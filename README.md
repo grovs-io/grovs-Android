@@ -129,7 +129,7 @@ You can download and run a demo project [from here](https://github.com/grovs/Gro
 
 ## Further Assistance
 
-For further assistance and detailed documentation, refer to the Grovs documentation available at https://grovs.io/docs.
+For further assistance and detailed documentation, refer to the Grovs documentation available at [https://grovs.io/docs](https://docs.grovs.io/s/docs).
 
 For technical support and inquiries, contact our support team at [support@grovs.io](mailto:support@grovs.io).
 
