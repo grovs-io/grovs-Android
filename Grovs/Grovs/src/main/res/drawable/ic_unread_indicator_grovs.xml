@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+
+    <!-- Define size of the circle -->
+    <size
+        android:width="12dp"
+        android:height="12dp" />
+
+    <!-- Define fill color for the circle -->
+    <solid android:color="@color/grovs_unseen_notification_indicator" /> <!-- Replace with desired color -->
+
+</shape>

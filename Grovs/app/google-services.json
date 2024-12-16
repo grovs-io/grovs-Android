@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1020572722842",
+    "project_id": "grovs-testapp",
+    "storage_bucket": "grovs-testapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1020572722842:android:383cb3bbe8288a34872123",
+        "android_client_info": {
+          "package_name": "io.grovs.example"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyWIRack1nOiaC-OefIoJ8BadMg40omJk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

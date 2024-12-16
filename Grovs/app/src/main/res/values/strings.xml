@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Grovs-TestApp</string>
+    <!-- Messages screen title -->
+    <string name="grovs_messages">Custom Messages</string>
+</resources>

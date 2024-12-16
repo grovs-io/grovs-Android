@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="GrovsDefaultImageButton">
+        <item name="android:background">@drawable/bg_ripple_grovs</item>
+        <item name="android:inset">0dp</item>
+    </style>
+
+    <style name="GrovsFullScreenDialogStyle">
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:statusBarColor">@color/grovs_background_deep</item>
+        <item name="android:windowBackground">@color/grovs_background_deep</item>
+    </style>
+
+    <style name="GrovsLoadingText">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/grovs_main_text</item>
+    </style>
+
+    <style name="GrovsFlatButton">
+        <item name="android:gravity">center</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:background">@drawable/bg_ripple_grovs</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:backgroundTint">@null</item>
+        <item name="backgroundTint">@null</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+
+    <style name="GrovsScreenTitleText">
+        <item name="android:textSize">20sp</item>
+        <item name="android:textColor">@color/grovs_main_text</item>
+        <item name="android:textFontWeight" tools:targetApi="p">600</item>
+    </style>
+
+    <style name="GrovsListTitleText">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/grovs_main_text</item>
+        <item name="android:textFontWeight" tools:targetApi="p">500</item>
+    </style>
+
+    <style name="GrovsListSubtitleText">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/grovs_secondary_text</item>
+    </style>
+
+</resources>

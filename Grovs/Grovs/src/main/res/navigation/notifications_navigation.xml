@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/notifications_navigation"
+    app:startDestination="@id/notificationsListFragment">
+
+    <action
+        android:id="@+id/action_showNotificationDetailsFragment"
+        app:destination="@id/notificationDetailsFragment"
+        app:enterAnim="@anim/slide_in_right"
+        app:exitAnim="@anim/slide_out_left"
+        app:popEnterAnim="@anim/slide_in_left"
+        app:popExitAnim="@anim/slide_out_right">
+        <argument
+            android:name="notification"
+            app:argType="io.grovs.model.notifications.Notification"
+            app:nullable="false"/>
+    </action>
+
+    <fragment
+        android:id="@+id/notificationsListFragment"
+        android:name="io.grovs.fragments.NotificationsListFragment"
+        android:label="fragment_notifications_list"
+        tools:layout="@layout/fragment_notifications_list" >
+    </fragment>
+
+    <fragment
+        android:id="@+id/notificationDetailsFragment"
+        android:name="io.grovs.fragments.NotificationDetailsFragment"
+        android:label="fragment_notification_details"
+        tools:layout="@layout/fragment_notification_details" >
+        <argument
+            android:name="notification"
+            app:argType="io.grovs.model.notifications.Notification"
+            app:nullable="false"/>
+    </fragment>
+
+</navigation>
