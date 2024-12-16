@@ -125,7 +125,7 @@ coroutineScope.launch {
 
 ## Demo project
 
-You can download and run a demo project [from here](https://github.com/grovs/Grovs-Android-example-app).
+You can download and run a demo project [from here](https://github.com/grovs-io/grovs-android-example-app).
 
 ## Further Assistance
 
