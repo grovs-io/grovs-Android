@@ -176,6 +176,11 @@ public class Grovs: ActivityProvider {
             return instance.numberOfUnreadMessages()
         }
 
+        /// Get the number of unread notifications this device currently has.
+        fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
+            return instance.numberOfUnreadMessages(lifecycleOwner = lifecycleOwner, onResult = onResult)
+        }
+
         /// Checks the configuration validity.
         private fun checkConfiguration() {
             instance.checkConfiguration()
@@ -414,14 +419,26 @@ public class Grovs: ActivityProvider {
     }
 
     suspend fun numberOfUnreadMessages(): Int? {
-        val maxRetry = 20
-        var count = 0
-        while (grovsManager?.authenticated != true && count < maxRetry) {
-            delay(200L * count)
-            count += 1
-        }
+        authenticationJob?.join()
 
         return notificationsManager?.numberOfUnreadNotifications()
+    }
+
+    fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
+        if (lifecycleOwner == null) {
+            DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
+        }
+
+        val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
+        scope.launch(grovsContext.serialDispatcher) {
+            authenticationJob?.join()
+            val result = notificationsManager?.numberOfUnreadNotifications()
+
+            withContext(Dispatchers.Main) {
+                onResult?.invoke(result)
+            }
+        }
+
     }
 
     private fun checkConfiguration() {

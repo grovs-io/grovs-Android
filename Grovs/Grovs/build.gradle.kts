@@ -20,7 +20,7 @@ val SDK_VERSION = "SDK_VERSION"
 
 private val libraryGroupId = "io.grovs"
 private val libraryArtifactId = "Grovs"
-private val libraryVersion = "1.0.0"
+private val libraryVersion = "1.0.1"
 
 android {
     namespace = "io.grovs"

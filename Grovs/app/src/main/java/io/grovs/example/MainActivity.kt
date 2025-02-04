@@ -99,8 +99,13 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             val result = Grovs.numberOfUnreadMessages()
             viewModel.updateUnreadNotificationsState(result ?: 0)
-            Log.d("MainActivity", "Number of unread notifications: $result")
+            Log.d("MainActivity", "Number of unread notifications coroutines: $result")
         }
+
+        Grovs.numberOfUnreadMessages(lifecycleOwner = this, onResult = {
+            viewModel.updateUnreadNotificationsState(it ?: 0)
+            Log.d("MainActivity", "Number of unread notifications callback: $it")
+        })
     }
 
     override fun onNewIntent(intent: Intent) {

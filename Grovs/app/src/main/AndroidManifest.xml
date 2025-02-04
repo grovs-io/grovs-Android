@@ -29,8 +29,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- TODO: Replace this with your links -->
             <intent-filter>
-                <data android:scheme="grovso0838c99d473a" android:host="open" />
+                <data android:scheme="grovst5abed1b0fdf8" android:host="open" />
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
@@ -40,14 +41,14 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="grov0607.sqd.link" />
+                <data android:scheme="https" android:host="grovdc41.sqd.link" />
             </intent-filter>
 
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="grov0607.test-sqd.link" />
+                <data android:scheme="https" android:host="grovdc41.test-sqd.link" />
             </intent-filter>
         </activity>
     </application>
