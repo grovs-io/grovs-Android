@@ -123,6 +123,41 @@ coroutineScope.launch {
 }
 ```
 
+### Using messages
+
+IMPORTANT: if console messages have automatic display enabled, they will appear in your app without any additional integration required.
+
+To receive push notifications for the received messages attach the device token to the SDK.
+
+```kotlin
+FirebaseMessaging.getInstance().token.addOnCompleteListener(OnCompleteListener { task ->
+    if (!task.isSuccessful) {
+        return@OnCompleteListener
+    }
+
+    // Get new FCM registration token
+    val token = task.result
+    Grovs.pushToken = token
+})
+```
+
+To get the number of unread messages, for instance if you want to display an unread number bullet, you can use the following SDK method.
+
+```kotlin
+coroutineScope.launch {
+    val messages = Grovs.numberOfUnreadMessages()
+    Log.d("Grovs", "Unread messages: $messages")
+}
+```
+
+To display the list of the messages on top of everthing else use:
+
+```kotlin
+Grovs.displayMessagesFragment {
+    // Display has finished.
+}
+```
+
 ## Demo project
 
 You can download and run a demo project [from here](https://github.com/grovs-io/grovs-android-example-app).
