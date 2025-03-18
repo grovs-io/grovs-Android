@@ -1,8 +1,11 @@
 package io.grovs.example
 
 import android.Manifest
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -236,6 +239,16 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                 text = unreadNotificationsState.toString(),
                 modifier = Modifier.padding(top = 16.dp)
             )
+
+            Button(
+                modifier = Modifier.padding(top = 16.dp),
+                onClick = {
+                    getClipboardText(context)?.let {
+                        openWebPage(context, it)
+                    }
+                }) {
+                Text(text = "Open clipboard link")
+            }
         }
     }
 }
@@ -265,4 +278,28 @@ fun CopyableText(text: String) {
             Toast.makeText(context, "Text copied to clipboard", Toast.LENGTH_SHORT).show()
         }
     )
+}
+
+// Function to retrieve text from clipboard
+fun getClipboardText(context: Context): String? {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    val clipData = clipboard.primaryClip
+    return if (clipData != null && clipData.itemCount > 0) {
+        clipData.getItemAt(0).text?.toString()
+    } else {
+        null
+    }
+}
+
+// Function to check if the string is a valid URL
+fun isValidUrl(url: String): Boolean {
+    return url.startsWith("http://") || url.startsWith("https://")
+}
+
+// Function to open the URL using an Intent (default browser)
+fun openWebPage(context: Context, url: String) {
+    try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        context.startActivity(intent)
+    } catch (e: ActivityNotFoundException) { }
 }
