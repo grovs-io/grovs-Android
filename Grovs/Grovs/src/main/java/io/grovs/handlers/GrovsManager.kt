@@ -76,7 +76,12 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         when (result) {
             is LSResult.Success -> {
                 eventsManager.setLinkToNewFutureActions(result.data.link, delayEvents = delayEvents)
-                return result.data
+                // if link and data are null we consider we have no deeplink
+                if ((result.data.data == null) && (result.data.link == null)) {
+                    return null
+                } else {
+                    return result.data
+                }
             }
             is LSResult.Error -> {
                 DebugLogger.instance.log(LogLevel.ERROR, "Error occurred while trying to resolve the deeplink. ${result.exception.message}")
