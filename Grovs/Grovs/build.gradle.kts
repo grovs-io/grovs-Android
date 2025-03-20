@@ -1,6 +1,4 @@
-import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import com.vanniktech.maven.publish.SonatypeHost
-import org.jetbrains.kotlin.kapt3.base.Kapt.kapt
 
 plugins {
     alias(libs.plugins.android.library)
@@ -8,7 +6,7 @@ plugins {
     id("kotlin-parcelize")
     id("maven-publish")
     id("signing")
-    id("com.vanniktech.maven.publish") version "0.28.0"
+    id("com.vanniktech.maven.publish") version "0.31.0"
 }
 
 val BOOLEAN = "boolean"
@@ -17,10 +15,17 @@ val TRUE = "true"
 val FALSE = "false"
 val SERVER_URL = "SERVER_URL"
 val SDK_VERSION = "SDK_VERSION"
+val NETWORK_LOGGING = "NETWORK_LOGGING"
 
 private val libraryGroupId = "io.grovs"
-private val libraryArtifactId = "Grovs"
-private val libraryVersion = "1.0.2"
+// MAVEN CENTRAL
+//private val libraryArtifactId = "Grovs"
+//private val libraryVersion = "1.0.2"
+//val NETWORK_LOGGING_VALUE = FALSE
+// GITHUB
+private val libraryArtifactId = "grovs"
+private val libraryVersion = "1.0.2-debug10"
+val NETWORK_LOGGING_VALUE = TRUE
 
 android {
     namespace = "io.grovs"
@@ -46,6 +51,7 @@ android {
 
             buildConfigField(STRING, SERVER_URL, SERVER_URL_PRODUCTION)
             buildConfigField(STRING, SDK_VERSION, "\"" + libraryVersion + "\"")
+            buildConfigField(BOOLEAN, NETWORK_LOGGING, NETWORK_LOGGING_VALUE)
         }
 
         release {
@@ -57,6 +63,7 @@ android {
 
             buildConfigField(STRING, SERVER_URL, SERVER_URL_PRODUCTION)
             buildConfigField(STRING, SDK_VERSION, "\"" + libraryVersion + "\"")
+            buildConfigField(BOOLEAN, NETWORK_LOGGING, NETWORK_LOGGING_VALUE)
         }
     }
 
@@ -124,6 +131,14 @@ dependencies {
 
 project.afterEvaluate {
     publishing {
+        repositories {
+            maven {
+                name = "GithubPackagesPrivate"
+                url = uri("https://maven.pkg.github.com/grovs-io/grovs-android-automation-app")
+                credentials(PasswordCredentials::class)
+            }
+        }
+
         publications {
             create<MavenPublication>("release") {
                 groupId = libraryGroupId
