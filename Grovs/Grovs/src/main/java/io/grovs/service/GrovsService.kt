@@ -434,7 +434,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         builder.writeTimeout(40, TimeUnit.SECONDS)
         builder.addInterceptor(HeaderInterceptor { headers() })
 
-        if (BuildConfig.DEBUG) {
+        if (BuildConfig.NETWORK_LOGGING) {
             /** add logging interceptor at last Interceptor*/
             builder.addInterceptor(httpLoggingInterceptor.apply {
                 httpLoggingInterceptor.level = HttpLoggingInterceptor.Level.BODY
