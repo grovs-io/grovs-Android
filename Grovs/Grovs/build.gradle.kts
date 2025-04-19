@@ -24,7 +24,7 @@ private val libraryVersion = "1.0.3"
 val NETWORK_LOGGING_VALUE = FALSE
 // GITHUB
 //private val libraryArtifactId = "grovs"
-//private val libraryVersion = "1.0.2-debug"
+//private val libraryVersion = "1.0.3-debug"
 //val NETWORK_LOGGING_VALUE = TRUE
 
 android {
