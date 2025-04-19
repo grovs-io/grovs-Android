@@ -114,12 +114,16 @@ Grovs.generateLink(title = "Title",
 
 ```kotlin
 coroutineScope.launch {
-    val link = Grovs.generateLink(title = "Title",
+    try {
+        val link = Grovs.generateLink(title = "Title",
                                         subtitle = "Subtitle",
                                         imageURL = "url_to_some_image",
                                         data = mapOf("param1" to "Value"),
                                         tags = listOf("my_tag"))
-    Log.d("Grovs", "Generated link: $link")
+        Log.d("Grovs", "Generated link: $link")
+    } catch (e: GrovsException) {
+        // Handle generation error
+    }
 }
 ```
 
