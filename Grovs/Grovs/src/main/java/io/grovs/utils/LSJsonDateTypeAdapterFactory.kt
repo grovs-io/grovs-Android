@@ -38,33 +38,33 @@ class LSJsonDateTypeAdapterFactory : TypeAdapterFactory {
 
         val originAdapter = DateTypeAdapter.FACTORY.create(gson,type)
 
-        if (type.rawType != Instant::class.java){
+        if (type.rawType != InstantCompat::class.java){
             return null
         }
 
-        return object: TypeAdapter<Instant>() {
+        return object: TypeAdapter<InstantCompat>() {
 
             @Throws(IOException::class)
-            override  fun write(out: JsonWriter, value: Instant?) {
+            override  fun write(out: JsonWriter, value: InstantCompat?) {
                 if (value == null)
                     out.nullValue()
                 else {
-                    val date = Date.from(value)
+                    val date = value.toDate()
                     out.value(dateFormat.format(date))
                 }
             }
 
             @Throws(IOException::class)
-            override  fun read(input: JsonReader?): Instant? {
+            override  fun read(input: JsonReader?): InstantCompat? {
                 return when {
                     input ==  null -> null
                     input.peek() === JsonToken.NULL -> { input.nextNull();  return null }
                     input.peek() == JsonToken.STRING -> {
-                        var instant: Instant? = null
+                        var instant: InstantCompat? = null
                         var string = input.nextString()
                         if (instant == null) {
                             tryOptional {
-                                instant = Instant.parse(string)
+                                instant = InstantCompat.parse(string)
                             }
                         }
 //                        if (instant == null) {
@@ -82,7 +82,7 @@ class LSJsonDateTypeAdapterFactory : TypeAdapterFactory {
 //                        }
                         return instant
                     }
-                    input.peek() == JsonToken.NUMBER -> Instant.ofEpochSecond(input.nextLong())
+                    input.peek() == JsonToken.NUMBER -> InstantCompat.ofEpochSecond(input.nextLong())
                     else -> null
                 }
 

@@ -20,9 +20,12 @@ import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
+import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSJsonDateTypeAdapterFactory
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -83,7 +86,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     companion object {
         val EAGER_RETRY_COUNT: Long = 15
         val EAGER_RETRY_FALLBACK_TIME: Long = 5000
-        val RETRY_FALLBACK_TIME: Long = 60000
+        val RETRY_FALLBACK_TIME: Long = 10000
     }
 
     init {
@@ -150,7 +153,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     ///
     /// - Parameters:
     ///   - appDetails: Details of the app.
-    suspend fun authenticate(appDetails: AppDetails): LSResult<AuthenticationResponse> {
+    fun authenticate(appDetails: AppDetails): Flow<GVRetryResult<AuthenticationResponse>> = flow {
         DebugLogger.instance.log(LogLevel.INFO, "Authenticate")
 
         var retryCount = 0
@@ -161,19 +164,25 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                     val body = response.body()
                     body?.let {
                         DebugLogger.instance.log(LogLevel.INFO, "Authenticate - Success")
-                        return LSResult.Success(it)
+                        emit(GVRetryResult.Success(it))
+                        return@flow
                     }
                 }
-
 
                 response.errorBody()?.string()?.let { responseString ->
                     val error = gson.fromJson(responseString, ErrorMessage::class.java)
                     DebugLogger.instance.log(LogLevel.INFO, "Authenticate - Failed. ${error.error}")
 
-                    return LSResult.Error(java.io.IOException("Failed to authenticate. ${error.error}"))
+                    emit(GVRetryResult.Error(java.io.IOException("Failed to authenticate. ${error.error}")))
+                    return@flow
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                if (e.javaClass.name == "kotlinx.coroutines.flow.internal.AbortFlowException") {
+                    throw  e
+                }
+            }
 
+            emit(GVRetryResult.Retrying(retryCount))
             delay(if (retryCount < EAGER_RETRY_COUNT) EAGER_RETRY_FALLBACK_TIME else RETRY_FALLBACK_TIME)
             retryCount++
         }
@@ -266,7 +275,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun getDeviceFor(vendorId: String): LSResult<GetDeviceResponse> {
+    fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> = flow {
         DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen")
 
         var retryCount = 0
@@ -278,7 +287,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                     body?.let {
                         DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Successful")
 
-                        return LSResult.Success(it)
+                        emit(GVRetryResult.Success(it))
+                        return@flow
                     }
                 }
 
@@ -286,10 +296,18 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                     val error = gson.fromJson(responseString, ErrorMessage::class.java)
                     DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Failed. ${error.error}")
 
-                    return LSResult.Error(java.io.IOException("Failed to get device last seen. ${error.error}"))
+                    emit(GVRetryResult.Error(java.io.IOException("Failed to get device last seen. ${error.error}")))
+                    return@flow
                 }
-            } catch (e: Exception) { }
+            } catch (e: Exception) {
+                if (e.javaClass.name == "kotlinx.coroutines.flow.internal.AbortFlowException") {
+                    throw e
+                }
 
+                DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Failed. ${e.message}")
+            }
+
+            emit(GVRetryResult.Retrying(retryCount))
             delay(if (retryCount < EAGER_RETRY_COUNT) EAGER_RETRY_FALLBACK_TIME else RETRY_FALLBACK_TIME)
             retryCount++
         }

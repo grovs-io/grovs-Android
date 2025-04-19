@@ -8,6 +8,8 @@ import io.grovs.model.LogLevel
 import io.grovs.service.GrovsService
 import io.grovs.storage.EventsStorage
 import io.grovs.storage.LocalCache
+import io.grovs.utils.DurationCompat
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
@@ -23,7 +25,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
     private val localCache = LocalCache(context = context)
     private var linkForFutureActions: String? = null
     private var allowedToSendToBackend = false
-    private var firstRequestTime: Instant? = null
+    private var firstRequestTime: InstantCompat? = null
 
     companion object {
         private const val FIRST_BATCH_EVENTS_SENDING_LEEWAY: Double = 30.0
@@ -36,13 +38,13 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
         lastResignTimestamp?.let {
             handleOldEvents(timestamp = lastResignTimestamp)
         } ?: run {
-            val event = Event(event = EventType.TIME_SPENT, createdAt = Instant.now(), link = linkForFutureActions)
+            val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now(), link = linkForFutureActions)
             eventsStorage.addEvent(event)
         }
     }
 
     fun onAppBackgrounded() {
-        localCache.resignTimestamp = Instant.now()
+        localCache.resignTimestamp = InstantCompat.now()
     }
 
     suspend fun logAppLaunchEvents() {
@@ -87,10 +89,10 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
         val numberOfOpens = localCache.numberOfOpens
         if (numberOfOpens == 0) {
             grovsContext.lastSeen?.let {
-                val event = Event(event = EventType.REINSTALL, createdAt = Instant.now(), link = linkForFutureActions)
+                val event = Event(event = EventType.REINSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions)
                 eventsStorage.addEvent(event)
             } ?: run {
-                val event = Event(event = EventType.INSTALL, createdAt = Instant.now(), link = linkForFutureActions)
+                val event = Event(event = EventType.INSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions)
                 eventsStorage.addEvent(event)
             }
         }
@@ -100,34 +102,34 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
     private suspend fun addReactivationIfNeeded() {
         val lastResignTimestamp = localCache.lastStartTimestamp
         lastResignTimestamp?.let {
-            val duration = Duration.between(it, Instant.now())
+            val duration = DurationCompat.between(it, InstantCompat.now())
             val daysBetween = duration.toDays()
 
             if (daysBetween >= NUMBER_OF_DAYS_FOR_REACTIVATION) {
-                val event = Event(EventType.REACTIVATION, Instant.now(), link = linkForFutureActions)
+                val event = Event(EventType.REACTIVATION, InstantCompat.now(), link = linkForFutureActions)
                 eventsStorage.addEvent(event)
             }
         }
 
-        localCache.lastStartTimestamp = Instant.now()
+        localCache.lastStartTimestamp = InstantCompat.now()
     }
 
     /// Logs an app open event.
     private suspend fun addOpenEvent() {
-        val event = Event(event = EventType.APP_OPEN, createdAt = Instant.now(), link = linkForFutureActions)
+        val event = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now(), link = linkForFutureActions)
         eventsStorage.addEvent(event)
     }
 
     /// Handles old events that occurred before the app resigned active.
     /// - Parameter timestamp: The timestamp of when the app last resigned active
-    private suspend fun handleOldEvents(timestamp: Instant) {
+    private suspend fun handleOldEvents(timestamp: InstantCompat) {
         // Handle events that occurred before the app resigned active
-        val event = Event(event = EventType.TIME_SPENT, createdAt = Instant.now())
+        val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now())
 
         changeStorageEvents { oldEvent ->
             val newEvent = oldEvent
             if (oldEvent.engagementTime == null && oldEvent.event == EventType.TIME_SPENT) {
-                val duration = Duration.between(oldEvent.createdAt, timestamp)
+                val duration = DurationCompat.between(oldEvent.createdAt, timestamp)
                 DebugLogger.instance.log(LogLevel.INFO, "Calculating time: ${oldEvent.createdAt} $timestamp")
                 val secondsPassed =  duration.seconds
                 if (secondsPassed > 0) {
@@ -135,6 +137,14 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
                 }
             }
             newEvent
+        }
+
+        // Remove invalid TIME_SPENT events
+        val events = eventsStorage.getEvents()
+        for (event in events) {
+            if ((event.event == EventType.TIME_SPENT) && (event.engagementTime == null)) {
+                eventsStorage.removeEvent(event)
+            }
         }
 
         // Send the time-spent events to the backend and add the new event
@@ -173,7 +183,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
     }
 
     /// Sends normal events (non-time-spent) to the backend.
-    private suspend fun sendNormalEventsToBackend() = runBlocking {
+    private fun sendNormalEventsToBackend() = runBlocking {
         checkEventsSendingAllowed()
         if (!allowedToSendToBackend) {
             return@runBlocking
@@ -200,7 +210,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
     }
 
     /// Sends time-spent events to the backend.
-    private suspend fun sendTimeSpentEventsToBackend() = runBlocking {
+    private fun sendTimeSpentEventsToBackend() = runBlocking {
         val events = eventsStorage.getEvents()
         DebugLogger.instance.log(LogLevel.INFO, "Sending time-spent logs to the backend")
 
@@ -223,7 +233,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
 
     private fun checkEventsSendingAllowed() {
         if (firstRequestTime == null) {
-            firstRequestTime = Instant.now()
+            firstRequestTime = InstantCompat.now()
 
             GlobalScope.launch {
                 delay(15000)
@@ -233,8 +243,8 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
 
         if (!allowedToSendToBackend) {
             // Check if delay was met
-            val now = Instant.now()
-            val duration = Duration.between(firstRequestTime, now)
+            val now = InstantCompat.now()
+            val duration = DurationCompat.between(firstRequestTime ?: InstantCompat.now(), now)
             allowedToSendToBackend = duration.seconds > 14
         }
     }

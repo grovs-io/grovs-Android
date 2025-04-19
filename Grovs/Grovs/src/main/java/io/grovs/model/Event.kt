@@ -2,6 +2,7 @@ package io.grovs.model
 
 import android.os.Parcelable
 import com.google.gson.annotations.SerializedName
+import io.grovs.utils.InstantCompat
 import kotlinx.parcelize.Parcelize
 import java.time.Instant
 
@@ -28,7 +29,7 @@ class Event(
     val event: EventType,
     /// The creation date of the event.
     @SerializedName("created_at")
-    val createdAt: Instant,
+    val createdAt: InstantCompat,
     /// The link associated with the event.
     var link: String? = null,
     /// The engagement time associated with the event.

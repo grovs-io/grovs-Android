@@ -11,9 +11,11 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
 import io.grovs.service.GrovsService
 import io.grovs.utils.AppDetailsHelper
+import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSResult
 import io.grovs.utils.hasURISchemesConfigured
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.Serializable
@@ -22,6 +24,10 @@ import java.net.URLDecoder
 import kotlin.coroutines.resumeWithException
 
 class GrovsManager(val context: Context, val application: Application, val grovsContext: GrovsContext, apiKey: String) {
+    enum class AuthenticationState {
+        UNAUTHENTICATED, RETRYING, AUTHENTICATED
+    }
+
     companion object {
         private const val GROVS_PREFS_NAME = "grovs_prefs"
         private const val KEY_LAST_REFERRER = "last_referrer"
@@ -36,7 +42,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
     private var shouldUpdateAttributes = false
 
     /// A flag indicating whether the user is authenticated with the Grovs backend.
-    var authenticated = false
+    var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
 
     private val prefs = context.getSharedPreferences(GROVS_PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -120,40 +126,55 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         }
 
         val appDetails = appDetails.toAppDetails()
-
-        val deviceResult = grovsService.getDeviceFor(appDetails.deviceID)
-        when (deviceResult) {
-            is LSResult.Success -> {
-                grovsContext.lastSeen = deviceResult.data.lastSeen
-            }
-            is LSResult.Error -> {}
-        }
-
-        val result = grovsService.authenticate(appDetails = appDetails)
-        when (result) {
-            is LSResult.Success -> {
-                authenticated = true
-                grovsContext.grovsId = result.data.grovsId
-
-                // Update context attributes if needed
-                if (shouldUpdateAttributes) {
-                    updateAttributesIfNeeded()
-                } else {
-                    grovsContext.identifier = result.data.sdkIdentifier
-                    grovsContext.attributes = result.data.sdkAttributes
+        grovsService.getDeviceFor(appDetails.deviceID).transformWhile {
+            emit(it)
+            it is GVRetryResult.Retrying
+        }.collect { deviceResult ->
+            when (deviceResult) {
+                is GVRetryResult.Success -> {
+                    grovsContext.lastSeen = deviceResult.data.lastSeen
                 }
-
-                eventsManager.logAppLaunchEvents()
-
-                return true
-            }
-            is LSResult.Error -> {
-                authenticated = true
-                DebugLogger.instance.log(LogLevel.ERROR, "Failed to authenticate the app.")
-
-                return false
+                is GVRetryResult.Retrying -> {
+                    authenticationState = AuthenticationState.RETRYING
+                    DebugLogger.instance.log(LogLevel.INFO, "Retrying to get the device.")
+                }
+                is GVRetryResult.Error -> {}
             }
         }
+
+        DebugLogger.instance.log(LogLevel.INFO, "Device getting finished. Authenticating...")
+
+        grovsService.authenticate(appDetails = appDetails).transformWhile {
+            emit(it)
+            it is GVRetryResult.Retrying
+        }.collect { result ->
+            when (result) {
+                is GVRetryResult.Success -> {
+                    authenticationState = AuthenticationState.AUTHENTICATED
+                    grovsContext.grovsId = result.data.grovsId
+
+                    // Update context attributes if needed
+                    if (shouldUpdateAttributes) {
+                        updateAttributesIfNeeded()
+                    } else {
+                        grovsContext.identifier = result.data.sdkIdentifier
+                        grovsContext.attributes = result.data.sdkAttributes
+                    }
+
+                    eventsManager.logAppLaunchEvents()
+                }
+                is GVRetryResult.Retrying -> {
+                    authenticationState = AuthenticationState.RETRYING
+                    DebugLogger.instance.log(LogLevel.INFO, "Retrying authentication.")
+                }
+                is GVRetryResult.Error -> {
+                    authenticationState = AuthenticationState.UNAUTHENTICATED
+                    DebugLogger.instance.log(LogLevel.ERROR, "Failed to authenticate the app.")
+                }
+            }
+        }
+
+        return authenticationState == AuthenticationState.AUTHENTICATED
     }
 
     suspend fun generateLink(title: String?, subtitle: String?, imageURL: String?, data: Map<String, Serializable>?, tags: List<String>?): LSResult<GenerateLinkResponse> {
@@ -161,7 +182,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Links cannot be generated."))
         }
-        if (!authenticated) {
+        if (authenticationState != AuthenticationState.AUTHENTICATED) {
             DebugLogger.instance.log(LogLevel.ERROR, "SDK is not ready for usage yet.")
             return LSResult.Error(java.io.IOException("SDK is not ready for usage yet."))
         }
@@ -182,7 +203,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return null
         }
-        if (!authenticated) {
+        if (authenticationState != AuthenticationState.AUTHENTICATED) {
             DebugLogger.instance.log(LogLevel.ERROR, "SDK is not ready for usage yet.")
             return null
         }
@@ -258,7 +279,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
     }
 
     private fun updateAttributesIfNeeded() {
-        if (!authenticated) {
+        if (authenticationState != AuthenticationState.AUTHENTICATED) {
             shouldUpdateAttributes = true
             return
         }

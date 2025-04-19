@@ -226,7 +226,7 @@ public class Grovs: ActivityProvider {
     private var currentActivityReference: WeakReference<Activity>? = null
         set(value) {
             field = value
-            if ((field != null) && (grovsManager?.authenticated == true)) {
+            if ((field != null) && (grovsManager?.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED)) {
                 notificationsManager?.displayAutomaticNotificationsIfNeeded()
             }
         }
@@ -320,6 +320,12 @@ public class Grovs: ActivityProvider {
                      tags: List<String>? = null): String {
         var link: String? = null
         grovsManager?.let { manager ->
+            if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+                val message = "The device is not yet authenticated, check internet connection and try again."
+                DebugLogger.instance.log(LogLevel.ERROR, message)
+                throw GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR)
+            }
+
             withContext(grovsContext.serialDispatcher) {
                 authenticationJob?.join()
                 val result = manager.generateLink(
@@ -362,6 +368,13 @@ public class Grovs: ActivityProvider {
                      listener: GrovsLinkGenerationListener
     ) {
         grovsManager?.let { manager ->
+            if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+                val message = "The device is not yet authenticated, check internet connection and try again."
+                DebugLogger.instance.log(LogLevel.ERROR, message)
+                listener.onLinkGenerated(null, GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR))
+                return
+            }
+
             if (lifecycleOwner == null) {
                 DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
             }
@@ -389,7 +402,9 @@ public class Grovs: ActivityProvider {
                 }
             }
         } ?: run {
-            DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+            val message = "The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first."
+            DebugLogger.instance.log(LogLevel.ERROR, message)
+            listener.onLinkGenerated(null, GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR))
         }
     }
 
@@ -419,12 +434,25 @@ public class Grovs: ActivityProvider {
     }
 
     suspend fun numberOfUnreadMessages(): Int? {
+        if (grovsManager?.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+            val message = "The device is not yet authenticated, check internet connection and try again."
+            DebugLogger.instance.log(LogLevel.ERROR, message)
+            return null
+        }
+
         authenticationJob?.join()
 
         return notificationsManager?.numberOfUnreadNotifications()
     }
 
     fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
+        if (grovsManager?.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+            val message = "The device is not yet authenticated, check internet connection and try again."
+            DebugLogger.instance.log(LogLevel.ERROR, message)
+            onResult?.invoke(null)
+            return
+        }
+
         if (lifecycleOwner == null) {
             DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
         }

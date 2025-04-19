@@ -40,6 +40,7 @@ import com.google.android.gms.tasks.OnCompleteListener
 import com.google.firebase.messaging.FirebaseMessaging
 import io.grovs.Grovs
 import io.grovs.example.ui.theme.GrovsTestAppTheme
+import io.grovs.model.exceptions.GrovsException
 import io.grovs.utils.flow
 import kotlinx.coroutines.launch
 
@@ -203,12 +204,18 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
 
             Button(onClick = {
                 coroutineScope.launch {
-                    val link = Grovs.generateLink(title = "Test title",
-                        subtitle = "Test subtitle",
-                        imageURL = null,
-                        data = mapOf("param1" to "Test value"),
-                        tags = null)
-                    flowGeneratedLinkState.value = link
+                    try {
+                        val link = Grovs.generateLink(
+                            title = "Test title",
+                            subtitle = "Test subtitle",
+                            imageURL = null,
+                            data = mapOf("param1" to "Test value"),
+                            tags = null
+                        )
+                        flowGeneratedLinkState.value = link
+                    } catch (e: GrovsException) {
+                        flowGeneratedLinkState.value = e.toString()
+                    }
                 }
             }) {
                 Text(text = "Generate link with flow")
