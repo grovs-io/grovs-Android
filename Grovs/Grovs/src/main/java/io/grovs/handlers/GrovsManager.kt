@@ -22,16 +22,39 @@ import java.net.URLDecoder
 import kotlin.coroutines.resumeWithException
 
 class GrovsManager(val context: Context, val application: Application, val grovsContext: GrovsContext, apiKey: String) {
+    companion object {
+        private const val GROVS_PREFS_NAME = "grovs_prefs"
+        private const val KEY_LAST_REFERRER = "last_referrer"
+    }
+
     private val grovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
     private val appDetails = grovsContext.getAppDetails(context = context)
     private val eventsManager = EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
-    private var lastItentHandledReference: WeakReference<Intent>? = null
+    private var lastIntentHandledReference: WeakReference<Intent>? = null
     /// Stores if attributes needs to be updated after auth
     private var shouldUpdateAttributes = false
 
     /// A flag indicating whether the user is authenticated with the Grovs backend.
     var authenticated = false
+
+    private val prefs = context.getSharedPreferences(GROVS_PREFS_NAME, Context.MODE_PRIVATE)
+
+    /// Last known install referrer value
+    /// Lazily-loaded, in-memory cached value
+    private var _lastReferrer: String? = null
+
+    private var lastReferrerUrl: String?
+        get() {
+            if (_lastReferrer == null) {
+                _lastReferrer = prefs.getString(KEY_LAST_REFERRER, null)
+            }
+            return _lastReferrer
+        }
+        set(value) {
+            _lastReferrer = value
+            prefs.edit().putString(KEY_LAST_REFERRER, value).apply()
+        }
 
     var identifier: String?
         get() = grovsContext.identifier
@@ -165,11 +188,11 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         }
 
         // avoid handling same link multiple times
-        if (intent === lastItentHandledReference?.get()) {
+        if (intent === lastIntentHandledReference?.get()) {
             DebugLogger.instance.log(LogLevel.INFO, "No link provided, trying to infer it.")
             return getDataForDevice(null, delayEvents = delayEvents)
         }
-        lastItentHandledReference = WeakReference(intent)
+        lastIntentHandledReference = WeakReference(intent)
 
         intent.data?.toString()?.let { link ->
             return getDataForDevice(intent.data?.toString(), delayEvents = delayEvents)
@@ -196,8 +219,15 @@ class GrovsManager(val context: Context, val application: Application, val grovs
                                 val referrerDetails = referrerClient.installReferrer
                                 val referrerUrl = referrerDetails.installReferrer
                                 DebugLogger.instance.log(LogLevel.INFO, "Got url from InstallReferrer: $referrerUrl")
+                                lastReferrerUrl = null
+                                // referrer gets cached by install referrer so we need to avoid handling it multiple times
+                                if (referrerUrl != lastReferrerUrl) {
+                                    lastReferrerUrl = referrerUrl
 
-                                continuation.resume(referrerUrl, null)
+                                    continuation.resume(referrerUrl, null)
+                                } else {
+                                    continuation.resume(null, null)
+                                }
                             } catch (e: Exception) {
                                 continuation.resumeWithException(e)
                             } finally {

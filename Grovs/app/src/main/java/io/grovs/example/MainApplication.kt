@@ -12,7 +12,7 @@ class MainApplication : Application() {
 
         // TODO: Replace with your own API Key
         val API_KEY = "grovst_06e36086dad3e934289560e3ca59527282030868f8c844629516c6e6c67bbf1f"
-        Grovs.configure(this, API_KEY, useTestEnvironment = true)
+        Grovs.configure(application = this, apiKey = API_KEY, useTestEnvironment = true)
         //Grovs.useTestEnvironment = true
 
         //Optionally, you can adjust the debug level for logging:

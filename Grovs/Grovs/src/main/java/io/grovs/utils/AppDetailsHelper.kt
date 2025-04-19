@@ -1,5 +1,6 @@
 package io.grovs.utils
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
@@ -18,6 +19,7 @@ class AppDetailsHelper constructor(private val context: Context) {
     var versionName: String = context.packageManager.getPackageInfo(context.packageName, 0).versionName
     var versionCode: Int = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
     var applicationId = context.packageName
+    @SuppressLint("HardwareIds")
     var deviceID = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
     var device = getDeviceName()
 
