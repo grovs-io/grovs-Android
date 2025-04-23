@@ -20,11 +20,11 @@ val NETWORK_LOGGING = "NETWORK_LOGGING"
 private val libraryGroupId = "io.grovs"
 // MAVEN CENTRAL
 private val libraryArtifactId = "Grovs"
-private val libraryVersion = "1.0.3"
+private val libraryVersion = "1.0.4"
 val NETWORK_LOGGING_VALUE = FALSE
 // GITHUB
 //private val libraryArtifactId = "grovs"
-//private val libraryVersion = "1.0.3-debug"
+//private val libraryVersion = "1.0.4-prod-debug"
 //val NETWORK_LOGGING_VALUE = TRUE
 
 android {

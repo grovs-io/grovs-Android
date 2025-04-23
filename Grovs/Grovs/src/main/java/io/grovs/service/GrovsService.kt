@@ -336,7 +336,13 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
                     return LSResult.Error(java.io.IOException("Failed getting all the notifications. ${error.error}"))
                 }
-            } catch (e: Exception) { }
+            } catch (e: Exception) {
+                if (e.javaClass.name == "kotlinx.coroutines.flow.internal.AbortFlowException") {
+                    throw e
+                }
+
+                DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Failed. ${e.message}")
+            }
 
             delay(if (retryCount < EAGER_RETRY_COUNT) EAGER_RETRY_FALLBACK_TIME else RETRY_FALLBACK_TIME)
             retryCount++

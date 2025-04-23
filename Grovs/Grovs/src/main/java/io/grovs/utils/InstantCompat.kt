@@ -11,7 +11,7 @@ import java.util.Locale
 import java.util.TimeZone
 
 @Parcelize
-data class InstantCompat(val epochMillis: Long) : Parcelable {
+data class InstantCompat(val epochMillis: Long) : Parcelable, Comparable<InstantCompat> {
 
     companion object {
         fun now(): InstantCompat {
@@ -88,4 +88,8 @@ data class InstantCompat(val epochMillis: Long) : Parcelable {
     }
 
     override fun toString(): String = toIsoString()
+
+    override fun compareTo(other: InstantCompat): Int {
+        return this.epochMillis.compareTo(other.epochMillis)
+    }
 }
