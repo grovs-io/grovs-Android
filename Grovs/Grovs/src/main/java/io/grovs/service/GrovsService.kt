@@ -1,12 +1,14 @@
 package io.grovs.service
 
 import android.content.Context
+import android.os.Parcelable
 import com.google.gson.GsonBuilder
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.GrovsContext
 import io.grovs.BuildConfig
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.ErrorMessage
@@ -66,6 +68,13 @@ class HeaderInterceptor(private val headers: ()->Map<String, String>) : Intercep
         val request: Request = requestBuilder.build()
         return chain.proceed(request)
     }
+}
+
+public class CustomRedirects(
+    val ios: CustomLinkRedirect? = null,
+    val android: CustomLinkRedirect? = null,
+    val desktop: CustomLinkRedirect? = null,
+) {
 }
 
 class GrovsService(val context: Context, val apiKey: String, val grovsContext: GrovsContext) {
@@ -181,7 +190,13 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         true // continue retrying
     }
 
-    suspend fun generateLink(title: String?, subtitle: String?, imageURL: String?, data: Map<String, Serializable>?, tags: List<String>?): LSResult<GenerateLinkResponse> {
+    suspend fun generateLink(title: String?,
+                             subtitle: String?,
+                             imageURL: String?,
+                             data: Map<String, Serializable>?,
+                             tags: List<String>?,
+                             customRedirects: CustomRedirects?,
+                             showPreview: Boolean?): LSResult<GenerateLinkResponse> {
         try {
             val stringData = gson.toJson(data)
             val stringTags = gson.toJson(tags)
@@ -189,7 +204,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 subtitle = subtitle,
                 imageUrl =  imageURL,
                 data = stringData,
-                tags = stringTags)
+                tags = stringTags,
+                iosCustomRedirect = customRedirects?.ios,
+                androidCustomRedirect = customRedirects?.android,
+                desktopCustomRedirect = customRedirects?.desktop,
+                showPreview = showPreview)
             val response = grovsApi.generateLink(request)
             if (response.isSuccessful) {
                 val body = response.body()

@@ -11,7 +11,26 @@ class GenerateLinkRequest(
     @SerializedName("image_url")
     val imageUrl: String?,
     val data: String?,
-    val tags: String?
+    val tags: String?,
+    @SerializedName("ios_custom_redirect")
+    val iosCustomRedirect: CustomLinkRedirect?,
+    @SerializedName("android_custom_redirect")
+    val androidCustomRedirect: CustomLinkRedirect?,
+    @SerializedName("desktop_custom_redirect")
+    val desktopCustomRedirect: CustomLinkRedirect?,
+    @SerializedName("show_preview")
+    val showPreview: Boolean?
+) : Parcelable {
+}
+
+@Parcelize
+class CustomLinkRedirect(
+    @SerializedName("url")
+    val link: String,
+    // true: if the app is installed it will handle the link
+    // false: even the app is installed the link should be opened in the browser
+    @SerializedName("open_app_if_installed")
+    val openAppIfInstalled: Boolean = true
 ) : Parcelable {
 }
 

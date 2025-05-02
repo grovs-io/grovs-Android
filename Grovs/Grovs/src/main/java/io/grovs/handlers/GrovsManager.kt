@@ -9,6 +9,7 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
+import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
@@ -177,7 +178,13 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         return authenticationState == AuthenticationState.AUTHENTICATED
     }
 
-    suspend fun generateLink(title: String?, subtitle: String?, imageURL: String?, data: Map<String, Serializable>?, tags: List<String>?): LSResult<GenerateLinkResponse> {
+    suspend fun generateLink(title: String?,
+                             subtitle: String?,
+                             imageURL: String?,
+                             data: Map<String, Serializable>?,
+                             tags: List<String>?,
+                             customRedirects: CustomRedirects?,
+                             showPreview: Boolean?): LSResult<GenerateLinkResponse> {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Links cannot be generated."))
@@ -191,7 +198,9 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             subtitle = subtitle,
             imageURL = imageURL,
             data = data,
-            tags = tags)
+            tags = tags,
+            customRedirects = customRedirects,
+            showPreview = showPreview)
     }
 
     fun start() {

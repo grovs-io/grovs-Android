@@ -40,7 +40,9 @@ import com.google.android.gms.tasks.OnCompleteListener
 import com.google.firebase.messaging.FirebaseMessaging
 import io.grovs.Grovs
 import io.grovs.example.ui.theme.GrovsTestAppTheme
+import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.exceptions.GrovsException
+import io.grovs.service.CustomRedirects
 import io.grovs.utils.flow
 import kotlinx.coroutines.launch
 
@@ -188,6 +190,10 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                     imageURL = null,
                     data = mapOf("param1" to "Test value"),
                     tags = null,
+                    customRedirects = CustomRedirects(
+                        ios = CustomLinkRedirect(link = "https://www.google.ro", openAppIfInstalled = false),
+                        android = CustomLinkRedirect(link = "https://www.youtube.ro", openAppIfInstalled = false),
+                        desktop = CustomLinkRedirect(link = "https://www.reddit.com", openAppIfInstalled = false)),
                     lifecycleOwner = activity,
                     listener = { link, error ->
                         link?.let { link ->

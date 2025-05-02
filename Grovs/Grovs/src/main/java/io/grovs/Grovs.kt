@@ -15,6 +15,7 @@ import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
+import io.grovs.service.CustomRedirects
 import io.grovs.utils.FlowObservable
 import io.grovs.utils.LSResult
 import io.grovs.utils.flowDelegate
@@ -108,12 +109,15 @@ public class Grovs: ActivityProvider {
         ///   - imageURL: The URL of the image associated with the link.
         ///   - data: Additional data for the link.
         ///   - tags: Tags for the link.
+        ///   - customRedirects: Override the default redirects for a link.
         suspend fun generateLink(title: String? = null,
                                  subtitle: String? = null,
                                  imageURL: String? = null,
                                  data: Map<String, Serializable>? = null,
-                                 tags: List<String>? = null): String {
-            return instance.generateLink(title, subtitle, imageURL, data, tags)
+                                 tags: List<String>? = null,
+                                 customRedirects: CustomRedirects? = null,
+                                 showPreview: Boolean? = null): String {
+            return instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreview)
         }
 
         /// Generates a link.
@@ -130,10 +134,12 @@ public class Grovs: ActivityProvider {
                          imageURL: String? = null,
                          data: Map<String, Serializable>? = null,
                          tags: List<String>? = null,
+                         customRedirects: CustomRedirects? = null,
+                         showPreview: Boolean? = null,
                          lifecycleOwner: LifecycleOwner? = null,
                          listener: GrovsLinkGenerationListener
         ) {
-            instance.generateLink(title, subtitle, imageURL, data, tags, lifecycleOwner, listener)
+            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreview, lifecycleOwner, listener)
         }
 
         /// This needs to be called on the launcher activity onStart() to allow the SDK to handle incoming links
@@ -314,10 +320,12 @@ public class Grovs: ActivityProvider {
     }
 
     suspend fun generateLink(title: String? = null,
-                     subtitle: String? = null,
-                     imageURL: String? = null,
-                     data: Map<String, Serializable>? = null,
-                     tags: List<String>? = null): String {
+                             subtitle: String? = null,
+                             imageURL: String? = null,
+                             data: Map<String, Serializable>? = null,
+                             tags: List<String>? = null,
+                             customRedirects: CustomRedirects? = null,
+                             showPreview: Boolean? = null): String {
         var link: String? = null
         grovsManager?.let { manager ->
             if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
@@ -333,7 +341,9 @@ public class Grovs: ActivityProvider {
                     subtitle = subtitle,
                     imageURL = imageURL,
                     data = data,
-                    tags = tags
+                    tags = tags,
+                    customRedirects = customRedirects,
+                    showPreview = showPreview
                 )
 
                 withContext(Dispatchers.Main) {
@@ -364,6 +374,8 @@ public class Grovs: ActivityProvider {
                      imageURL: String? = null,
                      data: Map<String, Serializable>? = null,
                      tags: List<String>? = null,
+                     customRedirects: CustomRedirects? = null,
+                     showPreview: Boolean? = null,
                      lifecycleOwner: LifecycleOwner? = null,
                      listener: GrovsLinkGenerationListener
     ) {
@@ -387,7 +399,9 @@ public class Grovs: ActivityProvider {
                     subtitle = subtitle,
                     imageURL = imageURL,
                     data = data,
-                    tags = tags
+                    tags = tags,
+                    customRedirects = customRedirects,
+                    showPreview = showPreview
                 )
 
                 withContext(Dispatchers.Main) {
