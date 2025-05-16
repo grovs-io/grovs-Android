@@ -227,8 +227,12 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         intent.data?.toString()?.let { link ->
             return getDataForDevice(intent.data?.toString(), delayEvents = delayEvents)
         } ?: run {
-            getInstallReferrer()?.let {
-                return getDataForDevice(it, delayEvents = delayEvents)
+            try {
+                getInstallReferrer()?.let {
+                    return getDataForDevice(it, delayEvents = delayEvents)
+                }
+            } catch (exception: SecurityException) {
+                DebugLogger.instance.log(LogLevel.ERROR, "Security exception while trying to use install referrer.")
             }
 
             return getDataForDevice(null, delayEvents = delayEvents)

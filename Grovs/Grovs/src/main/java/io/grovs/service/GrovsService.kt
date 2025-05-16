@@ -1,6 +1,7 @@
 package io.grovs.service
 
 import android.content.Context
+import android.os.Build
 import android.os.Parcelable
 import com.google.gson.GsonBuilder
 import io.grovs.api.GrovsApi
@@ -24,6 +25,8 @@ import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSJsonDateTypeAdapterFactory
+import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
+import io.grovs.utils.LSJsonInstantTypeAdapterFactory
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -81,9 +84,18 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     private val grovsApi: GrovsApi
     private val appDetails = grovsContext.getAppDetails(context = context)
     private val userAgent = grovsContext.getUserAgent(context = context)
-    private val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
-        LSJsonDateTypeAdapterFactory()
-    ).create()
+    private val gson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        GsonBuilder().setLenient()
+            .registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory())
+            .registerTypeAdapterFactory(LSJsonDateTypeAdapterFactory())
+            .registerTypeAdapterFactory(LSJsonInstantTypeAdapterFactory())
+            .create()
+    } else {
+        GsonBuilder().setLenient()
+            .registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory())
+            .registerTypeAdapterFactory(LSJsonDateTypeAdapterFactory())
+            .create()
+    }
     private val accessKey: String
         get() {
             if (grovsContext.settings.useTestEnvironment) {
@@ -440,9 +452,18 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     }
 
     private fun getRetrofit(): Retrofit {
-        val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
-            LSJsonDateTypeAdapterFactory()
-        ).create()
+        val gson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            GsonBuilder().setLenient()
+                    .registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory())
+                    .registerTypeAdapterFactory(LSJsonDateTypeAdapterFactory())
+                    .registerTypeAdapterFactory(LSJsonInstantTypeAdapterFactory())
+            .create()
+        } else {
+            GsonBuilder().setLenient()
+                .registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory())
+                .registerTypeAdapterFactory(LSJsonDateTypeAdapterFactory())
+                .create()
+        }
 
         return Retrofit.Builder()
             .baseUrl(BuildConfig.SERVER_URL)

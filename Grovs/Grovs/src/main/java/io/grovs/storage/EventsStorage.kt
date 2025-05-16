@@ -6,7 +6,7 @@ import com.google.gson.reflect.TypeToken
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.LogLevel
-import io.grovs.utils.LSJsonDateTypeAdapterFactory
+import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
@@ -16,7 +16,7 @@ class EventsStorage(context: Context) {
     @OptIn(ExperimentalCoroutinesApi::class)
     private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
-        LSJsonDateTypeAdapterFactory()
+        LSJsonInstantCompatTypeAdapterFactory()
     ).create()
 
     companion object {
@@ -63,6 +63,8 @@ class EventsStorage(context: Context) {
         val jsonString = gson.toJson(currentEvents)
         editor.putString(STORED_EVENTS, jsonString)
         editor.apply()
+
+        DebugLogger.instance.log(LogLevel.INFO, "Caching events - Add event: ${event.event}")
 
         try {
             gson.fromJson(jsonString, type)

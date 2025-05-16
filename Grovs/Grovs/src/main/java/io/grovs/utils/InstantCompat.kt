@@ -28,7 +28,7 @@ data class InstantCompat(val epochMillis: Long) : Parcelable, Comparable<Instant
         }
 
         fun parse(iso8601: String): InstantCompat {
-            return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 parseUsingJavaTime(iso8601)
             } else {
                 val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
