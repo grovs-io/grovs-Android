@@ -15,6 +15,16 @@ data class AppDetails (
     var deviceID: String,
     @SerializedName("user_agent")
     var userAgent: String,
-    var url: String? = null
+    var url: String? = null,
+    @SerializedName("screen_width")
+    var screenWidth: String? = null,
+    @SerializedName("screen_height")
+    var screenHeight: String? = null,
+    var timezone: String? = null,
+    var language: String? = null,
+    @SerializedName("webgl_vendor")
+    var webglVendor: String? = null,
+    @SerializedName("webgl_renderer")
+    var webglRenderer: String? = null,
 ) : Parcelable {
 }

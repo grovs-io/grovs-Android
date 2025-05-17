@@ -19,6 +19,7 @@ import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
 import io.grovs.utils.FlowObservable
 import io.grovs.utils.LSResult
+import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -264,6 +265,9 @@ public class Grovs: ActivityProvider {
             field = value
             if ((field != null) && (grovsManager?.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED)) {
                 notificationsManager?.displayAutomaticNotificationsIfNeeded()
+            }
+            currentActivityReference?.get()?.let {
+                ScreenUtils.getScreenResolution(context = it)
             }
         }
 
