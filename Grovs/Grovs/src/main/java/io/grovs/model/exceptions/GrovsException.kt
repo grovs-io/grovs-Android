@@ -11,7 +11,7 @@ fun Throwable.getStackTraceAsString(): String {
 }
 
 enum class GrovsErrorCode {
-    LINK_GENERATION_ERROR, SDK_NOT_INITIALIZED, NOTIFICATIONS_ERROR
+    LINK_GENERATION_ERROR, SDK_NOT_INITIALIZED, NOTIFICATIONS_ERROR, LINK_DETAILS_ERROR
 }
 
 class GrovsException(message: String?) : Exception(message) {

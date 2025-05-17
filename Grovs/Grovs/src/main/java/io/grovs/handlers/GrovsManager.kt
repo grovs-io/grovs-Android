@@ -8,6 +8,7 @@ import com.android.installreferrer.api.InstallReferrerStateListener
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
+import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
@@ -201,6 +202,19 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             tags = tags,
             customRedirects = customRedirects,
             showPreview = showPreview)
+    }
+
+    suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
+        if (!grovsContext.settings.sdkEnabled) {
+            DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Link details cannot be used.")
+            return LSResult.Error(java.io.IOException("The SDK is not enabled. Link details cannot be used."))
+        }
+        if (authenticationState != AuthenticationState.AUTHENTICATED) {
+            DebugLogger.instance.log(LogLevel.ERROR, "SDK is not ready for usage yet.")
+            return LSResult.Error(java.io.IOException("SDK is not ready for usage yet."))
+        }
+
+        return grovsService.linkDetails(path = path)
     }
 
     fun start() {

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
+import android.os.Parcelable
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import io.grovs.handlers.ActivityProvider
@@ -34,6 +35,10 @@ fun interface GrovsDeeplinkListener {
 
 fun interface GrovsLinkGenerationListener {
     fun onLinkGenerated(link:String?, error: GrovsException?)
+}
+
+fun interface GrovsLinkDetailsListener {
+    fun onLinkDetails(linkDetails:Map<String, Any>?, error: GrovsException?)
 }
 
 fun interface GrovsNotificationsListener {
@@ -110,6 +115,7 @@ public class Grovs: ActivityProvider {
         ///   - data: Additional data for the link.
         ///   - tags: Tags for the link.
         ///   - customRedirects: Override the default redirects for a link.
+        ///   - showPreview: Show the link preview before redirecting.
         suspend fun generateLink(title: String? = null,
                                  subtitle: String? = null,
                                  imageURL: String? = null,
@@ -128,7 +134,10 @@ public class Grovs: ActivityProvider {
         ///   - imageURL: The URL of the image associated with the link.
         ///   - data: Additional data for the link.
         ///   - tags: Tags for the link.
-        ///   - completion: A closure to be executed after generating the link.
+        ///   - customRedirects: Override the default redirects for a link.
+        ///   - showPreview: Show the link preview before redirecting.
+        ///   - lifecycleOwner: An optional LifecycleOwner to use when calling the listener, by default global one will be used.
+        ///   - listener: A closure to be executed after generating the link.
         fun generateLink(title: String? = null,
                          subtitle: String? = null,
                          imageURL: String? = null,
@@ -140,6 +149,27 @@ public class Grovs: ActivityProvider {
                          listener: GrovsLinkGenerationListener
         ) {
             instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreview, lifecycleOwner, listener)
+        }
+
+        /// Get link details using kotlin coroutine style.
+        ///
+        /// - Parameters:
+        ///   - path: The last part of a grovs link.
+        suspend fun linkDetails(path: String): Map<String, Any> {
+            return instance.linkDetails(path = path)
+        }
+
+        /// Get link details.
+        ///
+        /// - Parameters:
+        ///   - path: The last part of a grovs link.
+        ///   - lifecycleOwner: An optional LifecycleOwner to use when calling the listener, by default global one will be used.
+        ///   - listener: A closure to be executed with the link details after they are fetched.
+        fun linkDetails(path: String,
+                         lifecycleOwner: LifecycleOwner? = null,
+                         listener: GrovsLinkDetailsListener
+        ) {
+            instance.linkDetails(path = path, lifecycleOwner = lifecycleOwner, listener = listener)
         }
 
         /// This needs to be called on the launcher activity onStart() to allow the SDK to handle incoming links
@@ -419,6 +449,81 @@ public class Grovs: ActivityProvider {
             val message = "The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first."
             DebugLogger.instance.log(LogLevel.ERROR, message)
             listener.onLinkGenerated(null, GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR))
+        }
+    }
+
+    suspend fun linkDetails(path: String): Map<String, Any> {
+        var linkDetails: Map<String, Any>? = null
+        grovsManager?.let { manager ->
+            if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+                val message = "The device is not yet authenticated, check internet connection and try again."
+                DebugLogger.instance.log(LogLevel.ERROR, message)
+                throw GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR)
+            }
+
+            withContext(grovsContext.serialDispatcher) {
+                authenticationJob?.join()
+                val result = manager.linkDetails(path = path)
+
+                withContext(Dispatchers.Main) {
+                    when (result) {
+                        is LSResult.Success -> {
+                            linkDetails = result.data.link
+                        }
+                        is LSResult.Error -> {
+                            throw GrovsException(result.exception.message, GrovsErrorCode.LINK_DETAILS_ERROR)
+                        }
+                    }
+                }
+            }
+        } ?: run {
+            DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+            throw GrovsException("The sdk is not initialized. Initialize the sdk before generating links.", GrovsErrorCode.SDK_NOT_INITIALIZED)
+        }
+
+        linkDetails?.let { linkDetails ->
+            return linkDetails
+        } ?: run {
+            throw GrovsException("Failed to get the link details.", GrovsErrorCode.LINK_DETAILS_ERROR)
+        }
+    }
+
+    fun linkDetails(path: String,
+                     lifecycleOwner: LifecycleOwner? = null,
+                     listener: GrovsLinkDetailsListener
+    ) {
+        grovsManager?.let { manager ->
+            if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
+                val message = "The device is not yet authenticated, check internet connection and try again."
+                DebugLogger.instance.log(LogLevel.ERROR, message)
+                listener.onLinkDetails(null, GrovsException(message, GrovsErrorCode.LINK_DETAILS_ERROR))
+                return
+            }
+
+            if (lifecycleOwner == null) {
+                DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
+            }
+
+            val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
+            scope.launch(grovsContext.serialDispatcher) {
+                authenticationJob?.join()
+                val result = manager.linkDetails(path = path)
+
+                withContext(Dispatchers.Main) {
+                    when (result) {
+                        is LSResult.Success -> {
+                            listener.onLinkDetails(result.data.link, null)
+                        }
+                        is LSResult.Error -> {
+                            listener.onLinkDetails(null, GrovsException(result.exception.message, GrovsErrorCode.LINK_DETAILS_ERROR))
+                        }
+                    }
+                }
+            }
+        } ?: run {
+            val message = "The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first."
+            DebugLogger.instance.log(LogLevel.ERROR, message)
+            listener.onLinkDetails(null, GrovsException(message, GrovsErrorCode.LINK_DETAILS_ERROR))
         }
     }
 

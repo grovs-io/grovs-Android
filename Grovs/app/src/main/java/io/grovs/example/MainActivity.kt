@@ -15,9 +15,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -45,6 +48,8 @@ import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
 import io.grovs.utils.flow
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.util.Date
 
 class MainActivity : FragmentActivity() {
     private val viewModel: MainViewModel by viewModels()
@@ -184,47 +189,122 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                 text = flowGeneratedLinkState.value,
             )
 
-            Button(onClick = {
-                Grovs.generateLink(title = "Test title",
-                    subtitle = "Test subtitle",
-                    imageURL = null,
-                    data = mapOf("param1" to "Test value"),
-                    tags = null,
-                    customRedirects = CustomRedirects(
-                        ios = CustomLinkRedirect(link = "https://www.google.ro", openAppIfInstalled = false),
-                        android = CustomLinkRedirect(link = "https://www.youtube.ro", openAppIfInstalled = false),
-                        desktop = CustomLinkRedirect(link = "https://www.reddit.com", openAppIfInstalled = false)),
-                    lifecycleOwner = activity,
-                    listener = { link, error ->
-                        link?.let { link ->
-                            callbackGeneratedLinkState.value = link
-                        }
-                        error?.let { error ->
-                            callbackGeneratedLinkState.value = error.toString()
-                        }
-                    })
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
 
-            }) {
-                Text(text = "Generate link with callback")
+                Button(onClick = {
+                    Grovs.generateLink(title = "Test title",
+                        subtitle = "Test subtitle",
+                        imageURL = null,
+                        data = mapOf("param1" to "Test value"),
+                        tags = null,
+                        customRedirects = CustomRedirects(
+                            ios = CustomLinkRedirect(
+                                link = "https://www.google.ro",
+                                openAppIfInstalled = false
+                            ),
+                            android = CustomLinkRedirect(
+                                link = "https://www.youtube.ro",
+                                openAppIfInstalled = false
+                            ),
+                            desktop = CustomLinkRedirect(
+                                link = "https://www.reddit.com",
+                                openAppIfInstalled = false
+                            )
+                        ),
+                        showPreview = null,
+                        lifecycleOwner = activity,
+                        listener = { link, error ->
+                            link?.let { link ->
+                                callbackGeneratedLinkState.value = link
+                            }
+                            error?.let { error ->
+                                callbackGeneratedLinkState.value = error.toString()
+                            }
+                        })
+
+                }, modifier = Modifier.weight(1f)) {
+                    Text(text = "Generate link with callback")
+                }
+
+                Button(onClick = {
+                    coroutineScope.launch {
+                        try {
+                            val link = Grovs.generateLink(
+                                title = "Test title",
+                                subtitle = "Test subtitle",
+                                imageURL = null,
+                                data = mapOf(
+                                    "param1" to "Test value",
+                                    "param2" to Date(),
+                                    "param3" to Instant.now()
+                                ),
+                                tags = null
+                            )
+                            flowGeneratedLinkState.value = link
+                        } catch (e: GrovsException) {
+                            flowGeneratedLinkState.value = e.toString()
+                        }
+                    }
+                }, modifier = Modifier.weight(1f)) {
+                    Text(text = "Generate link with flow")
+                }
+
             }
 
-            Button(onClick = {
-                coroutineScope.launch {
-                    try {
-                        val link = Grovs.generateLink(
-                            title = "Test title",
-                            subtitle = "Test subtitle",
-                            imageURL = null,
-                            data = mapOf("param1" to "Test value"),
-                            tags = null
-                        )
-                        flowGeneratedLinkState.value = link
-                    } catch (e: GrovsException) {
-                        flowGeneratedLinkState.value = e.toString()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Button(onClick = {
+                    val link = callbackGeneratedLinkState.value
+                    val uri = Uri.parse(link)
+                    val lastSegment = uri.pathSegments.lastOrNull()
+
+                    lastSegment?.let { lastSegment ->
+                        Grovs.linkDetails(path = lastSegment,
+                            lifecycleOwner = activity,
+                            listener = { linkDetails, error ->
+                                linkDetails?.let { ld ->
+                                    Log.d("MainActivity", "Link details with callback response: $ld")
+                                }
+                                error?.let { error ->
+                                    Log.d("MainActivity", "Link details with callback error: $error")
+                                }
+                            })
                     }
+                }, modifier = Modifier.weight(1f)) {
+                    Text(text = "Link details with callback")
                 }
-            }) {
-                Text(text = "Generate link with flow")
+
+                Button(onClick = {
+                    coroutineScope.launch {
+                        try {
+                            val link = flowGeneratedLinkState.value
+                            val uri = Uri.parse(link)
+                            val lastSegment = uri.pathSegments.lastOrNull()
+
+                            lastSegment?.let { lastSegment ->
+                                val response = Grovs.linkDetails(path = lastSegment)
+                                Log.d("MainActivity", "Link details with flow response: $response")
+                            }
+                        } catch (e: GrovsException) {
+                            Log.d("MainActivity", "Link details with flow error: $e")
+                        }
+                    }
+                }, modifier = Modifier.weight(1f)) {
+                    Text(text = "Link details with flow")
+                }
+
             }
 
             Text(

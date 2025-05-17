@@ -1,5 +1,6 @@
 package io.grovs.api
 
+import android.os.Parcelable
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
 import io.grovs.model.DeeplinkDetails
@@ -7,11 +8,13 @@ import io.grovs.model.Event
 import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
+import io.grovs.model.LinkDetailsRequest
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -31,6 +34,9 @@ interface GrovsApi {
 
     @POST("create_link")
     suspend fun generateLink(@Body request: GenerateLinkRequest): Response<GenerateLinkResponse>
+
+    @POST("link_details")
+    suspend fun linkDetails(@Body request: LinkDetailsRequest): Response<ResponseBody>
 
     @POST("event")
     suspend fun addEvent(@Body request: Event): Response<Unit>

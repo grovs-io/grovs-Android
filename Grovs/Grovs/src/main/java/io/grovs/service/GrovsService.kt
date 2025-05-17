@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Parcelable
 import com.google.gson.GsonBuilder
+import com.google.gson.reflect.TypeToken
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.GrovsContext
 import io.grovs.BuildConfig
@@ -17,6 +18,8 @@ import io.grovs.model.Event
 import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
+import io.grovs.model.LinkDetailsRequest
+import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
@@ -234,6 +237,37 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             DebugLogger.instance.log(LogLevel.INFO, "Generate link - Failed. ${error.error}")
 
             return LSResult.Error(java.io.IOException("Failed to generate link. ${error.error}"))
+        } catch (e: Exception) {
+            return LSResult.Error(e)
+        }
+    }
+
+    suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
+        try {
+            val request = LinkDetailsRequest(path = path)
+            val response = grovsApi.linkDetails(request)
+            if (response.isSuccessful) {
+                val body = response.body()
+                body?.string()?.let {
+                    try {
+                        if (it == "null") {
+                            return LSResult.Error(java.io.IOException("Invalid link path."))
+                        } else {
+                            val map: Map<String, Any> =
+                                gson.fromJson(it, object : TypeToken<Map<String, Any?>>() {}.type)
+                            return LSResult.Success(LinkDetailsResponse(link = map))
+                        }
+                    } catch (error: Exception) {
+                        DebugLogger.instance.log(LogLevel.INFO, "Link details - Failed. ${error}")
+                    }
+                }
+            }
+
+            val error = gson.fromJson(response.errorBody()!!.string(), ErrorMessage::class.java)
+
+            DebugLogger.instance.log(LogLevel.INFO, "Link details - Failed. ${error.error}")
+
+            return LSResult.Error(java.io.IOException("Failed to get link details. ${error.error}"))
         } catch (e: Exception) {
             return LSResult.Error(e)
         }
