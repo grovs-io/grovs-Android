@@ -11,7 +11,7 @@
 Grovs is available as a Gradle artifact, add the below dependency to your `build.gradle`
 
 ```
-implementation("io.grovs:Grovs:1.0.6")
+implementation("io.grovs:Grovs:1.0.7")
 ```
 
 ## Configuration
