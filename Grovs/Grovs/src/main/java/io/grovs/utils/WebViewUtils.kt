@@ -1,6 +1,9 @@
 package io.grovs.utils
 
 import android.content.Context
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
+import android.os.Build
 import android.webkit.WebSettings
 import android.webkit.WebView
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +27,7 @@ class WebViewUtils {
 
                 // Retrieve and return the user agent string
                 val userAgent = webSettings.userAgentString
-                val processedUserAgent = parseUserAgent(userAgent)
+                val processedUserAgent = parseUserAgent(userAgent = userAgent, browserVersion = getChromeVersion(context = context))
 
                 return processedUserAgent
             } else {
@@ -37,7 +40,7 @@ class WebViewUtils {
 
                     // Retrieve and return the user agent string
                     val userAgent = webSettings.userAgentString
-                    val processedUserAgent = parseUserAgent(userAgent)
+                    val processedUserAgent = parseUserAgent(userAgent = userAgent, browserVersion = getChromeVersion(context = context))
 
                     processedUserAgent
                 }
@@ -45,7 +48,7 @@ class WebViewUtils {
             }
         }
 
-        fun parseUserAgent(userAgent: String): String {
+        fun parseUserAgent(userAgent: String, browserVersion: String?): String {
             try {
                 val mozillaVersionRegex = """Mozilla/(\d+\.\d+)""".toRegex()
                 val browserEngineRegex = """AppleWebKit/(\d+\.\d+)""".toRegex()
@@ -54,7 +57,7 @@ class WebViewUtils {
 
                 val mozillaVersion = mozillaVersionRegex.find(userAgent)?.groupValues?.get(1) ?: "5.0"
                 val browserEngine = browserEngineRegex.find(userAgent)?.groupValues?.get(1) ?: "537.36"
-                val browserName = browserNameRegex.find(userAgent)?.groupValues?.get(1) ?: "127"
+                val browserName = browserVersion ?: browserNameRegex.find(userAgent)?.groupValues?.get(1) ?: "127"
                 val mobileSafariVersion = mobileSafariVersionRegex.find(userAgent)?.groupValues?.get(1) ?: "537.36"
 
                 return "Mozilla/$mozillaVersion (Linux; Android 10; K) AppleWebKit/$browserEngine (KHTML, like Gecko) Chrome/$browserName.0.0.0 Mobile Safari/$mobileSafariVersion"
@@ -63,5 +66,31 @@ class WebViewUtils {
             }
         }
 
+        fun getChromeVersion(context: Context): String? {
+            val chromePackage = "com.android.chrome"
+            val packageManager = context.packageManager
+
+            return try {
+                val packageInfo: PackageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    // API 33+: use new method
+                    packageManager.getPackageInfo(
+                        chromePackage,
+                        PackageManager.PackageInfoFlags.of(0)
+                    )
+                } else {
+                    // API 21–32: use legacy method
+                    @Suppress("DEPRECATION")
+                    packageManager.getPackageInfo(chromePackage, 0)
+                }
+
+                val fullVersion = packageInfo.versionName
+                // Extract the major version before the first dot
+                fullVersion?.substringBefore('.')
+            } catch (e: PackageManager.NameNotFoundException) {
+                null
+            } catch (e: Exception) {
+                null
+            }
+        }
     }
 }
