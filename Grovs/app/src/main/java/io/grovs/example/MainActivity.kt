@@ -217,7 +217,8 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                                 openAppIfInstalled = false
                             )
                         ),
-                        showPreview = null,
+                        showPreviewIos = null,
+                        showPreviewAndroid = null,
                         lifecycleOwner = activity,
                         listener = { link, error ->
                             link?.let { link ->

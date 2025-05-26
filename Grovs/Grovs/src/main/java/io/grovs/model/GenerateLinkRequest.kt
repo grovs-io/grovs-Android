@@ -18,8 +18,10 @@ class GenerateLinkRequest(
     val androidCustomRedirect: CustomLinkRedirect?,
     @SerializedName("desktop_custom_redirect")
     val desktopCustomRedirect: CustomLinkRedirect?,
-    @SerializedName("show_preview")
-    val showPreview: Boolean?
+    @SerializedName("show_preview_ios")
+    val showPreviewIos: Boolean?,
+    @SerializedName("show_preview_android")
+    val showPreviewAndroid: Boolean?,
 ) : Parcelable {
 }
 

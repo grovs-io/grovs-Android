@@ -185,7 +185,8 @@ class GrovsManager(val context: Context, val application: Application, val grovs
                              data: Map<String, Serializable>?,
                              tags: List<String>?,
                              customRedirects: CustomRedirects?,
-                             showPreview: Boolean?): LSResult<GenerateLinkResponse> {
+                             showPreviewIos: Boolean?,
+                             showPreviewAndroid: Boolean?): LSResult<GenerateLinkResponse> {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Links cannot be generated."))
@@ -201,7 +202,8 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             data = data,
             tags = tags,
             customRedirects = customRedirects,
-            showPreview = showPreview)
+            showPreviewIos = showPreviewIos,
+            showPreviewAndroid = showPreviewAndroid)
     }
 
     suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {

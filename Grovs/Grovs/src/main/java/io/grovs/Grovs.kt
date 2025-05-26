@@ -145,11 +145,12 @@ public class Grovs: ActivityProvider {
                          data: Map<String, Serializable>? = null,
                          tags: List<String>? = null,
                          customRedirects: CustomRedirects? = null,
-                         showPreview: Boolean? = null,
+                         showPreviewIos: Boolean? = null,
+                         showPreviewAndroid: Boolean? = null,
                          lifecycleOwner: LifecycleOwner? = null,
                          listener: GrovsLinkGenerationListener
         ) {
-            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreview, lifecycleOwner, listener)
+            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreviewIos, showPreviewAndroid, lifecycleOwner, listener)
         }
 
         /// Get link details using kotlin coroutine style.
@@ -359,7 +360,8 @@ public class Grovs: ActivityProvider {
                              data: Map<String, Serializable>? = null,
                              tags: List<String>? = null,
                              customRedirects: CustomRedirects? = null,
-                             showPreview: Boolean? = null): String {
+                             showPreviewIos: Boolean? = null,
+                             showPreviewAndroid: Boolean? = null): String {
         var link: String? = null
         grovsManager?.let { manager ->
             if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
@@ -377,7 +379,8 @@ public class Grovs: ActivityProvider {
                     data = data,
                     tags = tags,
                     customRedirects = customRedirects,
-                    showPreview = showPreview
+                    showPreviewIos = showPreviewIos,
+                    showPreviewAndroid = showPreviewAndroid
                 )
 
                 withContext(Dispatchers.Main) {
@@ -409,7 +412,8 @@ public class Grovs: ActivityProvider {
                      data: Map<String, Serializable>? = null,
                      tags: List<String>? = null,
                      customRedirects: CustomRedirects? = null,
-                     showPreview: Boolean? = null,
+                     showPreviewIos: Boolean? = null,
+                     showPreviewAndroid: Boolean? = null,
                      lifecycleOwner: LifecycleOwner? = null,
                      listener: GrovsLinkGenerationListener
     ) {
@@ -435,7 +439,8 @@ public class Grovs: ActivityProvider {
                     data = data,
                     tags = tags,
                     customRedirects = customRedirects,
-                    showPreview = showPreview
+                    showPreviewIos = showPreviewIos,
+                    showPreviewAndroid = showPreviewAndroid
                 )
 
                 withContext(Dispatchers.Main) {

@@ -211,7 +211,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                              data: Map<String, Serializable>?,
                              tags: List<String>?,
                              customRedirects: CustomRedirects?,
-                             showPreview: Boolean?): LSResult<GenerateLinkResponse> {
+                             showPreviewIos: Boolean?,
+                             showPreviewAndroid: Boolean?): LSResult<GenerateLinkResponse> {
         try {
             val stringData = gson.toJson(data)
             val stringTags = gson.toJson(tags)
@@ -223,7 +224,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 iosCustomRedirect = customRedirects?.ios,
                 androidCustomRedirect = customRedirects?.android,
                 desktopCustomRedirect = customRedirects?.desktop,
-                showPreview = showPreview)
+                showPreviewIos = showPreviewIos,
+                showPreviewAndroid = showPreviewAndroid)
             val response = grovsApi.generateLink(request)
             if (response.isSuccessful) {
                 val body = response.body()
