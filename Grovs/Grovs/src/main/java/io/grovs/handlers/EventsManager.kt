@@ -11,6 +11,7 @@ import io.grovs.storage.LocalCache
 import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
+import io.grovs.utils.isValidUrl
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -28,7 +29,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
     private var firstRequestTime: InstantCompat? = null
 
     companion object {
-        private const val FIRST_BATCH_EVENTS_SENDING_LEEWAY: Double = 30.0
+        private const val FIRST_BATCH_EVENTS_SENDING_LEEWAY: Long = 15000
         private const val NUMBER_OF_DAYS_FOR_REACTIVATION: Int = 7
     }
 
@@ -158,7 +159,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
         // Add a link to the stored events
         changeStorageEvents { oldEvent ->
             val newEvent = oldEvent
-            if (newEvent.link == null) {
+            if (newEvent.link?.isValidUrl() != true) {
                 newEvent.link = link
             }
             newEvent
@@ -236,7 +237,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
             firstRequestTime = InstantCompat.now()
 
             GlobalScope.launch {
-                delay(15000)
+                delay(FIRST_BATCH_EVENTS_SENDING_LEEWAY)
                 sendNormalEventsToBackend()
             }
         }

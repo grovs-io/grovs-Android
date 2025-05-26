@@ -28,6 +28,8 @@ class EventsStorage(context: Context) {
     ///
     /// - Parameter events: The events to add or replace.
     suspend fun addOrReplaceEvents(events: List<Event>) = withContext(storageSerialDispatcher) {
+        DebugLogger.instance.log(LogLevel.INFO, "Caching events - Events update: ${events}")
+
         val currentEvents = getEvents().toMutableList()
         events.forEach { event ->
             if (currentEvents.contains(event)) {
@@ -64,7 +66,7 @@ class EventsStorage(context: Context) {
         editor.putString(STORED_EVENTS, jsonString)
         editor.apply()
 
-        DebugLogger.instance.log(LogLevel.INFO, "Caching events - Add event: ${event.event}")
+        DebugLogger.instance.log(LogLevel.INFO, "Caching events - Add event: ${event}")
 
         try {
             gson.fromJson(jsonString, type)
