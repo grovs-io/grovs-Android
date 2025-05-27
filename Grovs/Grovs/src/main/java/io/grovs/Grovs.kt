@@ -123,8 +123,16 @@ public class Grovs: ActivityProvider {
                                  data: Map<String, Serializable>? = null,
                                  tags: List<String>? = null,
                                  customRedirects: CustomRedirects? = null,
-                                 showPreview: Boolean? = null): String {
-            return instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreview)
+                                 showPreviewIos: Boolean? = null,
+                                 showPreviewAndroid: Boolean? = null): String {
+            return instance.generateLink(title = title,
+                subtitle = subtitle,
+                imageURL = imageURL,
+                data = data,
+                tags = tags,
+                customRedirects = customRedirects,
+                showPreviewIos = showPreviewIos,
+                showPreviewAndroid = showPreviewAndroid)
         }
 
         /// Generates a link.
