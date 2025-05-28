@@ -245,7 +245,9 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         } ?: run {
             try {
                 getInstallReferrer()?.let {
-                    return getDataForDevice(it, delayEvents = delayEvents)
+                    val result = getDataForDevice(it, delayEvents = delayEvents)
+                    
+                    return result
                 }
             } catch (exception: SecurityException) {
                 DebugLogger.instance.log(LogLevel.ERROR, "Security exception while trying to use install referrer.")
@@ -269,7 +271,6 @@ class GrovsManager(val context: Context, val application: Application, val grovs
                                 val referrerDetails = referrerClient.installReferrer
                                 val referrerUrl = referrerDetails.installReferrer
                                 DebugLogger.instance.log(LogLevel.INFO, "Got url from InstallReferrer: $referrerUrl")
-                                lastReferrerUrl = null
                                 // referrer gets cached by install referrer so we need to avoid handling it multiple times
                                 if (referrerUrl != lastReferrerUrl) {
                                     lastReferrerUrl = referrerUrl
