@@ -39,8 +39,14 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
         lastResignTimestamp?.let {
             handleOldEvents(timestamp = lastResignTimestamp)
         } ?: run {
-            val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now(), link = linkForFutureActions)
-            eventsStorage.addEvent(event)
+            if (!eventsStorage.hasEmptyTimeSpentEvent()) {
+                val event = Event(
+                    event = EventType.TIME_SPENT,
+                    createdAt = InstantCompat.now(),
+                    link = linkForFutureActions
+                )
+                eventsStorage.addEvent(event)
+            }
         }
     }
 

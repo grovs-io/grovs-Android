@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
+import io.grovs.model.EventType
 import io.grovs.model.LogLevel
 import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
 import kotlinx.coroutines.Dispatchers
@@ -105,5 +106,19 @@ class EventsStorage(context: Context) {
             } catch (e: Exception) {
                 emptyList()
             }
+    }
+
+    /// Check if we already have an empty time spent event.
+    suspend fun hasEmptyTimeSpentEvent(): Boolean = withContext(storageSerialDispatcher) {
+        val jsonString = preferences.getString(STORED_EVENTS, null)
+        val type = object : TypeToken<List<Event>>() {}.type
+
+        val events: List<Event> = try {
+            gson.fromJson(jsonString, type)
+        } catch (e: Exception) {
+            emptyList()
+        }
+
+        events.firstOrNull { (it.event == EventType.TIME_SPENT) && (it.engagementTime == null) } != null
     }
 }
