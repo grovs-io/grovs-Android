@@ -7,6 +7,8 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.LogLevel
+import io.grovs.utils.DurationCompat
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -73,6 +75,41 @@ class EventsStorage(context: Context) {
             gson.fromJson(jsonString, type)
         } catch (e: Exception) {
             DebugLogger.instance.log(LogLevel.INFO, "Caching events - Failed. ${e.stackTrace}")
+        }
+    }
+
+    suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean = false, link: String?) = withContext(storageSerialDispatcher) {
+        val events = getEvents()
+        if (startingNode) {
+            for (event in events) {
+                if ((event.event == EventType.TIME_SPENT) && (event.engagementTime == null)) {
+                    removeEvent(event)
+                }
+            }
+        } else {
+            val oldEvent = events.firstOrNull { (it.event == EventType.TIME_SPENT) && (it.engagementTime == null) }
+            oldEvent?.let { oldEvent ->
+                val timestamp = InstantCompat.now()
+                val duration = DurationCompat.between(oldEvent.createdAt, timestamp)
+                DebugLogger.instance.log(LogLevel.INFO, "Calculating time: ${oldEvent.createdAt} $timestamp")
+                val secondsPassed =  duration.seconds
+                if (secondsPassed > 0) {
+                    oldEvent.engagementTime = secondsPassed.toInt()
+                }
+                addOrReplaceEvents(listOf(oldEvent))
+            }
+        }
+
+        // Remove invalid TIME_SPENT events
+        for (event in events) {
+            if ((event.event == EventType.TIME_SPENT) && (event.engagementTime == null)) {
+                removeEvent(event)
+            }
+        }
+
+        if (!endingNode) {
+            val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now(), link = link)
+            addEvent(event)
         }
     }
 
