@@ -28,48 +28,24 @@ data class InstantCompat(val epochMillis: Long) : Parcelable, Comparable<Instant
         }
 
         fun parse(iso8601: String): InstantCompat {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                parseUsingJavaTime(iso8601)
-            } else {
-                val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
-                val adjusted = iso8601.replace("Z", "+0000").replace(":", "")
-                val date = sdf.parse(adjusted)
-                    ?: throw IllegalArgumentException("Invalid ISO 8601 string: $iso8601")
-                InstantCompat(date.time)
-            }
-        }
+            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            sdf.timeZone = TimeZone.getTimeZone("UTC")
+            val date = sdf.parse(iso8601)
+                ?: throw IllegalArgumentException("Invalid ISO 8601 string: $iso8601")
 
-        private fun parseUsingJavaTime(iso8601: String): InstantCompat {
-            val instantClass = Class.forName("java.time.Instant")
-            val parseMethod = instantClass.getMethod("parse", CharSequence::class.java)
-            val instantObj = parseMethod.invoke(null, iso8601)
-            val toEpochMilliMethod = instantClass.getMethod("toEpochMilli")
-            val epochMillis = toEpochMilliMethod.invoke(instantObj) as Long
-            return InstantCompat(epochMillis)
+            return InstantCompat(date.time)
         }
     }
 
     fun toEpochMilli(): Long = epochMillis
 
     fun toIsoString(): String {
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            toIsoUsingJavaTime()
-        } else {
-            val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-            sdf.timeZone = TimeZone.getTimeZone("UTC")
-            sdf.format(Date(epochMillis))
-        }
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        sdf.timeZone = TimeZone.getTimeZone("UTC")
+        return sdf.format(Date(epochMillis))
     }
 
     fun toDate(): Date = Date(epochMillis)
-
-    private fun toIsoUsingJavaTime(): String {
-        val instantClass = Class.forName("java.time.Instant")
-        val ofEpochMilliMethod = instantClass.getMethod("ofEpochMilli", Long::class.javaPrimitiveType)
-        val instantObj = ofEpochMilliMethod.invoke(null, epochMillis)
-        return instantObj.toString()
-    }
 
     fun plusMillis(millisToAdd: Long): InstantCompat {
         return InstantCompat(epochMillis + millisToAdd)

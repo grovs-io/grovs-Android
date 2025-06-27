@@ -3,6 +3,10 @@ package io.grovs.utils
 import android.os.Build
 import androidx.annotation.RequiresApi
 import com.google.gson.Gson
+import com.google.gson.JsonDeserializationContext
+import com.google.gson.JsonDeserializer
+import com.google.gson.JsonElement
+import com.google.gson.JsonParseException
 import com.google.gson.TypeAdapter
 import com.google.gson.TypeAdapterFactory
 import com.google.gson.internal.bind.DateTypeAdapter
@@ -11,6 +15,7 @@ import com.google.gson.stream.JsonReader
 import com.google.gson.stream.JsonToken
 import com.google.gson.stream.JsonWriter
 import java.io.IOException
+import java.lang.reflect.Type
 import java.text.SimpleDateFormat
 import java.time.Instant
 import java.util.Date
@@ -57,13 +62,12 @@ class LSJsonInstantCompatTypeAdapterFactory : TypeAdapterFactory {
                     input.peek() === JsonToken.NULL -> { input.nextNull();  return null }
                     input.peek() == JsonToken.STRING -> {
                         var instant: InstantCompat? = null
-                        var string = input.nextString()
-                        if (instant == null) {
-                            tryOptional {
-                                instant = InstantCompat.parse(string)
-                            }
+                        val string = input.nextString()
+                        tryOptional {
+                            instant = InstantCompat.parse(string)
                         }
-                        return instant
+
+                        instant
                     }
                     input.peek() == JsonToken.NUMBER -> InstantCompat.ofEpochSecond(input.nextLong())
                     else -> null
@@ -104,13 +108,12 @@ class LSJsonDateTypeAdapterFactory : TypeAdapterFactory {
                     input.peek() === JsonToken.NULL -> { input.nextNull();  return null }
                     input.peek() == JsonToken.STRING -> {
                         var instant: Date? = null
-                        var string = input.nextString()
-                        if (instant == null) {
-                            tryOptional {
-                                instant = dateFormat.parse(string)
-                            }
+                        val string = input.nextString()
+                        tryOptional {
+                            instant = dateFormat.parse(string)
                         }
-                        return instant
+
+                        instant
                     }
                     input.peek() == JsonToken.NUMBER -> Date(input.nextLong())
                     else -> null
@@ -153,13 +156,12 @@ class LSJsonInstantTypeAdapterFactory : TypeAdapterFactory {
                     input.peek() === JsonToken.NULL -> { input.nextNull();  return null }
                     input.peek() == JsonToken.STRING -> {
                         var instant: Instant? = null
-                        var string = input.nextString()
-                        if (instant == null) {
-                            tryOptional {
-                                instant = Instant.parse(string)
-                            }
+                        val string = input.nextString()
+                        tryOptional {
+                            instant = Instant.parse(string)
                         }
-                        return instant
+
+                        instant
                     }
                     input.peek() == JsonToken.NUMBER -> Instant.ofEpochSecond(input.nextLong())
                     else -> null
