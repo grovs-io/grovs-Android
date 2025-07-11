@@ -1,6 +1,6 @@
 ---
 name: Crash report
-about: Describe this issue template's purpose here.
+about: Report an application crash on Android
 title: ''
 labels: ''
 assignees: ''
