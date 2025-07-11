@@ -3,6 +3,7 @@ package io.grovs.handlers
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.os.DeadObjectException
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
 import io.grovs.model.DebugLogger
@@ -251,6 +252,8 @@ class GrovsManager(val context: Context, val application: Application, val grovs
                 }
             } catch (exception: SecurityException) {
                 DebugLogger.instance.log(LogLevel.ERROR, "Security exception while trying to use install referrer.")
+            } catch (exception: DeadObjectException) {
+                DebugLogger.instance.log(LogLevel.ERROR, "Dead object exception while trying to use install referrer.")
             }
 
             return getDataForDevice(null, delayEvents = delayEvents)
