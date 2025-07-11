@@ -11,7 +11,7 @@ assignees: ''
 
 - **Device Model**: <!-- e.g. Pixel 7, Samsung S23 -->
 - **Android Version**: <!-- e.g. Android 13 -->
-- **App Version**: <!-- e.g. 2.1.3 (build 451) -->
+- **SDK Version**: <!-- e.g. 2.1.3 (build 451) -->
 - **Crash Frequency**: <!-- e.g. every time on launch, randomly, on certain screen -->
 - **Was this crash after an update?**: Yes / No
 
