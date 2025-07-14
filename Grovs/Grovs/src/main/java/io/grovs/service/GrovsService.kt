@@ -26,6 +26,7 @@ import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
+import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSJsonDateTypeAdapterFactory
 import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
@@ -85,8 +86,8 @@ public class CustomRedirects(
 
 class GrovsService(val context: Context, val apiKey: String, val grovsContext: GrovsContext) {
     private val grovsApi: GrovsApi
-    private val appDetails = grovsContext.getAppDetails(context = context)
-    private val userAgent = grovsContext.getUserAgent(context = context)
+    private val appDetails: AppDetailsHelper by lazy { grovsContext.getAppDetails(context = context) }
+    private val userAgent: String by lazy { grovsContext.getUserAgent(context = context) }
     private val gson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         GsonBuilder().setLenient()
             .registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory())

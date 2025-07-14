@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 class WebViewUtils {
     companion object {
         private val defaultUserAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+        private var cachedUserAgent: String? = null
 
         /**
          * Returns the user agent string of a WebView.
@@ -20,6 +22,8 @@ class WebViewUtils {
          * @return The user agent string of the WebView.
          */
         fun getUserAgent(context: Context): String {
+            cachedUserAgent?.let { return it }
+
             try {
                 // Perform a thread check before using runBlocking
                 if (Thread.currentThread().name.contains("main", ignoreCase = true)) {
@@ -31,6 +35,8 @@ class WebViewUtils {
                     // Retrieve and return the user agent string
                     val userAgent = webSettings.userAgentString
                     val processedUserAgent = parseUserAgent(userAgent = userAgent, browserVersion = getChromeVersion(context = context))
+
+                    cachedUserAgent = processedUserAgent
 
                     return processedUserAgent
                 } else {
@@ -47,6 +53,8 @@ class WebViewUtils {
 
                         processedUserAgent
                     }
+                    cachedUserAgent = result
+
                     return result
                 }
             } catch (e: Exception) {
