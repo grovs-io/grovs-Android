@@ -183,13 +183,13 @@ public class Grovs: ActivityProvider {
         }
 
         /// This needs to be called on the launcher activity onStart() to allow the SDK to handle incoming links
-        fun onStart() {
-            instance.onStart()
+        fun onStart(launcherActivity: Activity? = null) {
+            instance.onStart(launcherActivity = launcherActivity)
         }
 
         /// This needs to be called on the launcher activity onNewIntent() to allow the SDK to handle incoming links
-        fun onNewIntent(intent: Intent?) {
-            instance.onNewIntent(intent)
+        fun onNewIntent(intent: Intent?, launcherActivity: Activity? = null) {
+            instance.onNewIntent(intent, launcherActivity = launcherActivity)
         }
 
         /// Register a listener to receive the link and data from which the app was opened.
@@ -544,11 +544,17 @@ public class Grovs: ActivityProvider {
         }
     }
 
-    fun onStart() {
+    fun onStart(launcherActivity: Activity? = null) {
+        launcherActivity?.let {
+            launcherActivityReference = WeakReference(launcherActivity)
+        }
         handleIntent(launcherActivityReference?.get()?.intent, delayEvents = true)
     }
 
-    fun onNewIntent(intent: Intent?) {
+    fun onNewIntent(intent: Intent?, launcherActivity: Activity? = null) {
+        launcherActivity?.let {
+            launcherActivityReference = WeakReference(launcherActivity)
+        }
         handleIntent(intent, delayEvents = false)
     }
 
