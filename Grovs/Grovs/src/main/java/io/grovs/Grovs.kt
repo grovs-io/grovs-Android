@@ -197,7 +197,7 @@ public class Grovs: ActivityProvider {
         /// - Parameters:
         ///   - launcherActivity: The launcher activity.
         ///   - listener: A listener to receive the link and data from which the app was opened.
-        fun setOnDeeplinkReceivedListener(launcherActivity: Activity, listener: GrovsDeeplinkListener) {
+        fun setOnDeeplinkReceivedListener(launcherActivity: Activity?, listener: GrovsDeeplinkListener) {
             instance.setOnDeeplinkReceivedListener(launcherActivity, listener)
         }
 
@@ -558,8 +558,10 @@ public class Grovs: ActivityProvider {
         handleIntent(intent, delayEvents = false)
     }
 
-    fun setOnDeeplinkReceivedListener(launcherActivity: Activity, listener: GrovsDeeplinkListener) {
-        launcherActivityReference = WeakReference(launcherActivity)
+    fun setOnDeeplinkReceivedListener(launcherActivity: Activity?, listener: GrovsDeeplinkListener) {
+        launcherActivity?.let {
+            launcherActivityReference = WeakReference(launcherActivity)
+        }
         deeplinkListener = listener
     }
 
