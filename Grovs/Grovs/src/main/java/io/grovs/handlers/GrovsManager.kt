@@ -41,6 +41,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
     private val eventsManager = EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     private var lastIntentHandledReference: WeakReference<Intent>? = null
+    private var handledIntentTokens: MutableList<Int> = mutableListOf()
     /// Stores if attributes needs to be updated after auth
     private var shouldUpdateAttributes = false
 
@@ -224,7 +225,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         // Implementation for starting the GrovsManager, if needed.
     }
 
-    suspend fun handleIntent(intent: Intent, delayEvents: Boolean): DeeplinkDetails? {
+    suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): DeeplinkDetails? {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return null
@@ -234,12 +235,21 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             return null
         }
 
-        // avoid handling same link multiple times
-        if (intent === lastIntentHandledReference?.get()) {
-            DebugLogger.instance.log(LogLevel.INFO, "No link provided, trying to infer it.")
+        // avoid handling same link multiple times (onStart gives same intent each time)
+        if (intent.hashCode() == lastIntentHandledReference?.get()?.hashCode()) {
+            DebugLogger.instance.log(LogLevel.INFO, " Avoid double handling assume, no link provided, trying to infer it.")
             return getDataForDevice(null, delayEvents = delayEvents)
         }
         lastIntentHandledReference = WeakReference(intent)
+
+        if (cacheIntent) {
+            if (handledIntentTokens.contains(intent.hashCode())) {
+                DebugLogger.instance.log(LogLevel.INFO, "Intent already handled, ignoring it.")
+                return getDataForDevice(null, delayEvents = delayEvents)
+            } else {
+                handledIntentTokens.add(intent.hashCode())
+            }
+        }
 
         intent.data?.toString()?.let { link ->
             return getDataForDevice(intent.data?.toString(), delayEvents = delayEvents)

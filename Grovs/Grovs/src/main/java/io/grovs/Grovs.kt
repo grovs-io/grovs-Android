@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Intent
 import android.os.Bundle
 import android.os.Parcelable
+import android.os.SystemClock
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import io.grovs.handlers.ActivityProvider
@@ -280,6 +281,11 @@ public class Grovs: ActivityProvider {
             }
         }
 
+    private var handleIntentConflict = false
+    private var lastOnStartTime: Long = 0
+    private var lastLinkMatched: String? = null
+    private val defaultIntent = Intent()
+
     private var grovsContext = GrovsContext()
 
     private var authenticationJob: Job? = null
@@ -545,13 +551,18 @@ public class Grovs: ActivityProvider {
     }
 
     fun onStart(launcherActivity: Activity? = null) {
+        lastOnStartTime = SystemClock.elapsedRealtime()
+        handleIntentConflict = false
+
         launcherActivity?.let {
             launcherActivityReference = WeakReference(launcherActivity)
         }
-        handleIntent(launcherActivityReference?.get()?.intent, delayEvents = true)
+        handleIntent(launcherActivityReference?.get()?.intent, delayEvents = true, cacheIntent = true)
     }
 
     fun onNewIntent(intent: Intent?, launcherActivity: Activity? = null) {
+        handleIntentConflict = SystemClock.elapsedRealtime() - lastOnStartTime < 2_000L
+
         launcherActivity?.let {
             launcherActivityReference = WeakReference(launcherActivity)
         }
@@ -633,23 +644,29 @@ public class Grovs: ActivityProvider {
         }
     }
 
-    private fun handleIntent(intent: Intent?, delayEvents: Boolean) {
-        intent?.let { intent ->
+    private fun handleIntent(intent: Intent?, delayEvents: Boolean, cacheIntent: Boolean = false) {
+        val intent = intent ?: defaultIntent
             grovsManager?.let { grovsManager ->
                 (launcherActivityReference?.get() as? LifecycleOwner)?.let { lifecycleOwner ->
                     lifecycleOwner.lifecycleScope.launch(grovsContext.serialDispatcher) {
                         authenticationJob?.join()
-                            val result = grovsManager.handleIntent(intent, delayEvents = delayEvents)
-                            result?.let { deeplinkDetails ->
-                                deeplinkDetails.link?.let { link ->
+                        val result = grovsManager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+                        result?.let { deeplinkDetails ->
+                            deeplinkDetails.link?.let { link ->
+                                if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
+                                    DebugLogger.instance.log(LogLevel.INFO,"Ignoring double intent handling.")
+                                    handleIntentConflict = false
+                                } else {
                                     withContext(Dispatchers.Main) {
                                         openedLinkDetails = deeplinkDetails
                                         deeplinkListener?.onDeeplinkReceived(link, deeplinkDetails.data)
                                     }
-                                } ?: run {
-                                    DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                                 }
+                            } ?: run {
+                                DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                             }
+                        }
+                        lastLinkMatched = result?.link
                     }
                 } ?: run {
                     DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
@@ -657,7 +674,6 @@ public class Grovs: ActivityProvider {
             } ?: run {
                 DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
             }
-        }
     }
 
     override fun requireActivity(): Activity? {
