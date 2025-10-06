@@ -47,6 +47,7 @@ import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
 import io.grovs.utils.flow
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.util.Date
@@ -83,15 +84,6 @@ class MainActivity : FragmentActivity() {
             viewModel.updateCallbackState(message)
         }
 
-        lifecycleScope.launchWhenStarted {
-            Grovs.Companion::openedLinkDetails.flow.collect { deeplinkDetails ->
-                val message = "Got link from flow: ${deeplinkDetails?.link} payload: ${deeplinkDetails?.data}"
-                Log.d("MainActivity", message)
-
-                viewModel.updateFlowState(message)
-            }
-        }
-
         // Notifications
 
         Grovs.setOnAutomaticNotificationsListener { isLast ->
@@ -105,7 +97,7 @@ class MainActivity : FragmentActivity() {
     override fun onStart() {
         super.onStart()
 
-        Grovs.onStart()
+        Grovs.onStart(launcherActivity = this)
 
         lifecycleScope.launch {
             val result = Grovs.numberOfUnreadMessages()
@@ -122,7 +114,7 @@ class MainActivity : FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
 
-        Grovs.onNewIntent(intent)
+        Grovs.onNewIntent(intent, launcherActivity = this)
     }
 
     private fun askNotificationPermission() {
