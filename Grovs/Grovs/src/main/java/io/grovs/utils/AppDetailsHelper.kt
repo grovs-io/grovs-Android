@@ -21,7 +21,7 @@ fun getDeviceName(): String =
 
 class AppDetailsHelper(private val context: Context) {
 
-    var versionName: String = context.packageManager.getPackageInfo(context.packageName, 0).versionName
+    var versionName: String = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.0"
     var versionCode: Int = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
     var applicationId = context.packageName
     @SuppressLint("HardwareIds")

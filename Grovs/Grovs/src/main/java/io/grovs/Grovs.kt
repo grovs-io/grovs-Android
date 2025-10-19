@@ -646,34 +646,34 @@ public class Grovs: ActivityProvider {
 
     private fun handleIntent(intent: Intent?, delayEvents: Boolean, cacheIntent: Boolean = false) {
         val intent = intent ?: defaultIntent
-            grovsManager?.let { grovsManager ->
-                (launcherActivityReference?.get() as? LifecycleOwner)?.let { lifecycleOwner ->
-                    lifecycleOwner.lifecycleScope.launch(grovsContext.serialDispatcher) {
-                        authenticationJob?.join()
-                        val result = grovsManager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
-                        result?.let { deeplinkDetails ->
-                            deeplinkDetails.link?.let { link ->
-                                if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
-                                    DebugLogger.instance.log(LogLevel.INFO,"Ignoring double intent handling.")
-                                    handleIntentConflict = false
-                                } else {
-                                    withContext(Dispatchers.Main) {
-                                        openedLinkDetails = deeplinkDetails
-                                        deeplinkListener?.onDeeplinkReceived(link, deeplinkDetails.data)
-                                    }
+        grovsManager?.let { grovsManager ->
+            (launcherActivityReference?.get() as? LifecycleOwner)?.let { lifecycleOwner ->
+                lifecycleOwner.lifecycleScope.launch(grovsContext.serialDispatcher) {
+                    authenticationJob?.join()
+                    val result = grovsManager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+                    result?.let { deeplinkDetails ->
+                        deeplinkDetails.link?.let { link ->
+                            if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
+                                DebugLogger.instance.log(LogLevel.INFO,"Ignoring double intent handling.")
+                                handleIntentConflict = false
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    openedLinkDetails = deeplinkDetails
+                                    deeplinkListener?.onDeeplinkReceived(link, deeplinkDetails.data)
                                 }
-                            } ?: run {
-                                DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                             }
+                        } ?: run {
+                            DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                         }
-                        lastLinkMatched = result?.link
                     }
-                } ?: run {
-                    DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+                    lastLinkMatched = result?.link
                 }
             } ?: run {
                 DebugLogger.instance.log(LogLevel.ERROR,"The SDK is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
             }
+        } ?: run {
+            DebugLogger.instance.log(LogLevel.ERROR,"The SDK manager is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+        }
     }
 
     override fun requireActivity(): Activity? {

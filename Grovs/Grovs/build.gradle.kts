@@ -29,7 +29,7 @@ val NETWORK_LOGGING_VALUE = FALSE
 
 android {
     namespace = "io.grovs"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 21
