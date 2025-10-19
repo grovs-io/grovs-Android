@@ -5,9 +5,22 @@
     android:layout_height="match_parent"
     tools:context="io.grovs.fragments.NotificationsListFragment">
 
+    <TextView
+        style="@style/GrovsEmptyText"
+        android:id="@+id/emptyTextView"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:visibility="invisible"
+        android:text="@string/grovs_messages_empty" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recyclerView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent" />
+        android:layout_height="match_parent" >
+
+    </androidx.recyclerview.widget.RecyclerView>
 </FrameLayout>

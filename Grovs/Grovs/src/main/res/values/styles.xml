@@ -18,6 +18,11 @@
         <item name="android:textColor">@color/grovs_main_text</item>
     </style>
 
+    <style name="GrovsEmptyText">
+        <item name="android:textSize">16sp</item>
+        <item name="android:textColor">@color/grovs_main_text</item>
+    </style>
+
     <style name="GrovsFlatButton">
         <item name="android:gravity">center</item>
         <item name="android:textAllCaps">true</item>

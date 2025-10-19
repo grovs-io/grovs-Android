@@ -1,3 +1,4 @@
 <resources>
     <string name="grovs_messages">Messages</string>
+    <string name="grovs_messages_empty">Your notifications inbox is currently empty.</string>
 </resources>

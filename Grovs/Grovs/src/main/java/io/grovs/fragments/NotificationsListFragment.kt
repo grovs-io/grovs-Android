@@ -62,6 +62,7 @@ class NotificationsListFragment : Fragment() {
                     }
                 } else {
                     hideProgressBar()
+                    binding.emptyTextView.visibility = if (viewModel.notifications.value.isEmpty()) View.VISIBLE else View.INVISIBLE
                 }
             }
         }
