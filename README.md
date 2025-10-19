@@ -11,7 +11,7 @@
 Grovs is available as a Gradle artifact, add the below dependency to your `build.gradle`
 
 ```
-implementation("io.grovs:Grovs:1.0.17")
+implementation("io.grovs:Grovs:1.0.18")
 ```
 
 ## Configuration
@@ -34,13 +34,13 @@ override fun onCreate() {
 override fun onStart() {
     super.onStart()
 
-    Grovs.onStart()
+    Grovs.onStart(this)
 }
 
 override fun onNewIntent(intent: Intent?) {
     super.onNewIntent(intent)
 
-    Grovs.onNewIntent(intent)
+    Grovs.onNewIntent(intent, this)
 }
 ```
 
