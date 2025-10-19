@@ -59,6 +59,7 @@ class NotificationsListFragment : Fragment() {
                 if (isLoading) {
                     if (viewModel.notifications.value.isEmpty()) {
                         showProgressBar()
+                        binding.emptyTextView.visibility = View.INVISIBLE
                     }
                 } else {
                     hideProgressBar()
