@@ -32,7 +32,7 @@ import java.io.Serializable
 import java.lang.ref.WeakReference
 
 fun interface GrovsDeeplinkListener {
-    fun onDeeplinkReceived(link:String, data:Map<String, Object>?)
+    fun onDeeplinkReceived(deeplinkDetails: DeeplinkDetails)
 }
 
 fun interface GrovsLinkGenerationListener {
@@ -659,7 +659,7 @@ public class Grovs: ActivityProvider {
                             } else {
                                 withContext(Dispatchers.Main) {
                                     openedLinkDetails = deeplinkDetails
-                                    deeplinkListener?.onDeeplinkReceived(link, deeplinkDetails.data)
+                                    deeplinkListener?.onDeeplinkReceived(deeplinkDetails)
                                 }
                             }
                         } ?: run {

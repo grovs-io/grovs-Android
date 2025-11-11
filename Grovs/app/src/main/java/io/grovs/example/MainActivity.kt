@@ -77,8 +77,8 @@ class MainActivity : FragmentActivity() {
 
         askNotificationPermission()
 
-        Grovs.setOnDeeplinkReceivedListener(this) { link, payload ->
-            val message = "Got link from listener: $link payload: $payload"
+        Grovs.setOnDeeplinkReceivedListener(this) { details ->
+            val message = "Got link from listener: ${details.link} payload: ${details.data} tracking: ${details.tracking}"
             Log.d("MainActivity", message)
 
             viewModel.updateCallbackState(message)

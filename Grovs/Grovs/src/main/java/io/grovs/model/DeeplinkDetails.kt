@@ -7,6 +7,7 @@ import java.io.Serializable
 
 class DeeplinkDetails(
     var link: String?,
-    var data: Map<String, Object>?
+    var data: Map<String, Object>?,
+    var tracking: Map<String, Object>?
 ) {
 }
