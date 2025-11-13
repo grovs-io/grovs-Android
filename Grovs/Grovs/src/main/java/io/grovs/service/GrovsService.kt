@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Parcelable
 import com.google.gson.GsonBuilder
+import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.GrovsContext
@@ -81,6 +82,13 @@ public class CustomRedirects(
     val ios: CustomLinkRedirect? = null,
     val android: CustomLinkRedirect? = null,
     val desktop: CustomLinkRedirect? = null,
+) {
+}
+
+public class TrackingParams(
+    val utmCampaign: String? = null,
+    val utmSource: String? = null,
+    val utmMedium: String? = null,
 ) {
 }
 
@@ -213,7 +221,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                              tags: List<String>?,
                              customRedirects: CustomRedirects?,
                              showPreviewIos: Boolean?,
-                             showPreviewAndroid: Boolean?): LSResult<GenerateLinkResponse> {
+                             showPreviewAndroid: Boolean?,
+                             tracking: TrackingParams?): LSResult<GenerateLinkResponse> {
         try {
             val stringData = gson.toJson(data)
             val stringTags = gson.toJson(tags)
@@ -226,7 +235,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 androidCustomRedirect = customRedirects?.android,
                 desktopCustomRedirect = customRedirects?.desktop,
                 showPreviewIos = showPreviewIos,
-                showPreviewAndroid = showPreviewAndroid)
+                showPreviewAndroid = showPreviewAndroid,
+                trackingCampaign = tracking?.utmCampaign,
+                trackingMedium = tracking?.utmMedium,
+                trackingSource = tracking?.utmSource)
             val response = grovsApi.generateLink(request)
             if (response.isSuccessful) {
                 val body = response.body()

@@ -18,6 +18,7 @@ import io.grovs.model.LogLevel
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
+import io.grovs.service.TrackingParams
 import io.grovs.utils.FlowObservable
 import io.grovs.utils.LSResult
 import io.grovs.utils.ScreenUtils
@@ -117,7 +118,9 @@ public class Grovs: ActivityProvider {
         ///   - data: Additional data for the link.
         ///   - tags: Tags for the link.
         ///   - customRedirects: Override the default redirects for a link.
-        ///   - showPreview: Show the link preview before redirecting.
+        ///   - showPreviewIos: Show the link preview before redirecting on iOS platform.
+        ///   - showPreviewAndroid: Show the link preview before redirecting on Android platform.
+        ///   - tracking: Provide utm tracking parameters for your link.
         suspend fun generateLink(title: String? = null,
                                  subtitle: String? = null,
                                  imageURL: String? = null,
@@ -125,7 +128,8 @@ public class Grovs: ActivityProvider {
                                  tags: List<String>? = null,
                                  customRedirects: CustomRedirects? = null,
                                  showPreviewIos: Boolean? = null,
-                                 showPreviewAndroid: Boolean? = null): String {
+                                 showPreviewAndroid: Boolean? = null,
+                                 tracking: TrackingParams? = null): String {
             return instance.generateLink(title = title,
                 subtitle = subtitle,
                 imageURL = imageURL,
@@ -133,7 +137,8 @@ public class Grovs: ActivityProvider {
                 tags = tags,
                 customRedirects = customRedirects,
                 showPreviewIos = showPreviewIos,
-                showPreviewAndroid = showPreviewAndroid)
+                showPreviewAndroid = showPreviewAndroid,
+                tracking = tracking)
         }
 
         /// Generates a link.
@@ -145,7 +150,9 @@ public class Grovs: ActivityProvider {
         ///   - data: Additional data for the link.
         ///   - tags: Tags for the link.
         ///   - customRedirects: Override the default redirects for a link.
-        ///   - showPreview: Show the link preview before redirecting.
+        ///   - showPreviewIos: Show the link preview before redirecting on iOS platform.
+        ///   - showPreviewAndroid: Show the link preview before redirecting on Android platform.
+        ///   - tracking: Provide utm tracking parameters for your link.
         ///   - lifecycleOwner: An optional LifecycleOwner to use when calling the listener, by default global one will be used.
         ///   - listener: A closure to be executed after generating the link.
         fun generateLink(title: String? = null,
@@ -156,10 +163,11 @@ public class Grovs: ActivityProvider {
                          customRedirects: CustomRedirects? = null,
                          showPreviewIos: Boolean? = null,
                          showPreviewAndroid: Boolean? = null,
+                         tracking: TrackingParams? = null,
                          lifecycleOwner: LifecycleOwner? = null,
                          listener: GrovsLinkGenerationListener
         ) {
-            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreviewIos, showPreviewAndroid, lifecycleOwner, listener)
+            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreviewIos, showPreviewAndroid, tracking, lifecycleOwner, listener)
         }
 
         /// Get link details using kotlin coroutine style.
@@ -375,7 +383,8 @@ public class Grovs: ActivityProvider {
                              tags: List<String>? = null,
                              customRedirects: CustomRedirects? = null,
                              showPreviewIos: Boolean? = null,
-                             showPreviewAndroid: Boolean? = null): String {
+                             showPreviewAndroid: Boolean? = null,
+                             tracking: TrackingParams?): String {
         var link: String? = null
         grovsManager?.let { manager ->
             if (manager.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
@@ -394,7 +403,8 @@ public class Grovs: ActivityProvider {
                     tags = tags,
                     customRedirects = customRedirects,
                     showPreviewIos = showPreviewIos,
-                    showPreviewAndroid = showPreviewAndroid
+                    showPreviewAndroid = showPreviewAndroid,
+                    tracking = tracking
                 )
 
                 withContext(Dispatchers.Main) {
@@ -428,6 +438,7 @@ public class Grovs: ActivityProvider {
                      customRedirects: CustomRedirects? = null,
                      showPreviewIos: Boolean? = null,
                      showPreviewAndroid: Boolean? = null,
+                     tracking: TrackingParams?,
                      lifecycleOwner: LifecycleOwner? = null,
                      listener: GrovsLinkGenerationListener
     ) {
@@ -454,7 +465,8 @@ public class Grovs: ActivityProvider {
                     tags = tags,
                     customRedirects = customRedirects,
                     showPreviewIos = showPreviewIos,
-                    showPreviewAndroid = showPreviewAndroid
+                    showPreviewAndroid = showPreviewAndroid,
+                    tracking = tracking
                 )
 
                 withContext(Dispatchers.Main) {

@@ -13,6 +13,7 @@ import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
+import io.grovs.service.TrackingParams
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSResult
@@ -188,7 +189,8 @@ class GrovsManager(val context: Context, val application: Application, val grovs
                              tags: List<String>?,
                              customRedirects: CustomRedirects?,
                              showPreviewIos: Boolean?,
-                             showPreviewAndroid: Boolean?): LSResult<GenerateLinkResponse> {
+                             showPreviewAndroid: Boolean?,
+                             tracking: TrackingParams?): LSResult<GenerateLinkResponse> {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Links cannot be generated."))
@@ -205,7 +207,8 @@ class GrovsManager(val context: Context, val application: Application, val grovs
             tags = tags,
             customRedirects = customRedirects,
             showPreviewIos = showPreviewIos,
-            showPreviewAndroid = showPreviewAndroid)
+            showPreviewAndroid = showPreviewAndroid,
+            tracking = tracking)
     }
 
     suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {

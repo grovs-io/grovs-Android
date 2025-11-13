@@ -46,6 +46,7 @@ import io.grovs.example.ui.theme.GrovsTestAppTheme
 import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
+import io.grovs.service.TrackingParams
 import io.grovs.utils.flow
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -197,20 +198,20 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                         tags = null,
                         customRedirects = CustomRedirects(
                             ios = CustomLinkRedirect(
-                                link = "https://www.google.ro",
+                                link = "https://www.google.com",
                                 openAppIfInstalled = false
                             ),
                             android = CustomLinkRedirect(
-                                link = "https://www.youtube.ro",
-                                openAppIfInstalled = false
-                            ),
-                            desktop = CustomLinkRedirect(
-                                link = "https://www.reddit.com",
+                                link = "https://www.youtube.com",
                                 openAppIfInstalled = false
                             )
                         ),
-                        showPreviewIos = null,
-                        showPreviewAndroid = null,
+                        showPreviewIos = true,
+                        showPreviewAndroid = true,
+                        tracking = TrackingParams(
+                            utmMedium = "test_medium",
+                            utmSource = "test_source",
+                            utmCampaign = "test_campaign"),
                         lifecycleOwner = activity,
                         listener = { link, error ->
                             link?.let { link ->

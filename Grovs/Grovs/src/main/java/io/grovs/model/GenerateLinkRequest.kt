@@ -22,7 +22,13 @@ class GenerateLinkRequest(
     val showPreviewIos: Boolean?,
     @SerializedName("show_preview_android")
     val showPreviewAndroid: Boolean?,
-) : Parcelable {
+    @SerializedName("tracking_campaign")
+    val trackingCampaign: String?,
+    @SerializedName("tracking_source")
+    val trackingSource: String?,
+    @SerializedName("tracking_medium")
+    val trackingMedium: String?,
+    ) : Parcelable {
 }
 
 @Parcelize

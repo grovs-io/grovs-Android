@@ -24,7 +24,7 @@ class MainViewModel : ViewModel() {
     init {
         viewModelScope.launch {
             Grovs.Companion::openedLinkDetails.flow.collect { deeplinkDetails ->
-                val message = "Got link from flow: ${deeplinkDetails?.link} payload: ${deeplinkDetails?.data}"
+                val message = "Got link from flow: ${deeplinkDetails?.link} payload: ${deeplinkDetails?.data} tracking: ${deeplinkDetails?.tracking}"
                 Log.d("MainActivity", message)
 
                 updateFlowState(message)
