@@ -11,7 +11,7 @@
 Grovs is available as a Gradle artifact, add the below dependency to your `build.gradle`
 
 ```
-implementation("io.grovs:Grovs:1.0.19")
+implementation("io.grovs:Grovs:1.1.0")
 ```
 
 ## Configuration
@@ -78,15 +78,15 @@ Once configured, you can utilize the various functionalities provided by Grovs.
 You can receive deep link events by registering a listener OR by using kotlin coroutines `flow`. Here's how you can implement it:
 
 ```kotlin
-Grovs.setOnDeeplinkReceivedListener(this) { link, payload ->
-    val message = "Got link from listener: $link payload: $payload"
+Grovs.setOnDeeplinkReceivedListener(this) { deeplinkDetails ->
+    val message = "Got link from listener: ${deeplinkDetails.link} payload: ${deeplinkDetails.data} tracking: ${deeplinkDetails.tracking}"
     Log.d("Grovs", message)
 }
 ```
 
 ```kotlin
 Grovs.Companion::openedLinkDetails.flow.collect { deeplinkDetails ->
-    val message = "Got link from flow: ${deeplinkDetails?.link} payload: ${deeplinkDetails?.data}"
+    val message = "Got link from flow: ${deeplinkDetails?.link} payload: ${deeplinkDetails?.data} tracking: ${deeplinkDetails?.tracking}"
     Log.d("Grovs", message)
 }
 ```
