@@ -1,0 +1,23 @@
+#!/bin/bash
+
+echo "Running unit tests before commit..."
+echo "========================================"
+
+cd "$(git rev-parse --show-toplevel)/Grovs" || exit 1
+
+./gradlew :Grovs:testDebugUnitTest --quiet 2>&1
+TEST_EXIT_CODE=$?
+
+if [ $TEST_EXIT_CODE -ne 0 ]; then
+    echo ""
+    echo "========================================"
+    echo "COMMIT BLOCKED: Tests failed."
+    echo "Fix the failing tests before committing."
+    echo "========================================"
+    echo ""
+    echo "To skip this check (use sparingly):"
+    echo "  git commit --no-verify"
+    exit 1
+fi
+
+echo "All tests passed. Proceeding with commit."
