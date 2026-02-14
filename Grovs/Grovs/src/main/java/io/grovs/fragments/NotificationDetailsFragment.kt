@@ -13,6 +13,7 @@ import android.webkit.WebViewClient
 import androidx.fragment.app.viewModels
 import io.grovs.databinding.FragmentNotificationDetailsBinding
 import io.grovs.model.notifications.Notification
+import io.grovs.utils.applySystemBarInsets
 import io.grovs.viewmodels.NotificationsMainViewModel
 
 

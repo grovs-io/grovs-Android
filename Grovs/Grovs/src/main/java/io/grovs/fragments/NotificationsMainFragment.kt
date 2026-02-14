@@ -13,6 +13,7 @@ import androidx.navigation.get
 import io.grovs.service.GrovsService
 import io.grovs.R
 import io.grovs.databinding.FragmentNotificationsMainBinding
+import io.grovs.utils.applySystemBarInsets
 import io.grovs.viewmodels.NotificationsMainViewModel
 
 class NotificationsMainFragment(val grovsService: GrovsService) : DialogFragment() {
@@ -40,6 +41,7 @@ class NotificationsMainFragment(val grovsService: GrovsService) : DialogFragment
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        applySystemBarInsets()
         setup()
     }
 

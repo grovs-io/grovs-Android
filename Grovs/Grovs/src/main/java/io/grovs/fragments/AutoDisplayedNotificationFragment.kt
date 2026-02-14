@@ -16,6 +16,7 @@ import io.grovs.R
 import io.grovs.databinding.FragmentAutoDisplayedNotificationBinding
 import io.grovs.model.notifications.Notification
 import io.grovs.service.GrovsService
+import io.grovs.utils.applySystemBarInsets
 import io.grovs.viewmodels.AutoDisplayedNotificationViewModel
 
 const val ARG_NOTIFICATION = "notification"
@@ -66,6 +67,7 @@ class AutoDisplayedNotificationFragment(val grovsService: GrovsService) : Dialog
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        applySystemBarInsets()
         setup()
     }
 
