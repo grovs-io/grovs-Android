@@ -19,16 +19,16 @@ fun getDeviceName(): String =
         "${Build.MANUFACTURER} ${Build.MODEL}"
     }.capitalize(Locale.ROOT)
 
-class AppDetailsHelper(private val context: Context) {
+class AppDetailsHelper(private val context: Context) : IAppDetailsHelper {
 
-    var versionName: String = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.0"
-    var versionCode: Int = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
-    var applicationId = context.packageName
+    override var versionName: String = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0.0"
+    override var versionCode: Int = context.packageManager.getPackageInfo(context.packageName, 0).versionCode
+    override var applicationId = context.packageName
     @SuppressLint("HardwareIds")
-    var deviceID = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
-    var device = getDeviceName()
+    override var deviceID = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
+    override var device = getDeviceName()
 
-    suspend fun toAppDetails(): AppDetails {
+    override suspend fun toAppDetails(): AppDetails {
         val glInfo = GlUtils.getGlInfoOffscreen()
         val screenSize = ScreenUtils.getScreenResolution(context = context)
         val language = Locale.getDefault().toLanguageTag()

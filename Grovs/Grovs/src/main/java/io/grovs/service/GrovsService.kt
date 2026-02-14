@@ -92,7 +92,7 @@ public class TrackingParams(
 ) {
 }
 
-class GrovsService(val context: Context, val apiKey: String, val grovsContext: GrovsContext) {
+class GrovsService(val context: Context, val apiKey: String, val grovsContext: GrovsContext) : IGrovsService {
     private val grovsApi: GrovsApi
     private val appDetails: AppDetailsHelper by lazy { grovsContext.getAppDetails(context = context) }
     private val userAgent: String by lazy { grovsContext.getUserAgent(context = context) }
@@ -121,13 +121,21 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         val EAGER_RETRY_COUNT: Long = 15
         val EAGER_RETRY_FALLBACK_TIME: Long = 5000
         val RETRY_FALLBACK_TIME: Long = 10000
+        
+        /**
+         * Override base URL for testing with MockWebServer.
+         * Set this to MockWebServer.url("/").toString() before configuring the SDK in tests.
+         * Set to null to use the default BuildConfig.SERVER_URL.
+         */
+        @Volatile
+        var testBaseUrl: String? = null
     }
 
     init {
         grovsApi = getRetrofit().create(GrovsApi::class.java)
     }
 
-    suspend fun payloadFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
+    override suspend fun payloadFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
 
         var retryCount = 0
@@ -155,7 +163,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun payloadWithLinkFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
+    override suspend fun payloadWithLinkFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
 
         var retryCount = 0
@@ -187,7 +195,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     ///
     /// - Parameters:
     ///   - appDetails: Details of the app.
-    fun authenticate(appDetails: AppDetails): Flow<GVRetryResult<AuthenticationResponse>> = flow {
+    override fun authenticate(appDetails: AppDetails): Flow<GVRetryResult<AuthenticationResponse>> = flow {
         DebugLogger.instance.log(LogLevel.INFO, "Authenticate")
 
         val response = grovsApi.authenticate(appDetails)
@@ -214,7 +222,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         true // continue retrying
     }
 
-    suspend fun generateLink(title: String?,
+    override suspend fun generateLink(title: String?,
                              subtitle: String?,
                              imageURL: String?,
                              data: Map<String, Serializable>?,
@@ -257,7 +265,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
+    override suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
         try {
             val request = LinkDetailsRequest(path = path)
             val response = grovsApi.linkDetails(request)
@@ -292,8 +300,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     ///
     /// - Parameters:
     ///   - event: The event to add.
-    ///   - completion: A closure indicating the success or failure of the operation.
-    suspend fun addEvent(event: Event): LSResult<Boolean> {
+    ///   return: A closure indicating the success or failure of the operation.
+    override suspend fun addEvent(event: Event): LSResult<Boolean> {
         try {
             DebugLogger.instance.log(LogLevel.INFO, "Add event - $event")
             val response = grovsApi.addEvent(event)
@@ -316,7 +324,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun updateAttributes(identifier: String? = null, attributes: Map<String, Any>? = null, pushToken: String? = null): LSResult<Boolean> {
+    override suspend fun updateAttributes(identifier: String?, attributes: Map<String, Any>?, pushToken: String?): LSResult<Boolean> {
         DebugLogger.instance.log(LogLevel.INFO, "Set attributes - $identifier $attributes push token: $pushToken")
 
         var retryCount = 0
@@ -348,7 +356,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> = flow {
+    override fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> = flow {
         DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen")
 
         val response = grovsApi.getDeviceFor(vendorId)
@@ -376,7 +384,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         true // continue retrying
     }
 
-    suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
+    override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications")
 
         var retryCount = 0
@@ -412,7 +420,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
+    override suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Get unread messages")
 
         var retryCount = 0
@@ -441,7 +449,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
+    override suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
         DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read")
 
         var retryCount = 0
@@ -471,7 +479,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
+    override suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Notifications to display automatically")
 
         var retryCount = 0
@@ -514,8 +522,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 .create()
         }
 
+        // Use test URL if set, otherwise use production URL
+        val baseUrl = testBaseUrl ?: BuildConfig.SERVER_URL
+
         return Retrofit.Builder()
-            .baseUrl(BuildConfig.SERVER_URL)
+            .baseUrl(baseUrl)
             .addConverterFactory(nullOnEmptyConverterFactory)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .client(getOkhttpClient())

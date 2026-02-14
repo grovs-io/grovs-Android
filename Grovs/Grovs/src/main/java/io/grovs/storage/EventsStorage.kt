@@ -14,7 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.withContext
 
-class EventsStorage(context: Context) {
+class EventsStorage(context: Context) : IEventsStorage {
     private val preferences = context.getSharedPreferences(GROVS_STORAGE, Context.MODE_PRIVATE)
     @OptIn(ExperimentalCoroutinesApi::class)
     private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
@@ -30,7 +30,7 @@ class EventsStorage(context: Context) {
     /// Adds or replaces events in the storage.
     ///
     /// - Parameter events: The events to add or replace.
-    suspend fun addOrReplaceEvents(events: List<Event>) = withContext(storageSerialDispatcher) {
+    override suspend fun addOrReplaceEvents(events: List<Event>) = withContext(storageSerialDispatcher) {
         DebugLogger.instance.log(LogLevel.INFO, "Caching events - Events update: ${events}")
 
         val currentEvents = getEvents().toMutableList()
@@ -59,7 +59,7 @@ class EventsStorage(context: Context) {
     /// Adds an event to the storage.
     ///
     /// - Parameter event: The event to add.
-    suspend fun addEvent(event: Event) = withContext(storageSerialDispatcher) {
+    override suspend fun addEvent(event: Event) = withContext(storageSerialDispatcher) {
         var currentEvents = getEvents().toMutableList()
         currentEvents.add(event)
 
@@ -78,7 +78,7 @@ class EventsStorage(context: Context) {
         }
     }
 
-    suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean = false, link: String?) = withContext(storageSerialDispatcher) {
+    override suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean, link: String?) = withContext(storageSerialDispatcher) {
         val events = getEvents()
         if (startingNode) {
             for (event in events) {
@@ -116,7 +116,7 @@ class EventsStorage(context: Context) {
     /// Removes an event from the storage.
     ///
     /// - Parameter event: The event to remove.
-    suspend fun removeEvent(event: Event) = withContext(storageSerialDispatcher) {
+    override suspend fun removeEvent(event: Event) = withContext(storageSerialDispatcher) {
         val currentEvents = getEvents().toMutableList()
         currentEvents.remove(event)
 
@@ -134,7 +134,7 @@ class EventsStorage(context: Context) {
     }
 
     /// Retrieves all events from the storage.
-    suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
+    override suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
             val jsonString = preferences.getString(STORED_EVENTS, null)
             val type = object : TypeToken<List<Event>>() {}.type
 
@@ -146,7 +146,7 @@ class EventsStorage(context: Context) {
     }
 
     /// Check if we already have an empty time spent event.
-    suspend fun hasEmptyTimeSpentEvent(): Boolean = withContext(storageSerialDispatcher) {
+    override suspend fun hasEmptyTimeSpentEvent(): Boolean = withContext(storageSerialDispatcher) {
         val jsonString = preferences.getString(STORED_EVENTS, null)
         val type = object : TypeToken<List<Event>>() {}.type
 

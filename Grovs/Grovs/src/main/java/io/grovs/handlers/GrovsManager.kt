@@ -13,9 +13,12 @@ import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
+import io.grovs.service.IGrovsService
 import io.grovs.service.TrackingParams
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
+import io.grovs.utils.IAppDetailsHelper
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.hasURISchemesConfigured
 import kotlinx.coroutines.GlobalScope
@@ -27,7 +30,29 @@ import java.lang.ref.WeakReference
 import java.net.URLDecoder
 import kotlin.coroutines.resumeWithException
 
-class GrovsManager(val context: Context, val application: Application, val grovsContext: GrovsContext, apiKey: String) {
+/**
+ * GrovsManager is the core manager for the Grovs SDK.
+ * 
+ * This class can be configured with custom service and events manager implementations
+ * for testing purposes. By default, it creates real implementations.
+ * 
+ * @param context The Android context
+ * @param application The Android application instance
+ * @param grovsContext The Grovs context containing SDK settings and state
+ * @param apiKey The API key for authenticating with Grovs backend
+ * @param grovsService Optional custom service implementation for testing (defaults to real service)
+ * @param eventsManager Optional custom events manager for testing (defaults to real manager)
+ * @param appDetailsHelper Optional custom app details helper for testing (defaults to real helper)
+ */
+class GrovsManager(
+    val context: Context,
+    val application: Application,
+    val grovsContext: GrovsContext,
+    apiKey: String,
+    grovsService: IGrovsService? = null,
+    eventsManager: IEventsManager? = null,
+    appDetailsHelper: IAppDetailsHelper? = null
+) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
     }
@@ -37,9 +62,10 @@ class GrovsManager(val context: Context, val application: Application, val grovs
         private const val KEY_LAST_REFERRER = "last_referrer"
     }
 
-    private val grovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
-    private val appDetails = grovsContext.getAppDetails(context = context)
-    private val eventsManager = EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    private val grovsService: IGrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    private val appDetails: IAppDetailsHelper = appDetailsHelper ?: grovsContext.getAppDetails(context = context)
+    private val eventsManager: IEventsManager = eventsManager ?: EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    private val appDetailsHelperForIntent: IAppDetailsHelper = appDetailsHelper ?: AppDetailsHelper(context)
 
     private var lastIntentHandledReference: WeakReference<Intent>? = null
     private var handledIntentTokens: MutableList<Int> = mutableListOf()
@@ -104,7 +130,7 @@ class GrovsManager(val context: Context, val application: Application, val grovs
     private suspend fun getDataForDevice(link: String? = null, delayEvents: Boolean): DeeplinkDetails? {
         eventsManager.setLinkToNewFutureActions(link, delayEvents = delayEvents)
 
-        val appDetails = AppDetailsHelper(context).toAppDetails()
+        val appDetails = appDetailsHelperForIntent.toAppDetails()
         appDetails.url = link
         val result = if (link == null) grovsService.payloadFor(appDetails) else grovsService.payloadWithLinkFor(appDetails)
         when (result) {

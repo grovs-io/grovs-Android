@@ -4,7 +4,7 @@ import android.content.Context
 import io.grovs.utils.InstantCompat
 import java.time.Instant
 
-class LocalCache(val context: Context) {
+class LocalCache(val context: Context) : ILocalCache {
     private val preferences = context.getSharedPreferences(EventsStorage.GROVS_STORAGE, Context.MODE_PRIVATE)
 
     companion object {
@@ -13,7 +13,7 @@ class LocalCache(val context: Context) {
         private const val GROVS_LAST_START_TIMESTAMP = "grovs_last_start_timestamp"
     }
 
-    var numberOfOpens:Int
+    override var numberOfOpens:Int
         set(value) {
             val editor = preferences.edit()
             editor.putInt(GROVS_NUMBER_OF_OPENS, value)
@@ -23,7 +23,7 @@ class LocalCache(val context: Context) {
             return preferences.getInt(GROVS_NUMBER_OF_OPENS, 0)
         }
 
-    var resignTimestamp:InstantCompat?
+    override var resignTimestamp:InstantCompat?
         set(value) {
             val editor = preferences.edit()
             editor.putString(GROVS_RESIGN_TIMESTAMP, value.toString())
@@ -39,7 +39,7 @@ class LocalCache(val context: Context) {
             }
         }
 
-    var lastStartTimestamp:InstantCompat?
+    override var lastStartTimestamp:InstantCompat?
         set(value) {
             val editor = preferences.edit()
             editor.putString(GROVS_LAST_START_TIMESTAMP, value.toString())

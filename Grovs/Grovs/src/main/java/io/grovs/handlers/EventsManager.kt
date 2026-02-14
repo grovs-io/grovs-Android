@@ -6,7 +6,10 @@ import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.LogLevel
 import io.grovs.service.GrovsService
+import io.grovs.service.IGrovsService
 import io.grovs.storage.EventsStorage
+import io.grovs.storage.IEventsStorage
+import io.grovs.storage.ILocalCache
 import io.grovs.storage.LocalCache
 import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
@@ -19,27 +22,33 @@ import kotlinx.coroutines.runBlocking
 import java.time.Duration
 import java.time.Instant
 
-class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey: String) {
-    private val grovsService = GrovsService(context = context, apiKey = apiKey,
-        grovsContext = grovsContext)
-    private val eventsStorage = EventsStorage(context = context)
-    private val localCache = LocalCache(context = context)
-    private var linkForFutureActions: String? = null
-    private var allowedToSendToBackend = false
-    private var firstRequestTime: InstantCompat? = null
+class EventsManager(
+    val context: Context, 
+    val grovsContext: GrovsContext, 
+    apiKey: String,
+    // Dependencies for testing - if null, real implementations are used
+    private val grovsService: IGrovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext),
+    private val eventsStorage: IEventsStorage = EventsStorage(context = context),
+    private val localCache: ILocalCache = LocalCache(context = context)
+) : IEventsManager {
+    // Internal state - exposed for testing
+    internal var linkForFutureActions: String? = null
+    internal var allowedToSendToBackend = false
+    internal var firstRequestTime: InstantCompat? = null
+    internal var eventsDelaySeconds = 14
 
     companion object {
         private const val FIRST_BATCH_EVENTS_SENDING_LEEWAY: Long = 15000
         private const val NUMBER_OF_DAYS_FOR_REACTIVATION: Int = 7
     }
 
-    suspend fun onAppForegrounded() {
+    override suspend fun onAppForegrounded() {
         sendNormalEventsToBackend()
         sendTimeSpentEventsToBackend()
         eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions)
     }
 
-    fun onAppBackgrounded() {
+    override fun onAppBackgrounded() {
         localCache.resignTimestamp = InstantCompat.now()
         linkForFutureActions = null
 
@@ -48,7 +57,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
         }
     }
 
-    suspend fun logAppLaunchEvents() {
+    override suspend fun logAppLaunchEvents() {
         addInitialEvents()
         addOpenEvent()
         eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions)
@@ -56,7 +65,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
 
     /// Logs an event and sends it to the backend.
     /// - Parameter event: The event to log
-    suspend fun log(event: Event) {
+    override suspend fun log(event: Event) {
         val newEvent = event
         if (newEvent.link == null) {
             newEvent.link = linkForFutureActions
@@ -68,7 +77,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
 
     /// Sets the link for future actions to associate with new events.
     /// - Parameter link: The link to set
-    suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
+    override suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
         linkForFutureActions = link
         allowedToSendToBackend = !delayEvents
         link?.let {
@@ -222,7 +231,7 @@ class EventsManager(val context: Context, val grovsContext: GrovsContext, apiKey
             // Check if delay was met
             val now = InstantCompat.now()
             val duration = DurationCompat.between(firstRequestTime ?: InstantCompat.now(), now)
-            allowedToSendToBackend = duration.seconds > 14
+            allowedToSendToBackend = duration.seconds > eventsDelaySeconds
         }
     }
 }
