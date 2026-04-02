@@ -6,7 +6,7 @@ import io.grovs.Grovs
 import io.grovs.model.LogLevel
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsException
-import io.grovs.service.GrovsService
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -64,7 +64,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             val requestCountBeforeDisable = mockWebServer.requestCount
             assertTrue(
@@ -91,7 +91,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act - change debug level multiple times
             Grovs.setDebug(LogLevel.INFO)
@@ -124,14 +124,14 @@ class SdkLifecycleE2ETest {
             }
 
             // Act
-            Grovs.configure(application, "api-key-1", useTestEnvironment = true)
+            Grovs.configure(application, "api-key-1", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
             val firstAuthJob = E2ETestUtils.getAuthenticationJob()
             withTimeoutOrNull(5_000) { firstAuthJob?.join() }
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
-            Grovs.configure(application, "api-key-2", useTestEnvironment = true)
+            Grovs.configure(application, "api-key-2", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
             val secondAuthJob = E2ETestUtils.getAuthenticationJob()
@@ -160,7 +160,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act
             val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -199,7 +199,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             Grovs.setSDK(enabled = false)
             Shadows.shadowOf(Looper.getMainLooper()).idle()
@@ -224,7 +224,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             val requestCountBefore = mockWebServer.requestCount
 
@@ -272,7 +272,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             val activityController = Robolectric.buildActivity(TestActivity::class.java)
             activityController.create().start().resume()
@@ -334,7 +334,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             val requestCountAfterAuth = mockWebServer.requestCount
 
@@ -381,7 +381,7 @@ class SdkLifecycleE2ETest {
     // PURCHASE_EVENT_DISABLED:             E2ETestUtils.enqueueEventResponse(mockWebServer)
     // PURCHASE_EVENT_DISABLED:         }
     // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application)
+    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:         val activityController = Robolectric.buildActivity(TestActivity::class.java)
     // PURCHASE_EVENT_DISABLED:         activityController.create().start()
@@ -422,7 +422,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
             // First configure
-            Grovs.configure(application, "test-api-key-1", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key-1", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
             delay(100)
@@ -433,7 +433,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueDeviceResponse(mockWebServer)
 
             try {
-                Grovs.configure(application, "test-api-key-2", useTestEnvironment = true)
+                Grovs.configure(application, "test-api-key-2", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
             } catch (e: Exception) {
                 // Reconfiguration may throw, which is acceptable
             }
@@ -463,7 +463,7 @@ class SdkLifecycleE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
             // Act
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
             val authJob = E2ETestUtils.getAuthenticationJob()

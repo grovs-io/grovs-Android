@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import io.grovs.Grovs
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
-import io.grovs.service.GrovsService
 import io.grovs.utils.InstantCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -246,7 +245,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = null)
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -267,7 +266,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = null)
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -288,7 +287,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = null)
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -311,7 +310,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = "2026-01-20T10:00:00.000Z")
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -335,7 +334,7 @@ class EventTrackingE2ETest {
         // Arrange
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -370,7 +369,7 @@ class EventTrackingE2ETest {
         // Arrange - first launch
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -406,7 +405,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = "2026-01-15T08:30:00.000Z")
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -457,7 +456,7 @@ class EventTrackingE2ETest {
         }
 
         // Act - configure but don't wait for auth
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
 
         // Check immediately - no events should be sent yet since auth is delayed
         val eventsBeforeAuth = synchronized(capturedEventBodies) {
@@ -496,7 +495,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = null)
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -522,7 +521,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/campaign123"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             // Do NOT enable immediate event sending yet — let the SDK's delay hold events
             // in storage so addLinkToEvents can retroactively patch the resolved link
 
@@ -575,7 +574,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/promo"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act - cold start with deeplink
             val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -624,7 +623,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/welcome-back"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act - cold start with deeplink on returning device
             val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -674,7 +673,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/both-events"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act - cold start with deeplink
             val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -730,7 +729,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = null, eventResponseCode = 500)
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -752,7 +751,7 @@ class EventTrackingE2ETest {
     // PURCHASE_EVENT_DISABLED:     installEventCapturingDispatcher(lastSeen = null)
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:     // Act - configure, authenticate, then log a custom purchase
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application)
+    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
     // PURCHASE_EVENT_DISABLED:     E2ETestUtils.enableImmediateEventSending()
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:     val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -802,7 +801,7 @@ class EventTrackingE2ETest {
         // Arrange - verify SDK handles repeated lifecycle transitions without errors
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -872,7 +871,7 @@ class EventTrackingE2ETest {
         installEventCapturingDispatcher(lastSeen = "2026-01-10T12:00:00.000Z")
 
         // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -901,7 +900,7 @@ class EventTrackingE2ETest {
     // PURCHASE_EVENT_DISABLED:             resolvedLink = "https://test.grovs.io/purchase-campaign"
     // PURCHASE_EVENT_DISABLED:         )
     // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application)
+    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:         // Cold start with deeplink
     // PURCHASE_EVENT_DISABLED:         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -991,7 +990,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/reactivation-campaign"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             // Do NOT enable immediate sending — let deeplink resolution patch events first
 
             // Cold start with deeplink
@@ -1089,7 +1088,7 @@ class EventTrackingE2ETest {
     // PURCHASE_EVENT_DISABLED:             }
     // PURCHASE_EVENT_DISABLED:         }
     // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application)
+    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:         // Cold start with deeplink
     // PURCHASE_EVENT_DISABLED:         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -1159,7 +1158,7 @@ class EventTrackingE2ETest {
     // PURCHASE_EVENT_DISABLED:     // Payment logged after auth should have null link.
     // PURCHASE_EVENT_DISABLED:     installEventCapturingDispatcher(lastSeen = null)
     // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application)
+    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
     // PURCHASE_EVENT_DISABLED:     E2ETestUtils.enableImmediateEventSending()
     // PURCHASE_EVENT_DISABLED:
     // PURCHASE_EVENT_DISABLED:     val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -1282,7 +1281,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/deferred-install"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             // Do NOT enable immediate sending — delayEvents=true keeps events in storage
             // so addLinkToEvents can patch them when the deferred link arrives
 
@@ -1344,7 +1343,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/deferred-reinstall"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Plain activity start (no deeplink)
             val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -1399,7 +1398,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/deferred-appopen"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Plain activity start (no deeplink)
             val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -1537,7 +1536,7 @@ class EventTrackingE2ETest {
         // sendTimeSpentEventsToBackend() sends the completed event.
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -1571,7 +1570,7 @@ class EventTrackingE2ETest {
         // linkForFutureActions=null, so the event should have no link.
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -1611,7 +1610,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/time-spent-link"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Cold start with deeplink
             val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -1671,7 +1670,7 @@ class EventTrackingE2ETest {
                 resolvedLink = "https://test.grovs.io/not-for-timespent"
             )
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Plain activity start → TIME_SPENT node created with null link
             // (linkForFutureActions is null, data_for_device delayed 3s)
@@ -1730,7 +1729,7 @@ class EventTrackingE2ETest {
         // events sent to the backend.
         installEventCapturingDispatcher(lastSeen = null)
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
         E2ETestUtils.enableImmediateEventSending()
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)

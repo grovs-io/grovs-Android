@@ -56,7 +56,7 @@ class DeepLinkingE2ETest {
     }
 
     private suspend fun configureAndWaitForAuth(apiKey: String = "test-api-key") {
-        E2ETestUtils.configureAndWaitForAuth(application, apiKey)
+        E2ETestUtils.configureAndWaitForAuth(application, apiKey, baseURL = mockWebServer.url("/").toString())
     }
 
     // ==================== Cold Start Tests ====================
@@ -80,7 +80,7 @@ class DeepLinkingE2ETest {
         ))
 
         // Configure without creating an activity to avoid consuming the deeplink response
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act - create activity with deeplink intent
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -174,7 +174,7 @@ class DeepLinkingE2ETest {
         ))
 
         // Configure without creating an activity to avoid consuming the deeplink response
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -227,7 +227,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":"https://test.grovs.io/warmstart","data":{"ref":"warm"}}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Create and start activity (no deeplink)
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -283,7 +283,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":"https://test.grovs.io/hotstart","data":{"ref":"hot"}}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Create activity in foreground
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
@@ -375,7 +375,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":"https://test.grovs.io/duplicate","data":{"ref":"dup"}}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start().resume()
@@ -441,7 +441,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":null,"data":null}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act - create activity with malformed URI
         val malformedIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -498,7 +498,7 @@ class DeepLinkingE2ETest {
                 .setBodyDelay(30_000, java.util.concurrent.TimeUnit.MILLISECONDS)
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -553,7 +553,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":"https://test.grovs.io/pending","data":{"ref":"late"}}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act - create and start activity with deeplink BEFORE setting listener
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -616,7 +616,7 @@ class DeepLinkingE2ETest {
         ))
 
         // Configure without creating an activity to avoid consuming the deeplink response
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -672,7 +672,7 @@ class DeepLinkingE2ETest {
                 .setBody("""{"link":"https://test.grovs.io/resolved","data":{"seq":"multi"}}""")
         ))
 
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         var callCount = 0
         val receivedLinks = mutableListOf<String?>()
@@ -738,7 +738,7 @@ class DeepLinkingE2ETest {
         ))
 
         // Configure without creating an activity to avoid consuming the deeplink response
-        E2ETestUtils.configureAndWaitForAuthOnly(application)
+        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         // Act
         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {

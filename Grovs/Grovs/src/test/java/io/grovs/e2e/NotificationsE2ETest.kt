@@ -3,7 +3,6 @@ package io.grovs.e2e
 import android.app.Application
 import android.os.Looper
 import io.grovs.Grovs
-import io.grovs.service.GrovsService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -51,7 +50,7 @@ class NotificationsE2ETest {
     }
 
     private suspend fun configureAndWaitForAuth() {
-        E2ETestUtils.configureAndWaitForAuth(application)
+        E2ETestUtils.configureAndWaitForAuth(application, baseURL = mockWebServer.url("/").toString())
     }
 
     // ==================== Notifications Tests ====================
@@ -65,7 +64,7 @@ class NotificationsE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
 
             val authJob = E2ETestUtils.getAuthenticationJob()
             withTimeoutOrNull(10_000) { authJob?.join() }
@@ -96,7 +95,7 @@ class NotificationsE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
 
             val authJob = E2ETestUtils.getAuthenticationJob()
             withTimeoutOrNull(10_000) { authJob?.join() }
@@ -343,7 +342,7 @@ class NotificationsE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
 
             val authJob = E2ETestUtils.getAuthenticationJob()
             withTimeoutOrNull(5_000) { authJob?.join() }

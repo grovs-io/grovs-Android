@@ -3,7 +3,6 @@ package io.grovs.e2e
 import android.app.Application
 import android.os.Looper
 import io.grovs.Grovs
-import io.grovs.service.GrovsService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockWebServer
@@ -59,7 +58,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act
             Grovs.identifier = "test-user-123"
@@ -80,7 +79,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act
             Grovs.pushToken = "fcm-token-abc123"
@@ -101,7 +100,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act
             Grovs.attributes = mapOf("name" to "Test User", "level" to 5)
@@ -124,7 +123,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             Grovs.identifier = "temp-user"
             Shadows.shadowOf(Looper.getMainLooper()).idle()
@@ -150,7 +149,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             // Act
             val mixedAttributes = mapOf(
@@ -181,7 +180,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             Grovs.attributes = mapOf("key" to "value")
             Shadows.shadowOf(Looper.getMainLooper()).idle()
@@ -208,7 +207,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
             // Act
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             Grovs.identifier = "user-123"
 
             delay(500)
@@ -241,7 +240,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
             // Act
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             Grovs.pushToken = "fcm-token-xyz-123"
 
             delay(500)
@@ -273,7 +272,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueVisitorAttributesResponse(mockWebServer)
 
             // Act
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
             Grovs.attributes = mapOf("plan" to "premium", "age" to 25)
 
             delay(500)
@@ -307,7 +306,7 @@ class UserAttributesE2ETest {
             E2ETestUtils.enqueueErrorResponse(mockWebServer, 500, "Internal Server Error")
 
             // Act
-            E2ETestUtils.configureAndWaitForAuthOnly(application)
+            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
             Grovs.identifier = "user-error-test"
             delay(500)

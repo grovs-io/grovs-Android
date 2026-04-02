@@ -11,5 +11,6 @@ class GrovsSettings {
         }
     var useTestEnvironment: Boolean = false
     var sdkEnabled: Boolean = true
+    var baseURL: String? = null
 
 }

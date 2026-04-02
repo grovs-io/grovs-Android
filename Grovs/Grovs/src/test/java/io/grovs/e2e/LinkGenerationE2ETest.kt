@@ -6,7 +6,6 @@ import io.grovs.Grovs
 import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
-import io.grovs.service.GrovsService
 import io.grovs.service.TrackingParams
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockWebServer
@@ -61,7 +60,7 @@ class LinkGenerationE2ETest {
         E2ETestUtils.enqueueGenerateLinkResponse(mockWebServer, link = "https://test.grovs.io/full-params")
 
         // Configure SDK
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
         // Wait for auth job with looper pumping
@@ -145,7 +144,7 @@ class LinkGenerationE2ETest {
         E2ETestUtils.enqueueGenerateLinkResponse(mockWebServer, link = "https://test.grovs.io/minimal")
 
         // Configure SDK
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
         // Wait for auth job with looper pumping
@@ -186,7 +185,7 @@ class LinkGenerationE2ETest {
         E2ETestUtils.enqueueErrorResponse(mockWebServer, 500, "Server error")
 
         // Configure SDK
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
         // Wait for auth job with looper pumping
@@ -219,7 +218,7 @@ class LinkGenerationE2ETest {
         E2ETestUtils.enqueueDeviceResponse(mockWebServer)
         E2ETestUtils.enqueueGenerateLinkResponse(mockWebServer, link = "https://test.grovs.io/with-data")
 
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
         val authJob = E2ETestUtils.getAuthenticationJob()
@@ -271,7 +270,7 @@ class LinkGenerationE2ETest {
         E2ETestUtils.enqueueDeviceResponse(mockWebServer)
         E2ETestUtils.enqueueDelayedResponse(mockWebServer, 30_000)
 
-        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
         val authJob = E2ETestUtils.getAuthenticationJob()

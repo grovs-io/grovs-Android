@@ -4,7 +4,7 @@ import android.app.Application
 import io.grovs.Grovs
 import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
-import io.grovs.service.GrovsService
+
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
@@ -52,7 +52,7 @@ class AuthenticationE2ETest {
     }
 
     private suspend fun configureAndWaitForAuth(apiKey: String = "test-api-key") =
-        E2ETestUtils.configureAndWaitForAuth(application, apiKey)
+        E2ETestUtils.configureAndWaitForAuth(application, apiKey, baseURL = mockWebServer.url("/").toString())
 
     // ==================== Authentication Flow Tests ====================
 
@@ -68,8 +68,8 @@ class AuthenticationE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
 
             assertNotNullWithContext(
-                GrovsService.testBaseUrl,
-                "testBaseUrl",
+                mockWebServer.url("/").toString(),
+                "mockWebServer URL",
                 "before Grovs.configure()"
             )
 
@@ -106,15 +106,15 @@ class AuthenticationE2ETest {
     }
 
     @Test
-    fun `test setup has MockWebServer running and testBaseUrl set`() {
+    fun `test setup has MockWebServer running`() {
         assertTrueWithContext(
             mockWebServer.url("/").toString().isNotEmpty(),
             "MockWebServer URL is not empty",
             "in test setup"
         )
         assertNotNullWithContext(
-            GrovsService.testBaseUrl,
-            "testBaseUrl",
+            mockWebServer.url("/").toString(),
+            "mockWebServer URL",
             "in test setup"
         )
     }
@@ -195,7 +195,7 @@ class AuthenticationE2ETest {
             E2ETestUtils.enqueueDelayedResponse(mockWebServer, 30_000)
 
             // Act
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
 
             E2ETestUtils.processMainLooper()
 

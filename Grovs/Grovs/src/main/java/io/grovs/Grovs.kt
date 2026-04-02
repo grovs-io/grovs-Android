@@ -93,8 +93,8 @@ public class Grovs: ActivityProvider {
             }
 
         /// Configures Grovs with the API key from the web console
-        fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean) {
-            instance.configure(application, apiKey, useTestEnvironment = useTestEnvironment)
+        fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean, baseURL: String? = null) {
+            instance.configure(application, apiKey, useTestEnvironment = useTestEnvironment, baseURL = baseURL)
         }
 
         /// Disables the Grovs SDK.
@@ -348,10 +348,11 @@ public class Grovs: ActivityProvider {
         }
     }
 
-    fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean) {
+    fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean, baseURL: String? = null) {
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
+        this.grovsContext.settings.baseURL = baseURL
 
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,

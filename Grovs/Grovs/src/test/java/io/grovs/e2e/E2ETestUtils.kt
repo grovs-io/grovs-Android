@@ -5,7 +5,6 @@ import android.os.Looper
 import android.provider.Settings
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
-import io.grovs.service.GrovsService
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -68,7 +67,6 @@ object E2ETestUtils {
     fun createMockWebServer(): MockWebServer {
         val server = MockWebServer()
         server.start()
-        GrovsService.testBaseUrl = server.url("/").toString()
         return server
     }
 
@@ -117,7 +115,6 @@ object E2ETestUtils {
             // If we can't set the dispatcher, shut down immediately as fallback
             try { server.shutdown() } catch (e2: Exception) { /* ignore */ }
         }
-        GrovsService.testBaseUrl = null
     }
 
     // ==================== Response Enqueuers ====================
@@ -1010,9 +1007,10 @@ object E2ETestUtils {
      */
     fun configureAndWaitForAuthOnly(
         application: Application,
-        apiKey: String = "test-api-key"
+        apiKey: String = "test-api-key",
+        baseURL: String? = null
     ) {
-        Grovs.configure(application, apiKey, useTestEnvironment = true)
+        Grovs.configure(application, apiKey, useTestEnvironment = true, baseURL = baseURL)
         Shadows.shadowOf(Looper.getMainLooper()).idle()
         runBlocking {
             val authJob = getAuthenticationJob()
@@ -1026,9 +1024,10 @@ object E2ETestUtils {
      */
     suspend fun configureAndWaitForAuth(
         application: Application,
-        apiKey: String = "test-api-key"
+        apiKey: String = "test-api-key",
+        baseURL: String? = null
     ): ActivityController<TestActivity>? {
-        Grovs.configure(application, apiKey, useTestEnvironment = true)
+        Grovs.configure(application, apiKey, useTestEnvironment = true, baseURL = baseURL)
 
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 

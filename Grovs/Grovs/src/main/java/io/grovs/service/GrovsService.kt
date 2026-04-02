@@ -122,13 +122,6 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         val EAGER_RETRY_FALLBACK_TIME: Long = 5000
         val RETRY_FALLBACK_TIME: Long = 10000
         
-        /**
-         * Override base URL for testing with MockWebServer.
-         * Set this to MockWebServer.url("/").toString() before configuring the SDK in tests.
-         * Set to null to use the default BuildConfig.SERVER_URL.
-         */
-        @Volatile
-        var testBaseUrl: String? = null
     }
 
     init {
@@ -522,8 +515,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 .create()
         }
 
-        // Use test URL if set, otherwise use production URL
-        val baseUrl = testBaseUrl ?: BuildConfig.SERVER_URL
+        val baseUrl = if (grovsContext.settings.baseURL != null) {
+            grovsContext.settings.baseURL!!.trimEnd('/') + "/api/v1/sdk/"
+        } else {
+            BuildConfig.SERVER_URL
+        }
 
         return Retrofit.Builder()
             .baseUrl(baseUrl)
