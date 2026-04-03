@@ -11,6 +11,8 @@ import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
+import io.grovs.model.events.PaymentEvent
+import io.grovs.model.events.PaymentEventType
 import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
 import io.grovs.service.IGrovsService
@@ -297,6 +299,18 @@ class GrovsManager(
 
             return getDataForDevice(null, delayEvents = delayEvents)
         }
+    }
+
+    suspend fun logInAppPurchase(originalJson: String) {
+        eventsManager.logInAppPurchase(originalJson = originalJson)
+    }
+
+    suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
+        eventsManager.logCustomPurchase(type = type,
+            priceInCents = priceInCents,
+            currency = currency,
+            productId = productId,
+            startDate = startDate)
     }
 
     private suspend fun getInstallReferrer(): String? {

@@ -7,6 +7,7 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.LogLevel
+import io.grovs.model.events.PaymentEvent
 import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
@@ -25,6 +26,7 @@ class EventsStorage(context: Context) : IEventsStorage {
     companion object {
         const val GROVS_STORAGE = "GrovsStorage"
         private const val STORED_EVENTS = "stored_events"
+        private const val STORED_PAYMENT_EVENTS = "stored_payment_events"
     }
 
     /// Adds or replaces events in the storage.
@@ -75,6 +77,25 @@ class EventsStorage(context: Context) : IEventsStorage {
             gson.fromJson(jsonString, type)
         } catch (e: Exception) {
             DebugLogger.instance.log(LogLevel.INFO, "Caching events - Failed. ${e.stackTrace}")
+        }
+    }
+
+    override suspend fun addPaymentEvent(event: PaymentEvent) = withContext(storageSerialDispatcher) {
+        var currentEvents = getPaymentEvents().toMutableList()
+        currentEvents.add(event)
+
+        val type = object : TypeToken<List<PaymentEvent>>() {}.type
+        val editor = preferences.edit()
+        val jsonString = gson.toJson(currentEvents)
+        editor.putString(STORED_PAYMENT_EVENTS, jsonString)
+        editor.apply()
+
+        DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Add event: ${event}")
+
+        try {
+            gson.fromJson(jsonString, type)
+        } catch (e: Exception) {
+            DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Failed. ${e.stackTrace}")
         }
     }
 
@@ -133,6 +154,26 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
+    /// Removes a payment event from the storage.
+    ///
+    /// - Parameter event: The event to remove.
+    override suspend fun removePaymentEvent(event: PaymentEvent) = withContext(storageSerialDispatcher) {
+        val currentEvents = getPaymentEvents().toMutableList()
+        currentEvents.remove(event)
+
+        val type = object : TypeToken<List<PaymentEvent>>() {}.type
+        val editor = preferences.edit()
+        val jsonString = gson.toJson(currentEvents)
+        editor.putString(STORED_PAYMENT_EVENTS, jsonString)
+        editor.apply()
+
+        try {
+            gson.fromJson(jsonString, type)
+        } catch (e: Exception) {
+            DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Failed. ${e.stackTrace}")
+        }
+    }
+
     /// Retrieves all events from the storage.
     override suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
             val jsonString = preferences.getString(STORED_EVENTS, null)
@@ -143,6 +184,18 @@ class EventsStorage(context: Context) : IEventsStorage {
             } catch (e: Exception) {
                 emptyList()
             }
+    }
+
+    /// Retrieves all payment from the storage.
+    override suspend fun getPaymentEvents(): List<PaymentEvent> = withContext(storageSerialDispatcher) {
+        val jsonString = preferences.getString(STORED_PAYMENT_EVENTS, null)
+        val type = object : TypeToken<List<PaymentEvent>>() {}.type
+
+        try {
+            gson.fromJson(jsonString, type)
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     /// Check if we already have an empty time spent event.

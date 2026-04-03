@@ -20,14 +20,21 @@ val SDK_VERSION = "SDK_VERSION"
 val NETWORK_LOGGING = "NETWORK_LOGGING"
 
 private val libraryGroupId = "io.grovs"
-// MAVEN CENTRAL
-private val libraryArtifactId = "Grovs"
-private val libraryVersion = "1.1.0"
-val NETWORK_LOGGING_VALUE = FALSE
-// GITHUB
-//private val libraryArtifactId = "grovs"
-//private val libraryVersion = "1.0.17"
-//val NETWORK_LOGGING_VALUE = TRUE
+private val libraryArtifactId = if (project.hasProperty("artifactId")) {
+    project.property("artifactId").toString()
+} else {
+    "Grovs"
+}
+private val libraryVersion = if (project.hasProperty("libraryVersion")) {
+    project.property("libraryVersion").toString()
+} else {
+    "1.1.1"
+}
+val NETWORK_LOGGING_VALUE = if (project.hasProperty("networkLogging")) {
+    project.property("networkLogging").toString()
+} else {
+    FALSE
+}
 
 android {
     namespace = "io.grovs"
@@ -46,7 +53,11 @@ android {
 
     buildTypes {
 
-        val SERVER_URL_PRODUCTION = "\"https://sdk.sqd.link/api/v1/sdk/\""
+        val SERVER_URL_PRODUCTION = if (project.hasProperty("serverUrl")) {
+            "\"${project.property("serverUrl")}/api/v1/sdk/\""
+        } else {
+            "\"https://sdk.sqd.link/api/v1/sdk/\""
+        }
 
         debug {
             isMinifyEnabled = false

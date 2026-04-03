@@ -1,16 +1,20 @@
 package io.grovs.handlers
 
 import android.content.Context
+import com.google.gson.annotations.SerializedName
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.LogLevel
+import io.grovs.model.events.PaymentEvent
+import io.grovs.model.events.PaymentEventType
 import io.grovs.service.GrovsService
 import io.grovs.service.IGrovsService
 import io.grovs.storage.EventsStorage
 import io.grovs.storage.IEventsStorage
 import io.grovs.storage.ILocalCache
 import io.grovs.storage.LocalCache
+import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
@@ -44,6 +48,7 @@ class EventsManager(
 
     override suspend fun onAppForegrounded() {
         sendNormalEventsToBackend()
+        sendPaymentEventsToBackend()
         sendTimeSpentEventsToBackend()
         eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions)
     }
@@ -75,6 +80,36 @@ class EventsManager(
         sendNormalEventsToBackend()
     }
 
+    /// Logs an in app payment event and sends it to the backend.
+    /// - Parameter event: The event to log
+    override suspend fun logInAppPurchase(originalJson: String) {
+        val events = PaymentEvent.fromOriginalJson(originalJson = originalJson)
+
+        if (events.isEmpty()) {
+            DebugLogger.instance.log(LogLevel.ERROR, "The provided originalJson seems to be invalid. Please use the string provided by billing library purchase.originalJson")
+        }
+
+        for (event in events) {
+            logPurchase(event = event)
+        }
+    }
+
+    /// Logs an in app payment event and sends it to the backend.
+    /// - Parameter event: The event to log
+    override suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat?) {
+        val applicationId = AppDetailsHelper(context).applicationId
+        val event = PaymentEvent(eventType = type,
+            appId = applicationId,
+            priceCents = priceInCents.toLong(),
+            currency = currency,
+            date = startDate,
+            productId = productId,
+            store = false
+        )
+
+        logPurchase(event = event)
+    }
+
     /// Sets the link for future actions to associate with new events.
     /// - Parameter link: The link to set
     override suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
@@ -85,7 +120,20 @@ class EventsManager(
             eventsStorage.markTimeSpentNode(startingNode = false, link = link)
         } ?: kotlin.run {
             sendNormalEventsToBackend()
+            sendPaymentEventsToBackend()
         }
+    }
+
+    /// Logs a payment event and sends it to the backend.
+    /// - Parameter event: The event to log
+    private suspend fun logPurchase(event: PaymentEvent) {
+        val newEvent = event
+        if (newEvent.link == null) {
+            newEvent.link = linkForFutureActions
+        }
+
+        eventsStorage.addPaymentEvent(newEvent)
+        sendPaymentEventsToBackend()
     }
 
     /// Adds initial events such as install or reactivation events.
@@ -150,6 +198,7 @@ class EventsManager(
         }
 
         sendNormalEventsToBackend()
+        sendPaymentEventsToBackend()
     }
 
     /// Changes stored events based on a closure and performs a completion handler.
@@ -167,7 +216,7 @@ class EventsManager(
         eventsStorage.addOrReplaceEvents(newEvents)
     }
 
-    /// Sends normal events (non-time-spent) to the backend.
+    /// Sends normal events (non-time-spent, non-payment) to the backend.
     private fun sendNormalEventsToBackend() = runBlocking {
         checkEventsSendingAllowed()
         if (!allowedToSendToBackend) {
@@ -217,6 +266,31 @@ class EventsManager(
         }
     }
 
+    /// Sends payment events to the backend.
+    private fun sendPaymentEventsToBackend() = runBlocking {
+        checkEventsSendingAllowed()
+        if (!allowedToSendToBackend) {
+            return@runBlocking
+        }
+
+        val events = eventsStorage.getPaymentEvents()
+        DebugLogger.instance.log(LogLevel.INFO, "Sending payment logs to the backend: $events")
+
+        for (event in events) {
+            val result = grovsService.addPaymentEvent(event)
+            when (result) {
+                is LSResult.Success -> {
+                    eventsStorage.removePaymentEvent(event)
+                }
+
+                is LSResult.Error -> {
+                    DebugLogger.instance.log(LogLevel.INFO, "Failed to send payment events: $event error: $result")
+                    delay(5000)
+                }
+            }
+        }
+    }
+
     private fun checkEventsSendingAllowed() {
         if (firstRequestTime == null) {
             firstRequestTime = InstantCompat.now()
@@ -224,6 +298,7 @@ class EventsManager(
             GlobalScope.launch {
                 delay(FIRST_BATCH_EVENTS_SENDING_LEEWAY)
                 sendNormalEventsToBackend()
+                sendPaymentEventsToBackend()
             }
         }
 

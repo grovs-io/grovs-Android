@@ -1,6 +1,8 @@
 package io.grovs.handlers
 
 import io.grovs.model.Event
+import io.grovs.model.events.PaymentEventType
+import io.grovs.utils.InstantCompat
 
 /**
  * Interface for EventsManager to enable dependency injection and testability.
@@ -24,7 +26,11 @@ interface IEventsManager {
      * Logs app launch events including install/reactivation and open events.
      */
     suspend fun logAppLaunchEvents()
-    
+
+    suspend fun logInAppPurchase(originalJson: String)
+
+    suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now())
+
     /**
      * Logs an event and sends it to the backend.
      * @param event The event to log

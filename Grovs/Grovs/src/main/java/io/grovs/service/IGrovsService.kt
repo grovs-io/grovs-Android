@@ -7,6 +7,7 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.Event
+import io.grovs.model.events.PaymentEvent
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.GVRetryResult
@@ -73,7 +74,12 @@ interface IGrovsService {
      * Add an event.
      */
     suspend fun addEvent(event: Event): LSResult<Boolean>
-    
+
+    /**
+     * Add a payment event.
+     */
+    suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean>
+
     /**
      * Get notifications.
      */

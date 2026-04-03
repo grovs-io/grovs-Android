@@ -24,9 +24,17 @@ To configure the Grovs SDK within your application, follow these steps:
 override fun onCreate() {
     super.onCreate()
 
-    Grovs.configure(this, "your-api-key")
+    Grovs.configure(this, "your-api-key", useTestEnvironment = false)
 }
 ```
+
+You can optionally pass a custom server URL if you're using a self-hosted backend:
+
+```kotlin
+Grovs.configure(this, "your-api-key", useTestEnvironment = false, baseURL = "https://your-server.com")
+```
+
+When `baseURL` is not provided, the SDK defaults to the Grovs production server.
 
 2. In your **launcher activity** add the code for handling incoming links:
 
@@ -160,6 +168,38 @@ To display the list of the messages on top of everthing else use:
 Grovs.displayMessagesFragment {
     // Display has finished.
 }
+```
+
+### Revenue tracking
+
+You can track in-app purchases and custom purchases to measure revenue attribution from your links.
+
+For Google Play in-app purchases, pass the `originalJson` from the purchase object:
+
+```kotlin
+Grovs.logInAppPurchase(originalJson = purchase.originalJson)
+```
+
+For custom purchases outside of Google Play:
+
+```kotlin
+Grovs.logCustomPurchase(
+    type = PaymentEventType.BUY,
+    priceInCents = 1999,
+    currency = "USD",
+    productId = "pro_plan"
+)
+```
+
+To log a cancellation:
+
+```kotlin
+Grovs.logCustomPurchase(
+    type = PaymentEventType.CANCELLATION,
+    priceInCents = 1999,
+    currency = "USD",
+    productId = "pro_plan"
+)
 ```
 
 ## Demo project

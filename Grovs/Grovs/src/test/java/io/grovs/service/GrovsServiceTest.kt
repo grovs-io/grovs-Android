@@ -566,17 +566,17 @@ class TestableGrovsService(
         }
     }
 
-    // PURCHASE_EVENT_DISABLED: override suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean> {
-    // PURCHASE_EVENT_DISABLED:     return try {
-    // PURCHASE_EVENT_DISABLED:         val response = testApi.addPaymentEvent(event)
-    // PURCHASE_EVENT_DISABLED:         if (response.isSuccessful) {
-    // PURCHASE_EVENT_DISABLED:             return LSResult.Success(true)
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:         LSResult.Error(java.io.IOException("Failed to add payment event"))
-    // PURCHASE_EVENT_DISABLED:     } catch (e: Exception) {
-    // PURCHASE_EVENT_DISABLED:         LSResult.Error(e)
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
+    override suspend fun addPaymentEvent(event: io.grovs.model.events.PaymentEvent): LSResult<Boolean> {
+        return try {
+            val response = testApi.addPaymentEvent(event)
+            if (response.isSuccessful) {
+                return LSResult.Success(true)
+            }
+            LSResult.Error(java.io.IOException("Failed to add payment event"))
+        } catch (e: Exception) {
+            LSResult.Error(e)
+        }
+    }
 
     override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
         return try {

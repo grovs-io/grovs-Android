@@ -15,11 +15,13 @@ import io.grovs.handlers.NotificationsManager
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
+import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.CustomRedirects
 import io.grovs.service.TrackingParams
 import io.grovs.utils.FlowObservable
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
@@ -208,6 +210,30 @@ public class Grovs: ActivityProvider {
         ///   - listener: A listener to receive the link and data from which the app was opened.
         fun setOnDeeplinkReceivedListener(launcherActivity: Activity?, listener: GrovsDeeplinkListener) {
             instance.setOnDeeplinkReceivedListener(launcherActivity, listener)
+        }
+
+        /// Log a purchase that happened using the google play billing library (in app purchase).
+        ///
+        /// - Parameters:
+        ///   - originalJson: The original json of the purchase (purchase.originalJson).
+        fun logInAppPurchase(originalJson: String) {
+            instance.logInAppPurchase(originalJson = originalJson)
+        }
+
+        /// Log a custom purchase for your project. If you are making purchases outside of google play, you can use this method to log them in grovs.
+        ///
+        /// - Parameters:
+        ///   - type: The type of the purchase event, a buy or a cancelled event.
+        ///   - priceInCents: The purchase price in cents.
+        ///   - currency: The currency of the purchase.
+        ///   - productId:
+        ///   - startDate:
+        fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
+            instance.logCustomPurchase(type = type,
+                priceInCents = priceInCents,
+                currency = currency,
+                productId = productId,
+                startDate = startDate)
         }
 
         /// Register a listener for receiving automatic notifications events.
@@ -587,6 +613,24 @@ public class Grovs: ActivityProvider {
             launcherActivityReference = WeakReference(launcherActivity)
         }
         deeplinkListener = listener
+    }
+
+    fun logInAppPurchase(originalJson: String) {
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            authenticationJob?.join()
+            grovsManager?.logInAppPurchase(originalJson = originalJson)
+        }
+    }
+
+    fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            authenticationJob?.join()
+            grovsManager?.logCustomPurchase(type = type,
+                priceInCents = priceInCents,
+                currency = currency,
+                productId = productId,
+                startDate = startDate)
+        }
     }
 
     fun setOnAutomaticNotificationsListener(listener: GrovsNotificationsListener) {

@@ -1,6 +1,7 @@
 package io.grovs.storage
 
 import io.grovs.model.Event
+import io.grovs.model.events.PaymentEvent
 
 /**
  * Interface for EventsStorage to enable dependency injection and testability.
@@ -18,7 +19,14 @@ interface IEventsStorage {
      * @param event The event to add.
      */
     suspend fun addEvent(event: Event)
-    
+
+    /**
+     * Adds a payment event to the storage.
+     * @param event The event to add.
+     */
+    suspend fun addPaymentEvent(event: PaymentEvent)
+
+
     /**
      * Marks a time spent node for tracking engagement time.
      * @param startingNode Whether this is a starting node
@@ -32,13 +40,25 @@ interface IEventsStorage {
      * @param event The event to remove.
      */
     suspend fun removeEvent(event: Event)
-    
+
+    /**
+     * Removes a payment event from the storage.
+     * @param event The payment event to remove.
+     */
+    suspend fun removePaymentEvent(event: PaymentEvent)
+
     /**
      * Retrieves all events from the storage.
      * @return List of events
      */
     suspend fun getEvents(): List<Event>
-    
+
+    /**
+     * Retrieves all payment events from the storage.
+     * @return List of payment events
+     */
+    suspend fun getPaymentEvents(): List<PaymentEvent>
+
     /**
      * Check if we already have an empty time spent event.
      * @return true if there's an empty time spent event

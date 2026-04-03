@@ -23,6 +23,7 @@ import io.grovs.model.LinkDetailsRequest
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.model.UpdateAttributesRequest
+import io.grovs.model.events.PaymentEvent
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
@@ -312,6 +313,34 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             DebugLogger.instance.log(LogLevel.INFO, "Add event - Failed - $event ${error.error}")
 
             return LSResult.Error(java.io.IOException("Failed to log the event. ${error.error}"))
+        } catch (e: Exception) {
+            return LSResult.Error(e)
+        }
+    }
+
+    /// Adds an event.
+    ///
+    /// - Parameters:
+    ///   - event: The payment event to add.
+    ///   return: A closure indicating the success or failure of the operation.
+    override suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean> {
+        try {
+            DebugLogger.instance.log(LogLevel.INFO, "Add payment event - $event")
+            val response = grovsApi.addPaymentEvent(event)
+            if (response.isSuccessful) {
+                val body = response.body()
+                body?.let {
+                    DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Successful - $event")
+
+                    return LSResult.Success(true)
+                }
+            }
+
+            val error = gson.fromJson(response.errorBody()!!.string(), ErrorMessage::class.java)
+
+            DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Failed - $event ${error.error}")
+
+            return LSResult.Error(java.io.IOException("Failed to log the payment event. ${error.error}"))
         } catch (e: Exception) {
             return LSResult.Error(e)
         }

@@ -8,7 +8,7 @@ import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.UpdateAttributesRequest
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
+import io.grovs.model.events.PaymentEvent
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
@@ -42,7 +42,7 @@ class MockGrovsApi : GrovsApi {
     var notificationsResponse: Response<NotificationsResponse>? = null
     var numberOfUnreadNotificationsResponse: Response<NumberOfUnreadNotificationsResponse>? = null
     var addEventResponse: Response<Unit>? = null
-    // PURCHASE_EVENT_DISABLED: var addPaymentEventResponse: Response<Unit>? = null
+    var addPaymentEventResponse: Response<Unit>? = null
     var updateAttributesResponse: Response<Unit>? = null
     var markNotificationAsReadResponse: Response<Unit>? = null
     var notificationsToDisplayAutomaticallyResponse: Response<NotificationsResponse>? = null
@@ -51,7 +51,7 @@ class MockGrovsApi : GrovsApi {
     var authenticateCalls = mutableListOf<AppDetails>()
     var generateLinkCalls = mutableListOf<GenerateLinkRequest>()
     var addEventCalls = mutableListOf<Event>()
-    // PURCHASE_EVENT_DISABLED: var addPaymentEventCalls = mutableListOf<PaymentEvent>()
+    var addPaymentEventCalls = mutableListOf<PaymentEvent>()
     var updateAttributesCalls = mutableListOf<UpdateAttributesRequest>()
     var linkDetailsCalls = mutableListOf<LinkDetailsRequest>()
 
@@ -87,10 +87,10 @@ class MockGrovsApi : GrovsApi {
         return addEventResponse ?: Response.success(Unit)
     }
 
-    // PURCHASE_EVENT_DISABLED: override suspend fun addPaymentEvent(request: PaymentEvent): Response<Unit> {
-    // PURCHASE_EVENT_DISABLED:     addPaymentEventCalls.add(request)
-    // PURCHASE_EVENT_DISABLED:     return addPaymentEventResponse ?: Response.success(Unit)
-    // PURCHASE_EVENT_DISABLED: }
+    override suspend fun addPaymentEvent(request: PaymentEvent): Response<Unit> {
+        addPaymentEventCalls.add(request)
+        return addPaymentEventResponse ?: Response.success(Unit)
+    }
 
     override suspend fun updateAttributes(request: UpdateAttributesRequest): Response<Unit> {
         updateAttributesCalls.add(request)
@@ -131,7 +131,7 @@ class MockGrovsApi : GrovsApi {
         notificationsResponse = null
         numberOfUnreadNotificationsResponse = null
         addEventResponse = null
-        // PURCHASE_EVENT_DISABLED: addPaymentEventResponse = null
+        addPaymentEventResponse = null
         updateAttributesResponse = null
         markNotificationAsReadResponse = null
         notificationsToDisplayAutomaticallyResponse = null
@@ -139,7 +139,7 @@ class MockGrovsApi : GrovsApi {
         authenticateCalls.clear()
         generateLinkCalls.clear()
         addEventCalls.clear()
-        // PURCHASE_EVENT_DISABLED: addPaymentEventCalls.clear()
+        addPaymentEventCalls.clear()
         updateAttributesCalls.clear()
         linkDetailsCalls.clear()
     }
@@ -147,7 +147,7 @@ class MockGrovsApi : GrovsApi {
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()
     fun verifyGenerateLinkCalled(): Boolean = generateLinkCalls.isNotEmpty()
     fun verifyAddEventCalled(): Boolean = addEventCalls.isNotEmpty()
-    // PURCHASE_EVENT_DISABLED: fun verifyAddPaymentEventCalled(): Boolean = addPaymentEventCalls.isNotEmpty()
+    fun verifyAddPaymentEventCalled(): Boolean = addPaymentEventCalls.isNotEmpty()
 
     // =====================================================================
     // Default success response factories

@@ -10,6 +10,7 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsRequest
 import io.grovs.model.UpdateAttributesRequest
+import io.grovs.model.events.PaymentEvent
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
@@ -40,6 +41,9 @@ interface GrovsApi {
 
     @POST("event")
     suspend fun addEvent(@Body request: Event): Response<Unit>
+
+    @POST("add_payment_event")
+    suspend fun addPaymentEvent(@Body request: PaymentEvent): Response<Unit>
 
     @POST("visitor_attributes")
     suspend fun updateAttributes(@Body request: UpdateAttributesRequest): Response<Unit>
