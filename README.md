@@ -4,6 +4,16 @@
     <img src="https://s3.eu-north-1.amazonaws.com/grovs.io/full-black.svg" width="120" alt="Grovs">
   </picture>
 </p>
+
+<p align="center">
+  <a href="https://github.com/grovs-io/grovs-Android/releases"><img src="https://img.shields.io/github/v/release/grovs-io/grovs-Android?style=flat-square&color=4F46E5" alt="Latest release"/></a>
+  <a href="https://central.sonatype.com/artifact/io.grovs/Grovs"><img src="https://img.shields.io/maven-central/v/io.grovs/Grovs?style=flat-square&color=4F46E5&label=maven%20central" alt="Maven Central"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/API-21%2B-4F46E5?style=flat-square" alt="API 21+"/></a>
+  <a href="#"><img src="https://img.shields.io/badge/kotlin-1.9%2B-4F46E5?style=flat-square&logo=kotlin&logoColor=white" alt="Kotlin"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/grovs-io/grovs-Android?style=flat-square&color=4F46E5" alt="MIT License"/></a>
+  <a href="https://github.com/grovs-io/grovs-Android/stargazers"><img src="https://img.shields.io/github/stars/grovs-io/grovs-Android?style=flat-square&color=4F46E5" alt="GitHub stars"/></a>
+</p>
+
 <p align="center">
   Deep linking, attribution, and smart links for Android.<br/>
   Part of the <a href="https://github.com/grovs-io">Grovs</a> open-source mobile linking platform.
