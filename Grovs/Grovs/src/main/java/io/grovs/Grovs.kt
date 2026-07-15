@@ -432,15 +432,17 @@ public class Grovs: ActivityProvider {
             ) {
                 return@launch
             }
-            val screenName = (activity as? FragmentActivity)
+            val leaf = (activity as? FragmentActivity)
                 ?.supportFragmentManager
                 ?.let(VisibleFragmentResolver::findVisibleLeaf)
                 ?.javaClass
-                ?.simpleName
-                ?: activity.javaClass.simpleName
+            val screenName = leaf?.simpleName ?: activity.javaClass.simpleName
+            // Fully-qualified name is the dedup identity: two distinct screens that share a simpleName
+            // must not be collapsed by the dedup window.
+            val screenClass = leaf?.name ?: activity.javaClass.name
 
             withContext(grovsContext.serialDispatcher) {
-                grovsManager?.autoTrackScreen(screenName)
+                grovsManager?.autoTrackScreen(screenName, screenClass)
             }
         }
         pendingScreenResolutionJobs.put(activity, job)?.cancel()

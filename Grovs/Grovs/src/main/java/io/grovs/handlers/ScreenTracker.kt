@@ -16,7 +16,7 @@ internal class ScreenTracker(
 ) {
 
     private var aliases: Map<String, String> = emptyMap()
-    private var lastScreenName: String? = null
+    private var lastDedupKey: String? = null
     private var lastScreenAt: InstantCompat? = null
 
     companion object {
@@ -45,13 +45,25 @@ internal class ScreenTracker(
 
     /**
      * Emits a screen_view event, unless the same screen was already tracked within the dedup window.
+     *
+     * [dedupKey] disambiguates the dedup window by screen *identity* rather than display name. Auto
+     * tracking passes the resolved class's fully-qualified name, so two distinct screens that happen
+     * to share a simpleName (e.g. same-named tab fragments in different packages) are not wrongly
+     * collapsed. When the screen is aliased (aliases are keyed by simpleName, so an aliased screen is
+     * intentionally treated as one screen) or no key is supplied (manual [trackScreen] via
+     * trackScreenView), the resolved name is used as the key — preserving prior behavior.
      */
-    suspend fun trackScreen(rawName: String, properties: Map<String, Any>? = null) {
+    suspend fun trackScreen(
+        rawName: String,
+        properties: Map<String, Any>? = null,
+        dedupKey: String? = null,
+    ) {
         if (shouldSkip(rawName)) return
 
         val resolved = aliases[rawName] ?: rawName
+        val key = if (dedupKey != null && !aliases.containsKey(rawName)) dedupKey else resolved
 
-        if (isDuplicate(resolved)) {
+        if (isDuplicate(key)) {
             DebugLogger.instance.log(
                 LogLevel.INFO,
                 "Skipping duplicate screen view within dedup window: $resolved"
@@ -59,7 +71,7 @@ internal class ScreenTracker(
             return
         }
 
-        lastScreenName = resolved
+        lastDedupKey = key
         lastScreenAt = InstantCompat.now()
 
         customEventsManager.track(
@@ -71,12 +83,12 @@ internal class ScreenTracker(
 
     /** Called on session rotation so the first screen of a new session always fires. */
     fun resetDedup() {
-        lastScreenName = null
+        lastDedupKey = null
         lastScreenAt = null
     }
 
-    private fun isDuplicate(resolvedName: String): Boolean {
-        if (lastScreenName != resolvedName) return false
+    private fun isDuplicate(key: String): Boolean {
+        if (lastDedupKey != key) return false
         val at = lastScreenAt ?: return false
         return (InstantCompat.now().toEpochMilli() - at.toEpochMilli()) < DEDUP_WINDOW_MS
     }

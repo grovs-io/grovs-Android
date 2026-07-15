@@ -451,7 +451,7 @@ class GrovsSingletonTest {
             testDispatcher.scheduler.advanceUntilIdle()
 
             coVerify(timeout = 1_500, exactly = 1) {
-                mockManager.autoTrackScreen("TestActivity")
+                mockManager.autoTrackScreen("TestActivity", any())
             }
             assertFalse(pendingAuthentication.isCompleted)
         } finally {
@@ -477,12 +477,12 @@ class GrovsSingletonTest {
             testDispatcher.scheduler.advanceUntilIdle()
 
             coVerify(timeout = 3_000, exactly = 1) {
-                mockManager.autoTrackScreen("TestActivity")
+                mockManager.autoTrackScreen("TestActivity", any())
             }
 
             // Keep observing so a late orphaned job cannot escape the final exact-count verification.
             Thread.sleep(300L)
-            coVerify(exactly = 1) { mockManager.autoTrackScreen("TestActivity") }
+            coVerify(exactly = 1) { mockManager.autoTrackScreen("TestActivity", any()) }
         } finally {
             controller.pause().stop().destroy()
         }
@@ -501,7 +501,7 @@ class GrovsSingletonTest {
             .create().start().resume().pause()
         try {
             testDispatcher.scheduler.advanceUntilIdle()
-            coVerify(exactly = 0) { mockManager.autoTrackScreen(any()) }
+            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any()) }
         } finally {
             controller.stop().destroy()
         }

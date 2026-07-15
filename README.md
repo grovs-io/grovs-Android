@@ -202,6 +202,10 @@ Merged onto every subsequently tracked event, up to the combined 20-tag cap.
 
 Screen views are tracked **automatically** for Activities and Fragments. When an Activity hosts Fragments, only the **Fragment is reported** (the host Activity's screen view is suppressed) — this matches iOS, which filters out container view controllers. Compose destinations are NOT auto-tracked (the SDK has no Compose dependency) — track those manually.
 
+**Modals** (`DialogFragment`, `BottomSheetDialogFragment`) are treated as overlays, not screens, so they are **not** auto-tracked — the screen underneath stays the current screen. If you want a modal reported as a screen, call `Grovs.trackScreenView("...")` when it opens.
+
+> **Tab switching:** tabs driven by the Navigation component, `ViewPager2`, `setMaxLifecycle`, or `replace()` transactions are tracked automatically (they resume the destination fragment). The legacy `hide()`/`show()` tab pattern does **not** change fragment lifecycle, so those switches are not auto-tracked — use `trackNavigation` (below), `setMaxLifecycle`, or a manual `trackScreenView` in your tab handler.
+
 To disable automatic screen tracking:
 
 ```kotlin

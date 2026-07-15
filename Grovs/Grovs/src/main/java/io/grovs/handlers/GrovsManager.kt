@@ -341,10 +341,14 @@ internal class GrovsManager(
         grovsService.syncScreenAliases(aliases)
     }
 
-    /** Called from the Activity/Fragment lifecycle hooks. No-op when auto-tracking is disabled. */
-    suspend fun autoTrackScreen(screenName: String) {
+    /**
+     * Called from the Activity/Fragment lifecycle hooks. No-op when auto-tracking is disabled.
+     * [screenClass] is the resolved screen's fully-qualified class name, used as the dedup identity
+     * so distinct screens sharing a simpleName are not collapsed.
+     */
+    suspend fun autoTrackScreen(screenName: String, screenClass: String? = null) {
         if (!grovsContext.settings.autoTrackScreenViews) return
-        screenTracker.trackScreen(rawName = screenName, properties = null)
+        screenTracker.trackScreen(rawName = screenName, properties = null, dedupKey = screenClass)
     }
 
     fun resetScreenDedup() {
