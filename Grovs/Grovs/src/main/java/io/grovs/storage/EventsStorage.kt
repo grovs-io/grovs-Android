@@ -27,7 +27,23 @@ class EventsStorage(context: Context) : IEventsStorage {
         const val GROVS_STORAGE = "GrovsStorage"
         private const val STORED_EVENTS = "stored_events"
         private const val STORED_PAYMENT_EVENTS = "stored_payment_events"
+
+        // Retention policy shared with CustomEventsStorage.
+
+        /** Hard cap on persisted events. Oldest are evicted first. */
+        const val MAX_STORED_EVENTS = 1000
+
+        /** Events older than this are discarded on read rather than sent. */
+        const val MAX_EVENT_AGE_DAYS = 7
+        internal const val MAX_EVENT_AGE_MS = MAX_EVENT_AGE_DAYS * 24L * 60 * 60 * 1000
+
+        /** Enforces the storage cap by dropping the oldest events first. */
+        internal fun <T> capped(events: List<T>, createdAt: (T) -> InstantCompat): List<T> =
+            if (events.size <= MAX_STORED_EVENTS) events
+            else events.sortedBy(createdAt).takeLast(MAX_STORED_EVENTS)
     }
+
+    private fun capped(events: List<Event>): List<Event> = capped(events) { it.createdAt }
 
     /// Adds or replaces events in the storage.
     ///
@@ -45,9 +61,11 @@ class EventsStorage(context: Context) : IEventsStorage {
             }
         }
 
+        val cappedEvents = capped(currentEvents)
+
         val type = object : TypeToken<List<Event>>() {}.type
         val editor = preferences.edit()
-        val jsonString = gson.toJson(currentEvents)
+        val jsonString = gson.toJson(cappedEvents)
         editor.putString(STORED_EVENTS, jsonString)
         editor.apply()
 
@@ -62,8 +80,7 @@ class EventsStorage(context: Context) : IEventsStorage {
     ///
     /// - Parameter event: The event to add.
     override suspend fun addEvent(event: Event) = withContext(storageSerialDispatcher) {
-        var currentEvents = getEvents().toMutableList()
-        currentEvents.add(event)
+        val currentEvents = capped(getEvents() + event)
 
         val type = object : TypeToken<List<Event>>() {}.type
         val editor = preferences.edit()
@@ -99,7 +116,7 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
-    override suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean, link: String?) = withContext(storageSerialDispatcher) {
+    override suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean, link: String?, sessionId: String?) = withContext(storageSerialDispatcher) {
         val events = getEvents()
         if (startingNode) {
             for (event in events) {
@@ -129,7 +146,7 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
 
         if (!endingNode) {
-            val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now(), link = link)
+            val event = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.now(), link = link, sessionId = sessionId)
             addEvent(event)
         }
     }
@@ -174,25 +191,29 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
-    /// Retrieves all events from the storage.
+    /// Retrieves all events from the storage, dropping any that are too old to be useful.
     override suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
-            val jsonString = preferences.getString(STORED_EVENTS, null)
-            val type = object : TypeToken<List<Event>>() {}.type
+        val jsonString = preferences.getString(STORED_EVENTS, null)
+        val type = object : TypeToken<List<Event>>() {}.type
 
-            try {
-                gson.fromJson(jsonString, type)
-            } catch (e: Exception) {
-                emptyList()
-            }
+        val events: List<Event> = try {
+            gson.fromJson<List<Event>>(jsonString, type) ?: emptyList()
+        } catch (e: Exception) {
+            DebugLogger.instance.log(LogLevel.ERROR, "Caching events - Read failed. ${e.message}")
+            emptyList()
+        }
+
+        val cutoff = InstantCompat.now().minusMillis(MAX_EVENT_AGE_MS)
+        events.filter { it.createdAt.isAfter(cutoff) }
     }
 
-    /// Retrieves all payment from the storage.
+    /// Retrieves all payment events from the storage.
     override suspend fun getPaymentEvents(): List<PaymentEvent> = withContext(storageSerialDispatcher) {
         val jsonString = preferences.getString(STORED_PAYMENT_EVENTS, null)
         val type = object : TypeToken<List<PaymentEvent>>() {}.type
 
         try {
-            gson.fromJson(jsonString, type)
+            gson.fromJson<List<PaymentEvent>>(jsonString, type) ?: emptyList()
         } catch (e: Exception) {
             emptyList()
         }
@@ -204,7 +225,7 @@ class EventsStorage(context: Context) : IEventsStorage {
         val type = object : TypeToken<List<Event>>() {}.type
 
         val events: List<Event> = try {
-            gson.fromJson(jsonString, type)
+            gson.fromJson<List<Event>>(jsonString, type) ?: emptyList()
         } catch (e: Exception) {
             emptyList()
         }

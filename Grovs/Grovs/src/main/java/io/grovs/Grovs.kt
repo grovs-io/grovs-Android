@@ -6,12 +6,19 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Parcelable
 import android.os.SystemClock
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentManager
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
+import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
@@ -25,14 +32,15 @@ import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.Serializable
 import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
 
 fun interface GrovsDeeplinkListener {
     fun onDeeplinkReceived(deeplinkDetails: DeeplinkDetails)
@@ -94,9 +102,36 @@ public class Grovs: ActivityProvider {
                 instance.attributes = value
             }
 
-        /// Configures Grovs with the API key from the web console
-        fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean, baseURL: String? = null) {
-            instance.configure(application, apiKey, useTestEnvironment = useTestEnvironment, baseURL = baseURL)
+        /** Configures Grovs using the released 1.1.1 signature. */
+        fun configure(
+            application: Application,
+            apiKey: String,
+            useTestEnvironment: Boolean,
+            baseURL: String? = null,
+        ) {
+            instance.configure(
+                application = application,
+                apiKey = apiKey,
+                useTestEnvironment = useTestEnvironment,
+                baseURL = baseURL,
+            )
+        }
+
+        /** Configures Grovs and explicitly controls automatic screen tracking. */
+        fun configure(
+            application: Application,
+            apiKey: String,
+            useTestEnvironment: Boolean,
+            baseURL: String?,
+            autoTrackScreenViews: Boolean,
+        ) {
+            instance.configure(
+                application = application,
+                apiKey = apiKey,
+                useTestEnvironment = useTestEnvironment,
+                baseURL = baseURL,
+                autoTrackScreenViews = autoTrackScreenViews,
+            )
         }
 
         /// Disables the Grovs SDK.
@@ -220,6 +255,53 @@ public class Grovs: ActivityProvider {
             instance.logInAppPurchase(originalJson = originalJson)
         }
 
+        /// Tracks a custom analytics event.
+        ///
+        /// - Parameters:
+        ///   - name: the event name. Must not be blank, and must not be one of the SDK's reserved
+        ///     names (view, open, install, reinstall, app_open, time_spent, reactivation,
+        ///     user_referred, custom, screen_view) — those are rejected and logged.
+        ///   - properties: arbitrary metadata. Non-finite numbers are dropped; Date, URL and UUID
+        ///     are coerced to strings. Dropped entirely if it serializes to over 8KB.
+        ///   - tags: up to 20 tags, each up to 255 characters. Merged with any global tags.
+        fun track(name: String, properties: Map<String, Any>? = null, tags: List<String>? = null) {
+            instance.track(name = name, properties = properties, tags = tags)
+        }
+
+        /// Sets tags merged onto every subsequently tracked event. Pass null to clear.
+        fun setGlobalTags(tags: List<String>? = null) {
+            instance.setGlobalTags(tags)
+        }
+
+        /// Tracks a screen view manually. Use when auto-tracking is off, or for screens the SDK
+        /// cannot see (custom views, Compose destinations).
+        fun trackScreenView(screenName: String, properties: Map<String, Any>? = null) {
+            instance.trackScreenView(screenName = screenName, properties = properties)
+        }
+
+        /// Maps Activity/Fragment class names to friendly names shown in the dashboard.
+        /// e.g. mapOf("MainActivity" to "Home").
+        fun setScreenAliases(aliases: Map<String, String>) {
+            instance.setScreenAliases(aliases)
+        }
+
+        /// Tracks screen views from a Jetpack Navigation [NavController]. Each destination change is
+        /// reported as a screen (using the destination's route, then its label, then its display
+        /// name). This is the recommended way to track Navigation-Compose and route-based graphs,
+        /// which the lifecycle-based auto-tracker cannot see.
+        ///
+        /// Call once per NavController, e.g. right after you set its graph. Safe to call repeatedly
+        /// on the same controller — duplicate registrations are ignored. The SDK keeps only a weak
+        /// reference to the controller, so this does not leak the hosting Activity/Fragment.
+        ///
+        /// Note: with Fragment-based navigation this can overlap the lifecycle auto-tracker and
+        /// produce duplicate screen views under different names. For those apps, either disable
+        /// automatic screen tracking (`autoTrackScreenViews = false`) and rely on this, or use this
+        /// only for Compose/route-based graphs.
+        fun trackNavigation(navController: NavController) {
+            instance.trackNavigation(navController)
+        }
+
         /// Log a custom purchase for your project. If you are making purchases outside of google play, you can use this method to log them in grovs.
         ///
         /// - Parameters:
@@ -324,10 +406,59 @@ public class Grovs: ActivityProvider {
 
     private var authenticationJob: Job? = null
 
+    /** The pending screen resolution per Activity, so pause/destroy and re-resumes can cancel it. */
+    private val pendingScreenResolutionJobs = ConcurrentHashMap<Activity, Job>()
+
+    private val fragmentLifecycleObserver = object : FragmentManager.FragmentLifecycleCallbacks() {
+        override fun onFragmentResumed(fm: FragmentManager, fragment: Fragment) {
+            fragment.activity?.let(::scheduleScreenResolution)
+        }
+    }
+
+    /**
+     * Resolves which screen is on display and reports it. Resolution is posted to the main looper
+     * rather than run inline, so all lifecycle callbacks of one navigation (an Activity plus its
+     * Fragments, in either order) coalesce into the single most recent job, which then walks the
+     * fragment tree once to find the visible leaf.
+     */
+    private fun scheduleScreenResolution(activity: Activity) {
+        if (grovsManager == null) return
+        if (!grovsContext.settings.autoTrackScreenViews) return
+
+        val job = GlobalScope.launch(Dispatchers.Main) {
+            val lifecycleOwner = activity as? LifecycleOwner
+            if (lifecycleOwner != null &&
+                !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+            ) {
+                return@launch
+            }
+            val screenName = (activity as? FragmentActivity)
+                ?.supportFragmentManager
+                ?.let(VisibleFragmentResolver::findVisibleLeaf)
+                ?.javaClass
+                ?.simpleName
+                ?: activity.javaClass.simpleName
+
+            withContext(grovsContext.serialDispatcher) {
+                grovsManager?.autoTrackScreen(screenName)
+            }
+        }
+        pendingScreenResolutionJobs.put(activity, job)?.cancel()
+        // Fires immediately if the job already finished, so the map cannot leak completed jobs.
+        job.invokeOnCompletion { pendingScreenResolutionJobs.remove(activity, job) }
+    }
+
     private val applicationLifecycleObserver: Application.ActivityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         private var numStarted = 0
 
-        override fun onActivityCreated(p0: Activity, p1: Bundle?) {}
+        override fun onActivityCreated(activity: Activity, p1: Bundle?) {
+            // Fragments are where most modern apps' screens actually live — a single-Activity app
+            // would otherwise report one screen for its entire lifetime.
+            if (activity is FragmentActivity) {
+                activity.supportFragmentManager
+                    .registerFragmentLifecycleCallbacks(fragmentLifecycleObserver, true)
+            }
+        }
         override fun onActivityStarted(activity: Activity) {
             currentActivityReference = WeakReference(activity)
 
@@ -339,9 +470,11 @@ public class Grovs: ActivityProvider {
         }
         override fun onActivityResumed(activity: Activity) {
             currentActivityReference = WeakReference(activity)
+            scheduleScreenResolution(activity)
         }
         override fun onActivityPaused(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
+            pendingScreenResolutionJobs.remove(activity)?.cancel()
         }
         override fun onActivityStopped(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
@@ -355,13 +488,24 @@ public class Grovs: ActivityProvider {
         override fun onActivitySaveInstanceState(activity: Activity, p1: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
+            pendingScreenResolutionJobs.remove(activity)?.cancel()
         }
 
         private fun onAppForegrounded() {
             // App moved to the foreground
             DebugLogger.instance.log(LogLevel.INFO, "App is in the foreground")
 
+            val previousSession = grovsContext.sessionId
+            grovsContext.rotateSessionIfNeeded()
+            val sessionRotated = grovsContext.sessionId != previousSession
+
             GlobalScope.launch(grovsContext.serialDispatcher) {
+                // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
+                // than on the caller's thread. Must precede any screen tracking on this dispatcher.
+                if (sessionRotated) {
+                    grovsManager?.resetScreenDedup()
+                }
+
                 authenticationJob?.join()
                 grovsManager?.onAppForegrounded()
             }
@@ -370,15 +514,36 @@ public class Grovs: ActivityProvider {
         private fun onAppBackgrounded() {
             // App moved to the background
             DebugLogger.instance.log(LogLevel.INFO, "App is in the background")
+            grovsContext.markBackgrounded()
             grovsManager?.onAppBackgrounded()
         }
     }
 
     fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean, baseURL: String? = null) {
+        configure(
+            application = application,
+            apiKey = apiKey,
+            useTestEnvironment = useTestEnvironment,
+            baseURL = baseURL,
+            autoTrackScreenViews = true,
+        )
+    }
+
+    fun configure(
+        application: Application,
+        apiKey: String,
+        useTestEnvironment: Boolean,
+        baseURL: String?,
+        autoTrackScreenViews: Boolean,
+    ) {
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
         this.grovsContext.settings.baseURL = baseURL
+        this.grovsContext.settings.autoTrackScreenViews = autoTrackScreenViews
+
+        // Stop the previous manager's custom-events flush timer when configure() is called again.
+        grovsManager?.close()
 
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,
@@ -391,6 +556,9 @@ public class Grovs: ActivityProvider {
             activityProvider = this)
 
         checkConfiguration()
+        // registerActivityLifecycleCallbacks adds to a list, so registering on every configure()
+        // would duplicate lifecycle callbacks (and double-report screen views).
+        application.unregisterActivityLifecycleCallbacks(applicationLifecycleObserver)
         application.registerActivityLifecycleCallbacks(applicationLifecycleObserver)
     }
 
@@ -622,6 +790,41 @@ public class Grovs: ActivityProvider {
         }
     }
 
+    fun track(name: String, properties: Map<String, Any>? = null, tags: List<String>? = null) {
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            grovsManager?.track(name = name, properties = properties, tags = tags)
+        }
+    }
+
+    fun setGlobalTags(tags: List<String>? = null) {
+        // globalTags is confined to serialDispatcher and unsynchronized, so it must be written there.
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            grovsManager?.setGlobalTags(tags)
+        }
+    }
+
+    fun trackScreenView(screenName: String, properties: Map<String, Any>? = null) {
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            grovsManager?.trackScreenView(screenName = screenName, properties = properties)
+        }
+    }
+
+    fun trackNavigation(navController: NavController) {
+        // Explicit opt-in: routed through the manual trackScreenView path so it works even when
+        // lifecycle-based auto-tracking is disabled (the "use NavController instead" workflow).
+        NavigationScreenTracker.attach(navController) { screenName ->
+            trackScreenView(screenName = screenName, properties = null)
+        }
+    }
+
+    fun setScreenAliases(aliases: Map<String, String>) {
+        // ScreenTracker.aliases is confined to serialDispatcher; the backend sync needs authentication.
+        GlobalScope.launch(grovsContext.serialDispatcher) {
+            authenticationJob?.join()
+            grovsManager?.setScreenAliases(aliases)
+        }
+    }
+
     fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
         GlobalScope.launch(grovsContext.serialDispatcher) {
             authenticationJob?.join()
@@ -687,7 +890,15 @@ public class Grovs: ActivityProvider {
                 val previousAuthenticationJob = authenticationJob
                 authenticationJob = GlobalScope.launch(grovsContext.serialDispatcher) {
                     previousAuthenticationJob?.join()
-                    val response = manager.authenticate()
+                    val response = try {
+                        manager.authenticate()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // Nothing above this job catches, and an escaped exception would crash the host app.
+                        DebugLogger.instance.log(LogLevel.ERROR, "Authentication failed: ${e.message}")
+                        false
+                    }
                     if (response) {
                         manager.start()
                         notificationsManager?.displayAutomaticNotificationsIfNeeded()

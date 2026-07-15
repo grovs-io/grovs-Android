@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.DeadObjectException
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
+import io.grovs.model.CustomEventRules
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
@@ -46,14 +47,15 @@ import kotlin.coroutines.resumeWithException
  * @param eventsManager Optional custom events manager for testing (defaults to real manager)
  * @param appDetailsHelper Optional custom app details helper for testing (defaults to real helper)
  */
-class GrovsManager(
+internal class GrovsManager(
     val context: Context,
     val application: Application,
     val grovsContext: GrovsContext,
     apiKey: String,
     grovsService: IGrovsService? = null,
     eventsManager: IEventsManager? = null,
-    appDetailsHelper: IAppDetailsHelper? = null
+    appDetailsHelper: IAppDetailsHelper? = null,
+    customEventsManager: ICustomEventsManager? = null,
 ) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
@@ -67,12 +69,16 @@ class GrovsManager(
     private val grovsService: IGrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
     private val appDetails: IAppDetailsHelper = appDetailsHelper ?: grovsContext.getAppDetails(context = context)
     private val eventsManager: IEventsManager = eventsManager ?: EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    private val customEventsManager: ICustomEventsManager = customEventsManager
+        ?: CustomEventsManager(context = context, grovsContext = grovsContext, grovsService = this.grovsService)
     private val appDetailsHelperForIntent: IAppDetailsHelper = appDetailsHelper ?: AppDetailsHelper(context)
+    private val screenTracker: ScreenTracker = ScreenTracker(customEventsManager = this.customEventsManager)
 
     private var lastIntentHandledReference: WeakReference<Intent>? = null
     private var handledIntentTokens: MutableList<Int> = mutableListOf()
     /// Stores if attributes needs to be updated after auth
     private var shouldUpdateAttributes = false
+    private var isClosed = false
 
     /// A flag indicating whether the user is authenticated with the Grovs backend.
     var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
@@ -131,6 +137,7 @@ class GrovsManager(
 
     private suspend fun getDataForDevice(link: String? = null, delayEvents: Boolean): DeeplinkDetails? {
         eventsManager.setLinkToNewFutureActions(link, delayEvents = delayEvents)
+        customEventsManager.setLinkForFutureEvents(link)
 
         val appDetails = appDetailsHelperForIntent.toAppDetails()
         appDetails.url = link
@@ -138,6 +145,7 @@ class GrovsManager(
         when (result) {
             is LSResult.Success -> {
                 eventsManager.setLinkToNewFutureActions(result.data.link, delayEvents = delayEvents)
+                customEventsManager.setLinkForFutureEvents(result.data.link)
                 // if link and data are null we consider we have no deeplink
                 if ((result.data.data == null) && (result.data.link == null)) {
                     return null
@@ -256,6 +264,12 @@ class GrovsManager(
         // Implementation for starting the GrovsManager, if needed.
     }
 
+    internal fun close() {
+        if (isClosed) return
+        isClosed = true
+        customEventsManager.close()
+    }
+
     suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): DeeplinkDetails? {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
@@ -303,6 +317,46 @@ class GrovsManager(
 
     suspend fun logInAppPurchase(originalJson: String) {
         eventsManager.logInAppPurchase(originalJson = originalJson)
+    }
+
+    suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?) {
+        if (!CustomEventRules.isValidName(name)) {
+            DebugLogger.instance.log(
+                LogLevel.ERROR,
+                "Cannot track \"$name\": the name is blank or reserved by the SDK. " +
+                    "Reserved names: ${CustomEventRules.RESERVED_NAMES.joinToString()}"
+            )
+            return
+        }
+        customEventsManager.track(name = name, properties = properties, tags = tags)
+    }
+
+    suspend fun trackScreenView(screenName: String, properties: Map<String, Any>?) {
+        screenTracker.trackScreen(rawName = screenName, properties = properties)
+    }
+
+    /** Applies aliases to future screen views and syncs them to the backend. Call after authentication. */
+    suspend fun setScreenAliases(aliases: Map<String, String>) {
+        screenTracker.setAliases(aliases)
+        grovsService.syncScreenAliases(aliases)
+    }
+
+    /** Called from the Activity/Fragment lifecycle hooks. No-op when auto-tracking is disabled. */
+    suspend fun autoTrackScreen(screenName: String) {
+        if (!grovsContext.settings.autoTrackScreenViews) return
+        screenTracker.trackScreen(rawName = screenName, properties = null)
+    }
+
+    fun resetScreenDedup() {
+        screenTracker.resetDedup()
+    }
+
+    fun setGlobalTags(tags: List<String>?) {
+        customEventsManager.setGlobalTags(tags)
+    }
+
+    suspend fun flushCustomEvents() {
+        customEventsManager.flush()
     }
 
     suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {

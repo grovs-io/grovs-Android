@@ -12,6 +12,7 @@ import io.grovs.api.GrovsApi
 import io.grovs.handlers.GrovsContext
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.CustomEvent
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
@@ -20,6 +21,8 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
+import io.grovs.model.exceptions.GrovsErrorCode
+import io.grovs.model.exceptions.GrovsException
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.notifications.NotificationsResponse
@@ -566,6 +569,29 @@ class TestableGrovsService(
         }
     }
 
+    override suspend fun addCustomEvent(event: CustomEvent): LSResult<Boolean> {
+        return try {
+            val response = testApi.addCustomEvent(event)
+            if (response.isSuccessful) {
+                LSResult.Success(true)
+            } else {
+                val code = response.code()
+                if (code in 400..499 && code != 429) {
+                    LSResult.Error(
+                        GrovsException(
+                            "Server rejected the event ($code).",
+                            GrovsErrorCode.EVENT_DISPATCH_ERROR
+                        )
+                    )
+                } else {
+                    LSResult.Error(java.io.IOException("Failed to log the custom event ($code)."))
+                }
+            }
+        } catch (e: Exception) {
+            LSResult.Error(e)
+        }
+    }
+
     override suspend fun addPaymentEvent(event: io.grovs.model.events.PaymentEvent): LSResult<Boolean> {
         return try {
             val response = testApi.addPaymentEvent(event)
@@ -623,6 +649,26 @@ class TestableGrovsService(
                 return LSResult.Success(true)
             }
             LSResult.Error(java.io.IOException("Failed to mark as read"))
+        } catch (e: Exception) {
+            LSResult.Error(e)
+        }
+    }
+
+    override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
+        if (aliases.isEmpty()) return LSResult.Success(true)
+
+        return try {
+            val request = io.grovs.model.ScreenAliasesRequest(
+                screenAliases = aliases.map {
+                    io.grovs.model.ScreenAlias(identifier = it.key, alias = it.value)
+                }
+            )
+            val response = testApi.syncScreenAliases(request)
+            if (response.isSuccessful) {
+                LSResult.Success(true)
+            } else {
+                LSResult.Error(java.io.IOException("Failed to sync screen aliases (${response.code()})."))
+            }
         } catch (e: Exception) {
             LSResult.Error(e)
         }

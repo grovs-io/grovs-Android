@@ -1,8 +1,10 @@
 package io.grovs.api
 
 import android.os.Parcelable
+import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
 import io.grovs.model.GenerateLinkRequest
@@ -42,6 +44,9 @@ interface GrovsApi {
     @POST("event")
     suspend fun addEvent(@Body request: Event): Response<Unit>
 
+    @POST("event/custom")
+    suspend fun addCustomEvent(@Body request: CustomEvent): Response<Unit>
+
     @POST("add_payment_event")
     suspend fun addPaymentEvent(@Body request: PaymentEvent): Response<Unit>
 
@@ -62,4 +67,7 @@ interface GrovsApi {
 
     @GET("notifications_to_display_automatically")
     suspend fun notificationsToDisplayAutomatically(): Response<NotificationsResponse>
+
+    @POST("screen_aliases")
+    suspend fun syncScreenAliases(@Body request: ScreenAliasesRequest): Response<Unit>
 }

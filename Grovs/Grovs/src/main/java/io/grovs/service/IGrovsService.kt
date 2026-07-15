@@ -2,6 +2,7 @@ package io.grovs.service
 
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
@@ -81,6 +82,15 @@ interface IGrovsService {
     suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean>
 
     /**
+     * Add a custom (consumer-tracked) event.
+     *
+     * Returns LSResult.Error carrying a GrovsException with EVENT_DISPATCH_ERROR when the server
+     * rejects the event outright (4xx) — the caller must DROP such events rather than retry.
+     * Any other error means the event should be kept and retried.
+     */
+    suspend fun addCustomEvent(event: CustomEvent): LSResult<Boolean>
+
+    /**
      * Get notifications.
      */
     suspend fun notifications(page: Int): LSResult<NotificationsResponse>
@@ -99,4 +109,9 @@ interface IGrovsService {
      * Mark notification as read.
      */
     suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean>
+
+    /**
+     * Syncs the class-name → friendly-name mapping used for screen-view reporting.
+     */
+    suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean>
 }

@@ -74,7 +74,7 @@ object TestAssertions {
     /**
      * Assert GrovsManager is in AUTHENTICATED state.
      */
-    fun assertAuthenticated(manager: io.grovs.handlers.GrovsManager, context: String) {
+    internal fun assertAuthenticated(manager: io.grovs.handlers.GrovsManager, context: String) {
         val actual = manager.authenticationState
         assertEquals(
             "Expected authenticationState to be AUTHENTICATED $context, but was $actual",
@@ -86,7 +86,7 @@ object TestAssertions {
     /**
      * Assert GrovsManager is in UNAUTHENTICATED state.
      */
-    fun assertUnauthenticated(manager: io.grovs.handlers.GrovsManager, context: String) {
+    internal fun assertUnauthenticated(manager: io.grovs.handlers.GrovsManager, context: String) {
         val actual = manager.authenticationState
         assertEquals(
             "Expected authenticationState to be UNAUTHENTICATED $context, but was $actual",

@@ -104,6 +104,7 @@ class GrovsManagerTest {
 
     @After
     fun tearDown() {
+        grovsManager.close()
         unmockkAll()
     }
 
@@ -171,6 +172,60 @@ class GrovsManagerTest {
         grovsManager.onAppBackgrounded()
 
         verify { mockEventsManager.onAppBackgrounded() }
+    }
+
+    private fun managerWithCustomEvents(customEventsManager: ICustomEventsManager) = GrovsManager(
+        context = context,
+        application = application,
+        grovsContext = grovsContext,
+        apiKey = testApiKey,
+        grovsService = mockGrovsService,
+        eventsManager = mockEventsManager,
+        appDetailsHelper = mockAppDetailsHelper,
+        customEventsManager = customEventsManager,
+    )
+
+    @Test
+    fun `close disposes the custom events manager exactly once`() {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+
+        manager.close()
+        manager.close()
+
+        verify(exactly = 1) { customEventsManager.close() }
+    }
+
+    @Test
+    fun `track rejects reserved and blank names before reaching the events manager`() = runTest {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+
+        manager.track("app_open", null, null)
+        manager.track("   ", null, null)
+
+        coVerify(exactly = 0) { customEventsManager.track(any(), any(), any()) }
+        manager.close()
+    }
+
+    @Test
+    fun `track forwards valid names to the events manager`() = runTest {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+
+        manager.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"))
+
+        coVerify(exactly = 1) {
+            customEventsManager.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"))
+        }
+        manager.close()
+    }
+
+    @Test
+    fun `setScreenAliases applies aliases and syncs them to the backend`() = runTest {
+        grovsManager.setScreenAliases(mapOf("MainActivity" to "Home"))
+
+        coVerify(exactly = 1) { mockGrovsService.syncScreenAliases(mapOf("MainActivity" to "Home")) }
     }
 
     // ==================== Generate Link Tests ====================

@@ -53,7 +53,7 @@ Add the Grovs dependency to your app-level `build.gradle`:
 
 ```groovy
 dependencies {
-    implementation("io.grovs:Grovs:1.1.1")
+    implementation("io.grovs:Grovs:1.2.0")
 }
 ```
 
@@ -174,6 +174,64 @@ Grovs.linkDetails(path = "/my-link-path", lifecycleOwner = this) { details, erro
 
 // Using coroutines
 val details = Grovs.linkDetails(path = "/my-link-path")
+```
+
+## Tracking events
+
+### Custom events
+
+Track custom analytics events with optional properties and tags:
+
+```kotlin
+Grovs.track("checkout_completed", properties = mapOf("sku" to "abc", "total" to 42.0), tags = listOf("shop"))
+```
+
+Event names must not be blank, and cannot be one of the SDK's reserved names: `view`, `open`, `install`, `reinstall`, `app_open`, `time_spent`, `reactivation`, `user_referred`, `custom`, `screen_view`. Rejected events are logged and dropped.
+
+Properties are sanitized before sending: `NaN` and `Infinity` values are dropped, `Date`, `URL` and `UUID` are coerced to strings, and the whole map is dropped if it serializes to more than 8KB. Tags are capped at 20 per event, 255 characters each.
+
+### Global tags
+
+```kotlin
+Grovs.setGlobalTags(listOf("android", "production"))
+```
+
+Merged onto every subsequently tracked event, up to the combined 20-tag cap.
+
+### Screen views
+
+Screen views are tracked **automatically** for Activities and Fragments. When an Activity hosts Fragments, only the **Fragment is reported** (the host Activity's screen view is suppressed) — this matches iOS, which filters out container view controllers. Compose destinations are NOT auto-tracked (the SDK has no Compose dependency) — track those manually.
+
+To disable automatic screen tracking:
+
+```kotlin
+Grovs.configure(this, "your-api-key", useTestEnvironment = false, autoTrackScreenViews = false)
+```
+
+> **Upgrading from 1.1.x:** auto screen tracking is **on by default** in 1.2.0. Apps that upgrade will start emitting `screen_view` events without any code change. Pass `autoTrackScreenViews = false` to `configure()` to keep the previous behavior.
+
+Track a screen manually — needed for Compose destinations, which the SDK cannot observe:
+
+```kotlin
+Grovs.trackScreenView("Checkout", properties = mapOf("step" to 2))
+```
+
+#### Jetpack Navigation
+
+For apps using Jetpack Navigation (Navigation-Compose or route-based graphs), hand the SDK your `NavController` and every destination change is tracked automatically — including bottom-navigation tabs, navigation rails, and Compose destinations that the lifecycle-based tracker cannot see:
+
+```kotlin
+Grovs.trackNavigation(navController)
+```
+
+The screen name is derived from the destination's route, then its `android:label`, then its display name. Call it once per `NavController` (e.g. right after you set the graph); repeat calls on the same controller are ignored, and the SDK holds only a weak reference so it won't leak the hosting Activity/Fragment.
+
+> With **Fragment-based** navigation this can overlap the automatic tracker and emit duplicate screen views under different names. In that case either disable automatic tracking (`autoTrackScreenViews = false`) and rely on `trackNavigation`, or use `trackNavigation` only for Compose/route-based graphs.
+
+Give screens friendly names in the dashboard:
+
+```kotlin
+Grovs.setScreenAliases(mapOf("MainActivity" to "Home", "CartFragment" to "Shopping Cart"))
 ```
 
 ## Link Generation

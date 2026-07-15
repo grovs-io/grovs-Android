@@ -10,7 +10,9 @@ import io.grovs.fragments.NotificationsMainFragment
 import io.grovs.model.notifications.Notification
 import io.grovs.service.GrovsService
 import io.grovs.utils.LSResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 interface ActivityProvider {
     fun requireActivity(): Activity?
@@ -24,13 +26,15 @@ class NotificationsManager(val context: Context, val grovsContext: GrovsContext,
         val activity = activityProvider.requireActivity() as? FragmentActivity
         activity?.lifecycleScope?.launch {
             val result = grovsService.notificationsToDisplayAutomatically()
-            when (result) {
-                is LSResult.Success -> {
+            if (result is LSResult.Success) {
+                withContext(Dispatchers.Main.immediate) {
                     for (notification in result.data.notifications ?: emptyList()) {
-                        displayAutomaticNotificationFor(notification = notification)
+                        displayAutomaticNotificationFor(
+                            notification = notification,
+                            activity = activity,
+                        )
                     }
                 }
-                is LSResult.Error -> {}
             }
         }
 
@@ -91,19 +95,19 @@ class NotificationsManager(val context: Context, val grovsContext: GrovsContext,
         }
     }
 
-    private fun displayAutomaticNotificationFor(notification: Notification) {
-        val activity = activityProvider.requireActivity() as? FragmentActivity
-        activity?.let { activity ->
-            val alreadyShownFragment = activity.supportFragmentManager.findFragmentByTag(notification.id.toString())
-            if (alreadyShownFragment == null) {
-                val dialogFragment = AutoDisplayedNotificationFragment.newInstance(notification = notification, grovsService = grovsService)
-                dialogFragment.onDialogDismissed = {
-                    val count = activity.supportFragmentManager.fragments.filterIsInstance<AutoDisplayedNotificationFragment>().count { it.isVisible }
-                    activityProvider.requireNotificationsListener()?.onAutomaticNotificationClosed(count == 0)
-                }
-                dialogFragment.show(activity.supportFragmentManager, notification.id.toString())
-                activity.supportFragmentManager.executePendingTransactions()
+    private fun displayAutomaticNotificationFor(
+        notification: Notification,
+        activity: FragmentActivity,
+    ) {
+        val alreadyShownFragment = activity.supportFragmentManager.findFragmentByTag(notification.id.toString())
+        if (alreadyShownFragment == null) {
+            val dialogFragment = AutoDisplayedNotificationFragment.newInstance(notification = notification, grovsService = grovsService)
+            dialogFragment.onDialogDismissed = {
+                val count = activity.supportFragmentManager.fragments.filterIsInstance<AutoDisplayedNotificationFragment>().count { it.isVisible }
+                activityProvider.requireNotificationsListener()?.onAutomaticNotificationClosed(count == 0)
             }
+            dialogFragment.show(activity.supportFragmentManager, notification.id.toString())
+            activity.supportFragmentManager.executePendingTransactions()
         }
     }
 

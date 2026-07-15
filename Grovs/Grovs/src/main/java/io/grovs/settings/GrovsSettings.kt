@@ -13,4 +13,8 @@ class GrovsSettings {
     var sdkEnabled: Boolean = true
     var baseURL: String? = null
 
+    /// Emit screen_view events automatically on Activity and Fragment resume.
+    /// Defaults to true, matching the iOS SDK.
+    var autoTrackScreenViews: Boolean = true
+
 }

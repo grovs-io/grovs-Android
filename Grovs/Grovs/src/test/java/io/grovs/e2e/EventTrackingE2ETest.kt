@@ -221,10 +221,7 @@ class EventTrackingE2ETest {
 
     private fun getLinkForFutureActions(): String? {
         return try {
-            val instance = E2ETestUtils.getGrovsInstance()
-            val managerField = instance!!.javaClass.getDeclaredField("grovsManager")
-            managerField.isAccessible = true
-            val manager = managerField.get(instance)
+            val manager = E2ETestUtils.getGrovsManager()
             val eventsManagerField = manager!!.javaClass.getDeclaredField("eventsManager")
             eventsManagerField.isAccessible = true
             val eventsManager = eventsManagerField.get(manager)

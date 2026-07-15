@@ -339,14 +339,10 @@ class SdkLifecycleE2ETest {
             val requestCountAfterAuth = mockWebServer.requestCount
 
             // Act - disable SDK via settings (using reflection)
-            val instance = E2ETestUtils.getGrovsInstance()
-            assertNotNull("Grovs instance should exist", instance)
-            val managerField = instance!!.javaClass.getDeclaredField("grovsManager")
-            managerField.isAccessible = true
-            val grovsManager = managerField.get(instance)
+            val grovsManager = E2ETestUtils.getGrovsManager()
             assertNotNull("GrovsManager should exist", grovsManager)
 
-            val contextField = grovsManager.javaClass.getDeclaredField("grovsContext")
+            val contextField = grovsManager!!.javaClass.getDeclaredField("grovsContext")
             contextField.isAccessible = true
             val grovsContext = contextField.get(grovsManager)
             assertNotNull("GrovsContext should exist", grovsContext)

@@ -28,7 +28,7 @@ private val libraryArtifactId = if (project.hasProperty("artifactId")) {
 private val libraryVersion = if (project.hasProperty("libraryVersion")) {
     project.property("libraryVersion").toString()
 } else {
-    "1.1.1"
+    "1.2.0"
 }
 val NETWORK_LOGGING_VALUE = if (project.hasProperty("networkLogging")) {
     project.property("networkLogging").toString()
@@ -350,6 +350,7 @@ dependencies {
     implementation(libs.installreferrer)
     implementation(libs.androidx.navigation.fragment.ktx)
     implementation(libs.androidx.navigation.ui.ktx)
+    implementation(libs.androidx.fragment.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.junit.jupiter.api)

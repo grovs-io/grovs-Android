@@ -50,22 +50,23 @@ class EventsManager(
         sendNormalEventsToBackend()
         sendPaymentEventsToBackend()
         sendTimeSpentEventsToBackend()
-        eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions)
+        eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
     }
 
     override fun onAppBackgrounded() {
         localCache.resignTimestamp = InstantCompat.now()
         linkForFutureActions = null
 
+        val sessionId = grovsContext.sessionId
         GlobalScope.launch {
-            eventsStorage.markTimeSpentNode(startingNode = false, endingNode = true, link = null)
+            eventsStorage.markTimeSpentNode(startingNode = false, endingNode = true, link = null, sessionId = sessionId)
         }
     }
 
     override suspend fun logAppLaunchEvents() {
         addInitialEvents()
         addOpenEvent()
-        eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions)
+        eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
     }
 
     /// Logs an event and sends it to the backend.
@@ -117,7 +118,7 @@ class EventsManager(
         allowedToSendToBackend = !delayEvents
         link?.let {
             addLinkToEvents(link)
-            eventsStorage.markTimeSpentNode(startingNode = false, link = link)
+            eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
         } ?: kotlin.run {
             sendNormalEventsToBackend()
             sendPaymentEventsToBackend()
@@ -149,10 +150,10 @@ class EventsManager(
         val numberOfOpens = localCache.numberOfOpens
         if (numberOfOpens == 0) {
             grovsContext.lastSeen?.let {
-                val event = Event(event = EventType.REINSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions)
+                val event = Event(event = EventType.REINSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions, sessionId = grovsContext.sessionId)
                 eventsStorage.addEvent(event)
             } ?: run {
-                val event = Event(event = EventType.INSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions)
+                val event = Event(event = EventType.INSTALL, createdAt = InstantCompat.now(), link = linkForFutureActions, sessionId = grovsContext.sessionId)
                 eventsStorage.addEvent(event)
             }
         }
@@ -166,7 +167,7 @@ class EventsManager(
             val daysBetween = duration.toDays()
 
             if (daysBetween >= NUMBER_OF_DAYS_FOR_REACTIVATION) {
-                val event = Event(EventType.REACTIVATION, InstantCompat.now(), link = linkForFutureActions)
+                val event = Event(EventType.REACTIVATION, InstantCompat.now(), link = linkForFutureActions, sessionId = grovsContext.sessionId)
                 eventsStorage.addEvent(event)
             }
         }
@@ -176,7 +177,7 @@ class EventsManager(
 
     /// Logs an app open event.
     private suspend fun addOpenEvent() {
-        val event = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now(), link = linkForFutureActions)
+        val event = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now(), link = linkForFutureActions, sessionId = grovsContext.sessionId)
         eventsStorage.addEvent(event)
     }
 

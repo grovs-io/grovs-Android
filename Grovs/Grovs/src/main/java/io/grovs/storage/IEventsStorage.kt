@@ -32,8 +32,9 @@ interface IEventsStorage {
      * @param startingNode Whether this is a starting node
      * @param endingNode Whether this is an ending node
      * @param link The link associated with this time spent node
+     * @param sessionId The session to stamp the new TIME_SPENT event with
      */
-    suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean = false, link: String?)
+    suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean = false, link: String?, sessionId: String? = null)
     
     /**
      * Removes an event from the storage.

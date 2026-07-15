@@ -3,8 +3,11 @@ package io.grovs.e2e
 import android.app.Application
 import android.os.Looper
 import android.provider.Settings
+import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentManager
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
+import io.grovs.handlers.GrovsManager
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -14,6 +17,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -35,9 +39,7 @@ import java.util.logging.Logger
  */
 object E2ETestUtils {
 
-    // Replace default JUL formatter on OkHttp loggers to suppress redundant
-    // "Jan 28, 2026 4:07:35 PM okhttp3.internal.platform.Platform log" header lines.
-    // Keeps the actual HTTP log content visible.
+    // Strip the default JUL header line from OkHttp loggers; keeps only the log message.
     private val okhttpLoggers = listOf(
         Logger.getLogger("okhttp3.internal.platform.Platform"),
         Logger.getLogger("okhttp3.OkHttpClient"),
@@ -53,11 +55,8 @@ object E2ETestUtils {
 
     // ==================== MockWebServer Management ====================
 
-    // Servers kept alive after tests so lingering GlobalScope coroutines
-    // (from onAppBackgrounded/onAppForegrounded) can complete their HTTP requests
-    // against a live server instead of hitting ConnectException + 10s OkHttp timeout
-    // + 5s retry delay. These are never explicitly shut down — the JVM process exit
-    // cleans them up. Keeping ~30 ephemeral ports alive is fine for a test suite.
+    // Kept alive (never shut down) so lingering GlobalScope coroutines from the previous
+    // test can still complete their HTTP requests instead of hitting a connect timeout.
     private val drainedServers = mutableListOf<MockWebServer>()
 
     /**
@@ -71,9 +70,8 @@ object E2ETestUtils {
     }
 
     /**
-     * Sets up test application with mock Android ID and clears SDK SharedPreferences
-     * to prevent stale data from lingering GlobalScope.launch coroutines (e.g.,
-     * markTimeSpentNode from onAppBackgrounded) contaminating the next test.
+     * Sets up test application with a mock Android ID and clears SDK SharedPreferences
+     * so state from a previous test's lingering coroutines can't leak in.
      */
     fun setupTestApplication(application: Application) {
         Settings.Secure.putString(
@@ -89,14 +87,10 @@ object E2ETestUtils {
     }
 
     /**
-     * Cleans up MockWebServer and test state.
-     * Instead of shutting down immediately, installs a permissive drain dispatcher
-     * that returns 200 OK for all requests. This lets lingering GlobalScope coroutines
-     * (e.g., sendTimeSpentEventsToBackend retry loops from the previous test) complete
-     * their HTTP calls instantly rather than hitting ConnectException → 10s OkHttp
-     * connect timeout → 5s delay per event. The server is shut down in the next
-     * test's createMockWebServer() call.
-     * Call this in @After methods.
+     * Cleans up MockWebServer state. Rather than shutting down immediately, installs a
+     * catch-all 200 OK dispatcher so lingering GlobalScope coroutines from this test can
+     * finish fast instead of hitting a connect timeout; the server itself is never
+     * explicitly closed. Call this in @After methods.
      */
     fun cleanupMockWebServer(server: MockWebServer) {
         try {
@@ -147,6 +141,46 @@ object E2ETestUtils {
                 .setHeader("Content-Type", "application/json")
                 .setBody(response)
         )
+    }
+
+    /**
+     * Enqueues a successful /authenticate response so configure() completes.
+     *
+     * Serves the response from within the dispatcher (matched by path) rather than via
+     * server.enqueue(...): setting server.dispatcher replaces MockWebServer's default
+     * QueueDispatcher outright, so a plain enqueue() would sit in a queue nothing drains.
+     */
+    fun enqueueAuthenticationSuccess(server: MockWebServer) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.path ?: ""
+                if (path.contains("authenticate")) {
+                    return MockResponse()
+                        .setResponseCode(200)
+                        .setHeader("Content-Type", "application/json")
+                        .setBody("""{"linksquared":"grovs_123","uri_scheme":"testscheme"}""")
+                }
+                // Every other endpoint answers 200 {} unless a test overrides it.
+                return MockResponse().setResponseCode(200).setBody("{}")
+            }
+        }
+    }
+
+    /**
+     * Drains the MockWebServer queue looking for a request to [path].
+     * Returns null if none arrives within the timeout — used to assert a request was NOT made.
+     */
+    fun awaitRequestFor(
+        server: MockWebServer,
+        path: String,
+        timeoutMs: Long = 2000,
+    ): RecordedRequest? {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            val request = server.takeRequest(200, TimeUnit.MILLISECONDS) ?: continue
+            if (request.path == path) return request
+        }
+        return null
     }
 
     fun enqueueEventResponse(server: MockWebServer) {
@@ -365,6 +399,20 @@ object E2ETestUtils {
 
     // ==================== Singleton/State Management ====================
 
+    /** Reads a private field of the Grovs singleton via reflection. */
+    private fun grovsField(name: String): Any? {
+        return try {
+            val instance = getGrovsInstance() ?: return null
+            Grovs::class.java.getDeclaredField(name).run {
+                isAccessible = true
+                get(instance)
+            }
+        } catch (e: Exception) {
+            println("Could not read Grovs field '$name': ${e.message}")
+            null
+        }
+    }
+
     /**
      * Reset Grovs singleton state via reflection.
      * This allows each test to start with a fresh SDK state.
@@ -379,37 +427,46 @@ object E2ETestUtils {
             val instance = instanceField.get(null)
                 ?: throw IllegalStateException("Grovs instance is null")
 
-            // Unregister lifecycle callbacks and reset numStarted to prevent
-            // accumulation across tests. Each configure() call registers the same
-            // observer object; without unregistering ALL copies, subsequent tests
-            // get duplicate onActivityStarted/onActivityStopped callbacks. This
-            // inflates numStarted so it never reaches 0, preventing
-            // onAppBackgrounded/onAppForegrounded from firing.
+            // Stop the previous manager's custom-events flush timer and authentication.
             try {
-                val appField = grovsClass.getDeclaredField("application")
-                appField.isAccessible = true
-                val app = appField.get(instance) as? android.app.Application
+                (grovsField("grovsManager") as? GrovsManager)?.close()
+            } catch (e: Exception) {
+                errors.add("Failed to close GrovsManager: ${e.message}")
+            }
+            try {
+                (grovsField("authenticationJob") as? Job)?.cancel()
+            } catch (e: Exception) {
+                errors.add("Failed to cancel authenticationJob: ${e.message}")
+            }
+            try {
+                val pendingJobs = grovsField("pendingScreenResolutionJobs") as? MutableMap<*, *>
+                pendingJobs?.values?.forEach { (it as? Job)?.cancel() }
+                pendingJobs?.clear()
+            } catch (e: Exception) {
+                errors.add("Failed to clear pending screen resolutions: ${e.message}")
+            }
 
-                val observerField = grovsClass.getDeclaredField("applicationLifecycleObserver")
-                observerField.isAccessible = true
-                val observer = observerField.get(instance) as? android.app.Application.ActivityLifecycleCallbacks
+            val registeredApplication = grovsField("application") as? android.app.Application
+            val lifecycleObserver =
+                grovsField("applicationLifecycleObserver") as? android.app.Application.ActivityLifecycleCallbacks
 
-                if (app != null && observer != null) {
-                    // Unregister multiple times to remove all accumulated registrations.
-                    // registerActivityLifecycleCallbacks adds to a list (not a set), so
-                    // N configure() calls = N registrations. Each unregister removes one.
+            // Each configure() call registers the same observer object; leaving old
+            // registrations in place duplicates lifecycle callbacks across tests and
+            // inflates numStarted so it never reaches 0, so both must be reset here.
+            try {
+                if (registeredApplication != null && lifecycleObserver != null) {
+                    // registerActivityLifecycleCallbacks adds to a list, not a set, so
+                    // N configure() calls need N unregisters to remove all copies.
                     repeat(10) {
-                        app.unregisterActivityLifecycleCallbacks(observer)
+                        registeredApplication.unregisterActivityLifecycleCallbacks(lifecycleObserver)
                     }
                 }
 
-                // Reset numStarted to 0 so the next test's first onActivityStarted
-                // correctly detects numStarted==0 → foreground transition.
-                if (observer != null) {
+                if (lifecycleObserver != null) {
                     try {
-                        val numStartedField = observer.javaClass.getDeclaredField("numStarted")
+                        val numStartedField = lifecycleObserver.javaClass.getDeclaredField("numStarted")
                         numStartedField.isAccessible = true
-                        numStartedField.setInt(observer, 0)
+                        numStartedField.setInt(lifecycleObserver, 0)
                     } catch (e: Exception) {
                         errors.add("Failed to reset numStarted: ${e.message}")
                     }
@@ -424,9 +481,9 @@ object E2ETestUtils {
                 "notificationsManager",
                 "apiKey",
                 "application",
+                "authenticationJob",
                 "deeplinkListener",
                 "grovsNotificationsListener",
-                "authenticationJob",
                 "launcherActivityReference",
                 "currentActivityReference"
             ).forEach { fieldName ->
@@ -441,7 +498,7 @@ object E2ETestUtils {
                 }
             }
 
-            // Reset grovsContext to fresh instance
+            // Reset grovsContext to a fresh instance so settings/session state don't leak.
             try {
                 val contextField = grovsClass.getDeclaredField("grovsContext")
                 contextField.isAccessible = true
@@ -461,6 +518,38 @@ object E2ETestUtils {
             System.err.println("WARNING: E2E singleton reset incomplete (${errors.size} issues):")
             errors.forEach { System.err.println("  - $it") }
         }
+    }
+
+    /**
+     * Flushes pending custom events deterministically. Runs the flush on the SDK's serial
+     * dispatcher so it is ordered after any previously enqueued work (track() etc.), after the
+     * authentication job has finished.
+     */
+    fun flushCustomEvents() {
+        val manager = getGrovsManager() as? GrovsManager ?: return
+        val grovsContext = grovsField("grovsContext") as? GrovsContext ?: return
+        runBlocking {
+            getAuthenticationJob()?.join()
+            withContext(grovsContext.serialDispatcher) {
+                manager.flushCustomEvents()
+            }
+        }
+    }
+
+    /**
+     * Invokes the SDK's internal lifecycle observers directly, for tests that need to control
+     * callback ordering (Robolectric dispatches it differently from a real device).
+     */
+    fun dispatchActivityResumed(activity: android.app.Activity) {
+        val observer = grovsField("applicationLifecycleObserver")
+            as? android.app.Application.ActivityLifecycleCallbacks ?: return
+        observer.onActivityResumed(activity)
+    }
+
+    fun dispatchFragmentResumed(fm: FragmentManager, fragment: Fragment) {
+        val observer = grovsField("fragmentLifecycleObserver")
+            as? FragmentManager.FragmentLifecycleCallbacks ?: return
+        observer.onFragmentResumed(fm, fragment)
     }
 
     /**
@@ -532,20 +621,13 @@ object E2ETestUtils {
      * Get the authenticationJob from Grovs singleton via reflection.
      */
     fun getAuthenticationJob(): Job? {
-        return try {
-            val grovsClass = Grovs::class.java
-            val instanceField = grovsClass.getDeclaredField("instance")
-            instanceField.isAccessible = true
-            val instance = instanceField.get(null)
-
-            val jobField = grovsClass.getDeclaredField("authenticationJob")
-            jobField.isAccessible = true
-            jobField.get(instance) as? Job
-        } catch (e: Exception) {
-            println("Could not get authenticationJob: ${e.message}")
-            null
-        }
+        return grovsField("authenticationJob") as? Job
     }
+
+    /**
+     * Get the current GrovsManager from the Grovs singleton via reflection.
+     */
+    fun getGrovsManager(): Any? = grovsField("grovsManager")
 
     /**
      * Get the Grovs singleton instance via reflection.
@@ -579,20 +661,7 @@ object E2ETestUtils {
      * Get authentication state from GrovsManager.
      */
     fun getAuthenticationState(): String? {
-        return try {
-            val instance = getGrovsInstance() ?: return null
-
-            val managerField = instance.javaClass.getDeclaredField("grovsManager")
-            managerField.isAccessible = true
-            val manager = managerField.get(instance) ?: return null
-
-            val stateField = manager.javaClass.getDeclaredField("authenticationState")
-            stateField.isAccessible = true
-            stateField.get(manager)?.toString()
-        } catch (e: Exception) {
-            println("Could not get auth state: ${e.message}")
-            null
-        }
+        return (getGrovsManager() as? GrovsManager)?.authenticationState?.toString()
     }
 
     /**
@@ -613,44 +682,14 @@ object E2ETestUtils {
     }
 
     fun getGrovsId(): String? {
-        return try {
-            val instance = getGrovsInstance() ?: return null
-
-            val contextField = instance.javaClass.getDeclaredField("grovsContext")
-            contextField.isAccessible = true
-            val context = contextField.get(instance)
-
-            val grovsIdField = context.javaClass.getDeclaredField("grovsId")
-            grovsIdField.isAccessible = true
-            grovsIdField.get(context) as? String
-        } catch (e: Exception) {
-            println("Could not get grovsId: ${e.message}")
-            null
-        }
+        return (grovsField("grovsContext") as? GrovsContext)?.grovsId
     }
 
     /**
      * Check if SDK is enabled.
      */
     fun isSdkEnabled(): Boolean {
-        return try {
-            val instance = getGrovsInstance() ?: return true
-
-            val contextField = instance.javaClass.getDeclaredField("grovsContext")
-            contextField.isAccessible = true
-            val context = contextField.get(instance)
-
-            val settingsField = context.javaClass.getDeclaredField("settings")
-            settingsField.isAccessible = true
-            val settings = settingsField.get(context)
-
-            val enabledField = settings.javaClass.getDeclaredField("sdkEnabled")
-            enabledField.isAccessible = true
-            enabledField.get(settings) as? Boolean ?: true
-        } catch (e: Exception) {
-            println("Could not get SDK enabled state: ${e.message}")
-            true
-        }
+        return (grovsField("grovsContext") as? GrovsContext)?.settings?.sdkEnabled ?: true
     }
 
     // ==================== Request Helpers ====================
@@ -1064,21 +1103,15 @@ object E2ETestUtils {
      *   Unmatched requests get a 200 OK with empty JSON body.
      */
     /**
-     * Enable immediate event sending by setting allowedToSendToBackend = true on the EventsManager
-     * and backdating firstRequestTime to 20 seconds ago. This bypasses the 15-second leeway delay
-     * that normally prevents events from being sent immediately.
-     *
-     * The backdating is necessary because checkEventsSendingAllowed() recalculates
-     * allowedToSendToBackend based on (now - firstRequestTime) > 14 seconds, which would
-     * overwrite a simple boolean set.
+     * Bypasses the 15-second leeway delay before events are sent, by backdating
+     * firstRequestTime and setting allowedToSendToBackend = true on the EventsManager.
+     * Backdating is required because checkEventsSendingAllowed() recomputes
+     * allowedToSendToBackend from (now - firstRequestTime), which would otherwise
+     * overwrite a plain boolean set.
      */
     fun enableImmediateEventSending() {
         try {
-            val instance = getGrovsInstance() ?: return
-
-            val managerField = instance.javaClass.getDeclaredField("grovsManager")
-            managerField.isAccessible = true
-            val manager = managerField.get(instance) ?: return
+            val manager = getGrovsManager() ?: return
 
             val eventsManagerField = manager.javaClass.getDeclaredField("eventsManager")
             eventsManagerField.isAccessible = true

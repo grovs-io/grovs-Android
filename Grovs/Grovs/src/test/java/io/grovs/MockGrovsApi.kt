@@ -1,8 +1,10 @@
 package io.grovs
 
 import io.grovs.api.GrovsApi
+import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
@@ -42,18 +44,22 @@ class MockGrovsApi : GrovsApi {
     var notificationsResponse: Response<NotificationsResponse>? = null
     var numberOfUnreadNotificationsResponse: Response<NumberOfUnreadNotificationsResponse>? = null
     var addEventResponse: Response<Unit>? = null
+    var addCustomEventResponse: Response<Unit>? = null
     var addPaymentEventResponse: Response<Unit>? = null
     var updateAttributesResponse: Response<Unit>? = null
     var markNotificationAsReadResponse: Response<Unit>? = null
     var notificationsToDisplayAutomaticallyResponse: Response<NotificationsResponse>? = null
+    var syncScreenAliasesResponse: Response<Unit>? = null
 
     // Track method calls for verification
     var authenticateCalls = mutableListOf<AppDetails>()
     var generateLinkCalls = mutableListOf<GenerateLinkRequest>()
     var addEventCalls = mutableListOf<Event>()
+    var lastCustomEvent: CustomEvent? = null
     var addPaymentEventCalls = mutableListOf<PaymentEvent>()
     var updateAttributesCalls = mutableListOf<UpdateAttributesRequest>()
     var linkDetailsCalls = mutableListOf<LinkDetailsRequest>()
+    var lastScreenAliases: ScreenAliasesRequest? = null
 
     // =====================================================================
     // GrovsApi Implementation
@@ -87,6 +93,11 @@ class MockGrovsApi : GrovsApi {
         return addEventResponse ?: Response.success(Unit)
     }
 
+    override suspend fun addCustomEvent(request: CustomEvent): Response<Unit> {
+        lastCustomEvent = request
+        return addCustomEventResponse ?: Response.success(Unit)
+    }
+
     override suspend fun addPaymentEvent(request: PaymentEvent): Response<Unit> {
         addPaymentEventCalls.add(request)
         return addPaymentEventResponse ?: Response.success(Unit)
@@ -117,6 +128,11 @@ class MockGrovsApi : GrovsApi {
         return notificationsToDisplayAutomaticallyResponse ?: createSuccessNotificationsResponse()
     }
 
+    override suspend fun syncScreenAliases(request: ScreenAliasesRequest): Response<Unit> {
+        lastScreenAliases = request
+        return syncScreenAliasesResponse ?: Response.success(Unit)
+    }
+
     // =====================================================================
     // Helper methods to reset and verify
     // =====================================================================
@@ -131,17 +147,21 @@ class MockGrovsApi : GrovsApi {
         notificationsResponse = null
         numberOfUnreadNotificationsResponse = null
         addEventResponse = null
+        addCustomEventResponse = null
         addPaymentEventResponse = null
         updateAttributesResponse = null
         markNotificationAsReadResponse = null
         notificationsToDisplayAutomaticallyResponse = null
+        syncScreenAliasesResponse = null
 
         authenticateCalls.clear()
         generateLinkCalls.clear()
         addEventCalls.clear()
+        lastCustomEvent = null
         addPaymentEventCalls.clear()
         updateAttributesCalls.clear()
         linkDetailsCalls.clear()
+        lastScreenAliases = null
     }
 
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()

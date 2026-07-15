@@ -1,0 +1,26 @@
+package io.grovs.handlers
+
+/**
+ * Interface for CustomEventsManager, to enable dependency injection and testability.
+ */
+internal interface ICustomEventsManager {
+
+    /**
+     * Sanitizes and persists a tracked event. Event-name validation (blank/reserved names) happens
+     * at the API boundary in [GrovsManager.track]; SDK-internal events like screen_view call this
+     * directly.
+     */
+    suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?)
+
+    /** Tags merged onto every subsequently tracked event. Pass null to clear. */
+    fun setGlobalTags(tags: List<String>?)
+
+    /** Sends up to BATCH_SIZE pending events. Called by the flush timer and by tests. */
+    suspend fun flush()
+
+    /** The link attributed to subsequently tracked events. */
+    fun setLinkForFutureEvents(link: String?)
+
+    /** Cancels periodic work owned by this manager. Safe to call more than once. */
+    fun close()
+}
