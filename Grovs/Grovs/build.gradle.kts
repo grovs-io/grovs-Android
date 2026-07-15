@@ -366,6 +366,10 @@ dependencies {
     testImplementation("androidx.arch.core:core-testing:2.2.0")
     // Robolectric for Android runtime simulation - requires 4.14+ for Java 24 support
     testImplementation("org.robolectric:robolectric:4.16.1")
+    // Analytics navigation E2E test fixtures (screen-tracking setups S01–S10)
+    testImplementation("androidx.navigation:navigation-compose:2.8.3")
+    testImplementation("androidx.navigation:navigation-testing:2.8.3")
+    testImplementation("androidx.viewpager2:viewpager2:1.1.0")
     
     // Instrumented test dependencies
     androidTestImplementation(libs.androidx.junit)
