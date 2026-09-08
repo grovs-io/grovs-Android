@@ -29,6 +29,7 @@ import io.grovs.utils.LSResult
 import io.grovs.utils.SystemClipboard
 import io.grovs.utils.hasURISchemesConfigured
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableJob
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -103,18 +104,22 @@ internal class GrovsManager(
     internal var attributionScope: CoroutineScope =
         CoroutineScope(grovsContext.serialDispatcher + SupervisorJob())
 
-    private sealed class AttributionWait {
-        object NotStarted : AttributionWait()
-        class Waiting(val deadline: Job) : AttributionWait()
-        object Released : AttributionWait()
+    /// A link lookup in flight. `generation` is the number of links committed when it started; a
+    /// later commit makes its result stale. `done` completes when the call exits, so fingerprint
+    /// results can wait for a direct link the user opened (which takes precedence) to settle.
+    private class Lookup(val generation: Int, val sessionId: String, val explicit: Boolean) {
+        val done: CompletableJob = Job()
     }
 
-    private var attributionWait: AttributionWait = AttributionWait.NotStarted
-
-    /** Identity determines which lookup may commit; a new explicit link replaces the owner. */
-    private class LinkResolution(val sessionId: String)
-    private var activeResolution: LinkResolution? = null
+    /// Every state below is guarded by [resolutionMutex]. [close] never touches it: it only flips
+    /// [isClosed], which every lookup re-checks before committing.
     private val resolutionMutex = Mutex()
+    private var committedLinks = 0
+    /// The one fingerprint/referrer lookup per session; repeated onStart callbacks share it.
+    private var sharedLookup: Lookup? = null
+    private val explicitLookups = mutableListOf<Lookup>()
+    /// Non-null while queued events are held for a pending lookup.
+    private var holdDeadline: Job? = null
 
     private data class ResolvedDeeplink(val details: DeeplinkDetails, val eventLink: String?)
 
@@ -199,21 +204,24 @@ internal class GrovsManager(
         DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
     }
 
-    private fun ownsResolution(resolution: LinkResolution): Boolean =
-        !isClosed && activeResolution === resolution
+    private fun isCurrent(lookup: Lookup): Boolean = !isClosed && committedLinks == lookup.generation
 
-    private fun beginAttributionWait() {
-        if (attributionWait !is AttributionWait.NotStarted) return
+    /// Arms the events hold once; later lookups share the deadline already running.
+    private fun armHold() {
+        if (holdDeadline != null) return
         eventsManager.beginLinkResolution()
-        val deadline = attributionScope.launch {
+        customEventsManager.setEventsHeld(true)
+        holdDeadline = attributionScope.launch {
             delay(attributionTimeoutMs)
             resolutionMutex.withLock {
-                if (isClosed || attributionWait !is AttributionWait.Waiting) return@withLock
-                // Do not cancel this deadline from inside its own coroutine: the flush suspends.
-                attributionWait = AttributionWait.Released
+                if (isClosed || holdDeadline == null) return@withLock
+                holdDeadline = null
+                // Nothing below may escape: this runs unattended on the SDK's own scope, so an
+                // uncaught throw (events storage, disk) would reach the host app's default handler.
                 try {
                     DebugLogger.instance.log(LogLevel.INFO, "Link attribution timed out; releasing queued events")
-                    eventsManager.completeLinkResolution(null, delayEvents = false)
+                    customEventsManager.setEventsHeld(false)
+                    eventsManager.releaseLinkResolution(delayEvents = false)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -221,27 +229,25 @@ internal class GrovsManager(
                 }
             }
         }
-        attributionWait = AttributionWait.Waiting(deadline)
     }
 
-    private fun releaseAttributionWait() {
-        val waiting = attributionWait as? AttributionWait.Waiting ?: return
-        attributionWait = AttributionWait.Released
-        waiting.deadline.cancel()
-        eventsManager.setEventsHeld(false)
+    /// Releases the hold without changing attribution. Held events flush with whatever link they carry.
+    private suspend fun releaseHold(delayEvents: Boolean) {
+        val deadline = holdDeadline ?: return
+        holdDeadline = null
+        deadline.cancel()
+        customEventsManager.setEventsHeld(false)
+        eventsManager.releaseLinkResolution(delayEvents = delayEvents)
     }
 
-    /** Resolves a candidate without assigning it to events. Only the current owner may commit. */
-    private suspend fun getDataForDevice(
-        link: String?,
-        resolution: LinkResolution,
-    ): ResolvedDeeplink? {
+    /// Resolves a candidate without committing it. Null when nothing resolved or the lookup went stale.
+    private suspend fun getDataForDevice(link: String?, lookup: Lookup): ResolvedDeeplink? {
         val request = appDetailsHelperForIntent.toAppDetails().copy(
             url = link,
-            sessionId = resolution.sessionId,
+            sessionId = lookup.sessionId,
         )
         val result = if (link == null) grovsService.payloadFor(request) else grovsService.payloadWithLinkFor(request)
-        if (!ownsResolution(resolution)) return null
+        if (!isCurrent(lookup)) return null
 
         return when (result) {
             is LSResult.Error -> {
@@ -250,10 +256,12 @@ internal class GrovsManager(
             }
             is LSResult.Success -> {
                 if (result.data.link != null) {
-                    clipboardHandler.markResolved()
                     ResolvedDeeplink(result.data, result.data.link)
                 } else if (clipboardHandler.isPending) {
-                    when (val outcome = clipboardHandler.runFlow(request) { ownsResolution(resolution) }) {
+                    // Only an empty resolve on a fresh install runs the clipboard flow. A run already
+                    // parked by another lookup keeps the hold; this call must not touch it.
+                    when (val outcome = clipboardHandler.runFlow(request) { isCurrent(lookup) }) {
+                        // INSTALL carries the clipboard string verbatim; the host gets the resolved details.
                         is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
                         else -> null
                     }
@@ -264,21 +272,35 @@ internal class GrovsManager(
         }
     }
 
-    private suspend fun commitResolution(
-        resolution: LinkResolution,
-        result: ResolvedDeeplink?,
-        delayEvents: Boolean,
-    ) = resolutionMutex.withLock {
-        if (!ownsResolution(resolution)) return@withLock
-        val link = result?.details?.link
-        customEventsManager.setLinkForFutureEvents(link)
-        if (link != null) customEventsManager.attributePendingEvents(link, resolution.sessionId)
-        if (!ownsResolution(resolution)) return@withLock
-
-        (attributionWait as? AttributionWait.Waiting)?.deadline?.cancel()
-        attributionWait = AttributionWait.Released
-        eventsManager.completeLinkResolution(result?.eventLink, delayEvents = delayEvents)
+    /// A direct link the user opened wins over anything inferred. Fingerprint and clipboard results
+    /// wait for in-flight direct lookups; a committed one makes them stale, a rejected one lets them through.
+    private suspend fun awaitExplicitLookups() {
+        while (true) {
+            val pending = resolutionMutex.withLock { explicitLookups.toList() }
+            if (pending.isEmpty()) return
+            pending.forEach { it.done.join() }
+        }
     }
+
+    /// Applies a resolved link everywhere and releases the hold. Only a still-current lookup commits;
+    /// committing makes every other lookup in flight stale.
+    private suspend fun commit(lookup: Lookup, result: ResolvedDeeplink, eventLink: String, delayEvents: Boolean): DeeplinkDetails? =
+        resolutionMutex.withLock {
+            if (!isCurrent(lookup)) return@withLock null
+            committedLinks++
+            // A resolved link from any path makes the clipboard flow moot.
+            clipboardHandler.markResolved()
+            val link = result.details.link
+            customEventsManager.setLinkForFutureEvents(link)
+            if (link != null) customEventsManager.attributePendingEvents(link, lookup.sessionId)
+            // Keep the hold closed while storage is updated: a background flush must not take
+            // INSTALL between releasing the hold and applying the link.
+            holdDeadline?.cancel()
+            holdDeadline = null
+            customEventsManager.setEventsHeld(false)
+            eventsManager.completeLinkResolution(eventLink, delayEvents = delayEvents)
+            result.details
+        }
 
     suspend fun authenticate(): Boolean {
         if (!context.hasURISchemesConfigured()) {
@@ -322,9 +344,6 @@ internal class GrovsManager(
                         grovsContext.attributes = result.data.sdkAttributes
                     }
 
-                    if (clipboardHandler.isPending) {
-                        resolutionMutex.withLock { if (!isClosed) beginAttributionWait() }
-                    }
                     eventsManager.logAppLaunchEvents()
 
                     // Aliases set before the SDK was ready are held; send them now.
@@ -398,8 +417,6 @@ internal class GrovsManager(
     internal fun close() {
         if (isClosed) return
         isClosed = true
-        activeResolution = null
-        releaseAttributionWait()
         attributionScope.cancel()
         attributesUpdateJob?.cancel()
         attributesUpdateJob = null
@@ -424,35 +441,47 @@ internal class GrovsManager(
         if (cacheIntent && !repeatedIntent) handledIntentTokens.add(intent.hashCode())
 
         val explicitLink = if (repeatedIntent) null else intent.data?.toString()
-        val resolution = resolutionMutex.withLock {
-            // Repeated lifecycle callbacks share the pending lookup; explicit links take precedence.
-            if (activeResolution?.sessionId == grovsContext.sessionId && explicitLink == null) return@withLock null
+        val lookup = resolutionMutex.withLock {
             if (isClosed) return@withLock null
-            LinkResolution(grovsContext.sessionId).also {
-                activeResolution = it
-                beginAttributionWait()
-                customEventsManager.setLinkForFutureEvents(null)
+            // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.
+            if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
+            Lookup(committedLinks, grovsContext.sessionId, explicit = explicitLink != null).also {
+                if (it.explicit) explicitLookups.add(it) else sharedLookup = it
+                armHold()
+                if (it.explicit) {
+                    // The user opened this link: events logged from now on carry it even if the
+                    // lookup is cancelled. The backend's answer replaces it either way.
+                    eventsManager.setLinkForFutureEvents(explicitLink)
+                }
             }
         } ?: return null
 
         try {
             val link = explicitLink ?: if (repeatedIntent) null else readInstallReferrer()
-            if (!ownsResolution(resolution)) return null
+            if (!isCurrent(lookup)) return null
+            if (link != null && explicitLink == null) {
+                // Consumed only by a lookup that actually sends it; a stale one leaves it for the next.
+                lastReferrerUrl = link
+            }
 
-            val result = getDataForDevice(link, resolution)
-            if (!ownsResolution(resolution)) return null
+            val result = getDataForDevice(link, lookup)
+            if (result == null) {
+                if (lookup.explicit && isCurrent(lookup)) eventsManager.setLinkForFutureEvents(null)
+                return null
+            }
+            val eventLink = result.eventLink ?: return result.details
 
-            commitResolution(resolution, result, delayEvents)
-            return if (ownsResolution(resolution)) result?.details else null
+            if (!lookup.explicit) awaitExplicitLookups()
+            return commit(lookup, result, eventLink, delayEvents)
         } finally {
             withContext(NonCancellable) {
                 resolutionMutex.withLock {
-                    if (ownsResolution(resolution)) {
-                        activeResolution = null
-                        releaseAttributionWait()
-                        attributionWait = AttributionWait.NotStarted
-                    }
+                    if (lookup.explicit) explicitLookups.remove(lookup) else if (sharedLookup === lookup) sharedLookup = null
+                    // The last lookup out with no link committed lets the queued events go as they are.
+                    val lookupsInFlight = explicitLookups.size + (if (sharedLookup == null) 0 else 1)
+                    if (lookupsInFlight == 0 && !isClosed) releaseHold(delayEvents)
                 }
+                lookup.done.complete()
             }
         }
     }
@@ -567,10 +596,9 @@ internal class GrovsManager(
                                 val referrerDetails = referrerClient.installReferrer
                                 val referrerUrl = referrerDetails.installReferrer
                                 DebugLogger.instance.log(LogLevel.INFO, "Got url from InstallReferrer: $referrerUrl")
-                                // referrer gets cached by install referrer so we need to avoid handling it multiple times
+                                // Play caches the referrer, so only one not yet sent is reported.
+                                // The caller records it once it actually sends it.
                                 if (referrerUrl != lastReferrerUrl) {
-                                    lastReferrerUrl = referrerUrl
-
                                     continuation.resume(referrerUrl, null)
                                 } else {
                                     continuation.resume(null, null)
@@ -581,8 +609,9 @@ internal class GrovsManager(
                                 referrerClient.endConnection()
                             }
                         }
-                        InstallReferrerClient.InstallReferrerResponse.FEATURE_NOT_SUPPORTED,
-                        InstallReferrerClient.InstallReferrerResponse.SERVICE_UNAVAILABLE -> {
+                        else -> {
+                            // FEATURE_NOT_SUPPORTED, SERVICE_UNAVAILABLE, DEVELOPER_ERROR, PERMISSION_ERROR:
+                            // every outcome must resume, or the lookup that owns the hold never ends.
                             continuation.resume(null, null)
                             referrerClient.endConnection()
                         }

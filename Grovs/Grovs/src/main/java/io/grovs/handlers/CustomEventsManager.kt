@@ -37,6 +37,8 @@ internal class CustomEventsManager(
 
     private var globalTags: List<String>? = null
     private var linkForFutureEvents: String? = null
+    @Volatile
+    private var eventsHeld = false
     private val timerScope = CoroutineScope(timerDispatcher + SupervisorJob())
 
     companion object {
@@ -113,7 +115,15 @@ internal class CustomEventsManager(
         }
     }
 
+    override fun setEventsHeld(held: Boolean) {
+        eventsHeld = held
+    }
+
     override suspend fun flush() {
+        if (eventsHeld) {
+            DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: link lookup pending")
+            return
+        }
         if (grovsContext.grovsId == null) {
             // Without a device id the backend rejects the send as terminal, which would drop the
             // events for good. Leave them queued; a later tick retries once authenticated.

@@ -55,6 +55,8 @@ class SessionTest {
 
         override suspend fun removePaymentEvent(event: PaymentEvent) {}
 
+        override suspend fun replacePaymentEvents(events: List<PaymentEvent>) {}
+
         override suspend fun getEvents(): List<Event> = storedEvents.toList()
 
         override suspend fun getPaymentEvents(): List<PaymentEvent> = emptyList()

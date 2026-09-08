@@ -37,23 +37,22 @@ interface IEventsManager {
      */
     suspend fun log(event: Event)
     
-    /**
-     * Sets the link for future actions to associate with new events.
-     * @param link The link to set
-     * @param delayEvents Whether to delay sending events
-     */
-    suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean)
+    /** The link stamped on events logged from now on. Does not touch stored events or flush. */
+    fun setLinkForFutureEvents(link: String?)
 
     /** Starts a lookup hold. Pending events wait for a resolved link or the attribution deadline. */
     fun beginLinkResolution()
 
     /** Commits attribution before releasing the lookup hold and allowing queued events to flush. */
-    suspend fun completeLinkResolution(link: String?, delayEvents: Boolean)
+    suspend fun completeLinkResolution(link: String, delayEvents: Boolean)
+
+    /** Releases the lookup hold and flushes queued events with whatever link they already carry. */
+    suspend fun releaseLinkResolution(delayEvents: Boolean)
 
     /**
      * Holds every normal and payment event on the device while true, regardless of `delayEvents`
      * or the first-batch delay. Used while link attribution is unresolved.
-     * Clearing the hold does not flush; call [setLinkToNewFutureActions] afterwards.
+     * Clearing the hold does not flush; call [releaseLinkResolution] to do both.
      */
     fun setEventsHeld(held: Boolean)
 }

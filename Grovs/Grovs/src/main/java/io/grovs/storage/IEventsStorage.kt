@@ -49,6 +49,12 @@ interface IEventsStorage {
     suspend fun removePaymentEvent(event: PaymentEvent)
 
     /**
+     * Replaces every stored payment event with the given list.
+     * @param events The full list to persist.
+     */
+    suspend fun replacePaymentEvents(events: List<PaymentEvent>)
+
+    /**
      * Retrieves all events from the storage.
      * @return List of events
      */

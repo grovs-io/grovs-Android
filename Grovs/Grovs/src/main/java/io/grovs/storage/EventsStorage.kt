@@ -191,6 +191,10 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
+    override suspend fun replacePaymentEvents(events: List<PaymentEvent>) = withContext(storageSerialDispatcher) {
+        preferences.edit().putString(STORED_PAYMENT_EVENTS, gson.toJson(events)).apply()
+    }
+
     /// Retrieves all events from the storage, dropping any that are too old to be useful.
     override suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
         val jsonString = preferences.getString(STORED_EVENTS, null)

@@ -9,6 +9,8 @@ import io.grovs.TestFixtures
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
 import io.grovs.model.EventType
+import io.grovs.model.events.PaymentEvent
+import io.grovs.model.events.PaymentEventType
 import io.grovs.service.IGrovsService
 import io.grovs.storage.CustomEventsStorage
 import io.grovs.storage.EventsStorage
@@ -48,6 +50,8 @@ class LinkAttributionTest {
         val storage = EventsStorage(app)
         val customStorage = CustomEventsStorage(app)
         val sent = mutableListOf<Pair<EventType, String?>>()
+        val sentPurchases = mutableListOf<String?>()
+        val sentCustom = mutableListOf<String?>()
         val events = EventsManager(app, context, "test", service, storage, cache).also {
             // The old first-batch delay has expired. Only the resolution hold can protect events.
             it.firstRequestTime = InstantCompat.now().minusMillis(20_000)
@@ -64,6 +68,14 @@ class LinkAttributionTest {
             coEvery { service.addEvent(any()) } answers {
                 val event = firstArg<Event>()
                 sent.add(event.event to event.link)
+                LSResult.Success(true)
+            }
+            coEvery { service.addPaymentEvent(any()) } answers {
+                sentPurchases.add(firstArg<PaymentEvent>().link)
+                LSResult.Success(true)
+            }
+            coEvery { service.addCustomEvent(any()) } answers {
+                sentCustom.add(firstArg<io.grovs.model.CustomEvent>().link)
                 LSResult.Success(true)
             }
             manager = GrovsManager(app, app, context, "test", service, events, helper, custom,
@@ -242,6 +254,152 @@ class LinkAttributionTest {
             request.cancelAndJoin()
             assertFalse(rig.events.eventsHeld)
             assertEquals(directUrl, rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false)?.link)
+        } finally { rig.manager.close() }
+    }
+
+    // ==================== Regressions from the explicit-resolution refactor ====================
+
+    @Test
+    fun `a direct link is attributed before its lookup suspends so cancellation keeps it`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadWithLinkFor(any()) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        try {
+            val request = async { rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false) }
+            started.await()
+            request.cancelAndJoin()
+            assertEquals(directUrl, rig.events.linkForFutureActions)
+            assertFalse(rig.events.eventsHeld)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `a purchase logged during a direct link lookup carries that link`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadWithLinkFor(any()) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        try {
+            val request = async { rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false) }
+            started.await()
+            rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "sku", InstantCompat.now())
+            gate.complete(Unit)
+            request.await()
+            assertEquals(listOf(directUrl), rig.sentPurchases)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `a purchase logged during a fingerprint lookup is backfilled with the resolved link`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadFor(any()) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        try {
+            val request = async { rig.manager.handleIntent(Intent(), false) }
+            started.await()
+            rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "sku", InstantCompat.now())
+            assertTrue(rig.sentPurchases.isEmpty())
+            gate.complete(Unit)
+            request.await()
+            assertEquals(listOf(directUrl), rig.sentPurchases)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `custom events do not flush while a lookup is pending and carry its link afterwards`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadFor(any()) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        try {
+            val request = async { rig.manager.handleIntent(Intent(), false) }
+            started.await()
+            rig.manager.track("during_lookup", null, null)
+            rig.custom.flush()
+            assertTrue(rig.sentCustom.isEmpty())
+            gate.complete(Unit)
+            request.await()
+            rig.custom.flush()
+            assertEquals(listOf(directUrl), rig.sentCustom)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `a rejected direct link leaves a parked clipboard flow in charge of install`() = runTest {
+        val rig = Rig(freshInstall = true)
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.clipboardStatus() } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(true)
+        }
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == directUrl }) } returns LSResult.Success(empty)
+        try {
+            rig.events.logAppLaunchEvents()
+            val old = async { rig.manager.handleIntent(Intent(), true) }
+            started.await()
+            assertNull(rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false))
+            assertTrue(rig.events.eventsHeld)
+            assertTrue(rig.sent.none { it.first == EventType.INSTALL })
+            gate.complete(Unit)
+            assertEquals(directUrl, old.await()?.link)
+            rig.events.onAppForegrounded()
+            assertEquals(listOf(EventType.INSTALL to clipboardUrl), rig.sent.filter { it.first == EventType.INSTALL })
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `a direct link arriving after the deadline is held until it resolves`() = runTest {
+        val rig = Rig(freshInstall = true)
+        val fingerprintStarted = CompletableDeferred<Unit>()
+        val fingerprintGate = CompletableDeferred<Unit>()
+        val directStarted = CompletableDeferred<Unit>()
+        val directGate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadFor(any()) } coAnswers {
+            fingerprintStarted.complete(Unit)
+            fingerprintGate.await()
+            LSResult.Success(empty)
+        }
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == directUrl }) } coAnswers {
+            directStarted.complete(Unit)
+            directGate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        try {
+            val old = async { rig.manager.handleIntent(Intent(), true) }
+            fingerprintStarted.await()
+            rig.deadlineClock.advanceTimeBy(25_001)
+            rig.deadlineClock.runCurrent()
+            assertFalse(rig.events.eventsHeld)
+
+            val direct = async { rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false) }
+            directStarted.await()
+            assertTrue(rig.events.eventsHeld)
+            directGate.complete(Unit)
+            assertEquals(directUrl, direct.await()?.link)
+            assertFalse(rig.events.eventsHeld)
+            fingerprintGate.complete(Unit)
+            assertNull(old.await())
+            rig.assertFutureLink(directUrl)
         } finally { rig.manager.close() }
     }
 }

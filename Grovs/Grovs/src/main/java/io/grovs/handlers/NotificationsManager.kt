@@ -23,16 +23,20 @@ class NotificationsManager(val context: Context, val grovsContext: GrovsContext,
     private val grovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {
-        val activity = activityProvider.requireActivity() as? FragmentActivity
-        activity?.lifecycleScope?.launch {
-            val result = grovsService.notificationsToDisplayAutomatically()
-            if (result is LSResult.Success) {
-                withContext(Dispatchers.Main.immediate) {
-                    for (notification in result.data.notifications ?: emptyList()) {
-                        displayAutomaticNotificationFor(
-                            notification = notification,
-                            activity = activity,
-                        )
+        val activity = activityProvider.requireActivity() as? FragmentActivity ?: return
+        // Called from the SDK's serial dispatcher. lifecycleScope registers its lifecycle observer
+        // on first access, and LifecycleRegistry requires that on the main thread.
+        activity.runOnUiThread {
+            activity.lifecycleScope.launch {
+                val result = grovsService.notificationsToDisplayAutomatically()
+                if (result is LSResult.Success) {
+                    withContext(Dispatchers.Main.immediate) {
+                        for (notification in result.data.notifications ?: emptyList()) {
+                            displayAutomaticNotificationFor(
+                                notification = notification,
+                                activity = activity,
+                            )
+                        }
                     }
                 }
             }

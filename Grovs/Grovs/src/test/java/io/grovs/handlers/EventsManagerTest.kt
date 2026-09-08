@@ -311,34 +311,39 @@ class EventsManagerTest {
     // ==================== Link Association Tests ====================
 
     @Test
-    fun `EventsManager setLinkToNewFutureActions sets linkForFutureActions property`() = runTest {
-        eventsManager.setLinkToNewFutureActions("https://test.link", delayEvents = false)
+    fun `EventsManager setLinkForFutureEvents only stamps events logged afterwards`() = runTest {
+        val existingEvent = Event(EventType.APP_OPEN, InstantCompat.now())
+        coEvery { mockEventsStorage.getEvents() } returns listOf(existingEvent)
+
+        eventsManager.setLinkForFutureEvents("https://test.link")
 
         assertEqualsWithContext(
             "https://test.link",
             eventsManager.linkForFutureActions,
             "linkForFutureActions",
-            "after setLinkToNewFutureActions('https://test.link', delayEvents=false)"
+            "after setLinkForFutureEvents('https://test.link')"
         )
+        coVerify(exactly = 0) { mockEventsStorage.addOrReplaceEvents(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
     }
 
     @Test
-    fun `EventsManager setLinkToNewFutureActions enables backend sending when delayEvents is false`() = runTest {
-        eventsManager.setLinkToNewFutureActions("https://test.link", delayEvents = false)
+    fun `EventsManager completeLinkResolution enables backend sending when delayEvents is false`() = runTest {
+        eventsManager.completeLinkResolution("https://test.link", delayEvents = false)
 
         assertAllowedToSendToBackend(
             eventsManager,
             expected = true,
-            context = "after setLinkToNewFutureActions() with delayEvents=false"
+            context = "after completeLinkResolution() with delayEvents=false"
         )
     }
 
     @Test
-    fun `EventsManager setLinkToNewFutureActions associates link with existing events`() = runTest {
+    fun `EventsManager completeLinkResolution associates link with existing events`() = runTest {
         val existingEvent = Event(EventType.APP_OPEN, InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(existingEvent)
 
-        eventsManager.setLinkToNewFutureActions("https://test.link", delayEvents = false)
+        eventsManager.completeLinkResolution("https://test.link", delayEvents = false)
 
         coVerify {
             mockEventsStorage.addOrReplaceEvents(match { events ->
@@ -406,7 +411,7 @@ class EventsManagerTest {
         coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
 
         eventsManager.setEventsHeld(true)
-        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+        eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
 
         coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
         assertAllowedToSendToBackend(eventsManager, expected = false, context = "while events are held")
@@ -421,25 +426,32 @@ class EventsManagerTest {
         eventsManager.firstRequestTime = InstantCompat.ofEpochMilli(0)
 
         eventsManager.setEventsHeld(true)
-        eventsManager.setLinkToNewFutureActions(null, delayEvents = true)
+        eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
 
         coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
     }
 
     @Test
-    fun `clearing the hold then setting the link flushes`() = runTest {
+    fun `releasing the hold flushes without changing the link`() = runTest {
         val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
         coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
 
-        eventsManager.setEventsHeld(true)
-        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+        eventsManager.beginLinkResolution()
+        eventsManager.setLinkForFutureEvents("https://test.link/direct")
+        eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
         coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
 
         eventsManager.setEventsHeld(false)
         coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }   // clearing alone does not flush
 
-        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+        eventsManager.releaseLinkResolution(delayEvents = false)
         coVerify(exactly = 1) { mockGrovsService.addEvent(any()) }
+        assertEqualsWithContext(
+            "https://test.link/direct",
+            eventsManager.linkForFutureActions,
+            "linkForFutureActions",
+            "after releaseLinkResolution()"
+        )
     }
 }

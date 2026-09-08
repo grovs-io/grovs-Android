@@ -21,6 +21,9 @@ import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
+import io.grovs.GrovsDeeplinkListener
+import android.net.Uri
+import kotlinx.coroutines.CompletableDeferred
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
@@ -401,6 +404,44 @@ class GrovsSingletonTest {
             controller.pause().stop().destroy()
             unmockkObject(VisibleFragmentResolver)
         }
+    }
+
+    @Test
+    fun `deep link delivery survives the launcher activity being destroyed mid-lookup`() {
+        val link = "https://demo.sqd.link/survives"
+        val details = DeeplinkDetails(link, null, null)
+        val gate = CompletableDeferred<Unit>()
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        coEvery { mockManager.handleIntent(any(), any(), any()) } coAnswers {
+            gate.await()
+            details
+        }
+        injectMockGrovsManagerDirectly(mockManager)
+        val listener = mockk<GrovsDeeplinkListener>(relaxed = true)
+
+        val controller = Robolectric.buildActivity(
+            androidx.activity.ComponentActivity::class.java,
+            Intent(Intent.ACTION_VIEW, Uri.parse(link)),
+        ).setup()
+        val activity = controller.get()
+        Grovs.setOnDeeplinkReceivedListener(activity, listener)
+        Grovs.onStart(activity)
+        // lifecycleScope registers its lifecycle observer on Main, which this test drives by hand.
+        testDispatcher.scheduler.advanceUntilIdle()
+        coVerify(timeout = 2_000) { mockManager.handleIntent(any(), any(), any()) }
+
+        // A splash screen finishing, or a rotation, destroys the launcher while the lookup is in flight.
+        controller.pause().stop().destroy()
+        gate.complete(Unit)
+
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            testDispatcher.scheduler.advanceUntilIdle()
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (runCatching { verify(exactly = 1) { listener.onDeeplinkReceived(details) } }.isSuccess) break
+            Thread.sleep(10)
+        }
+        verify(exactly = 1) { listener.onDeeplinkReceived(details) }
     }
 
     @Test

@@ -1104,16 +1104,16 @@ class GrovsManagerTest {
     }
 
     @Test
-    fun `fresh install is held before authentication queues launch events`() = runTest {
+    fun `authentication never arms the events hold on its own`() = runTest {
+        // Only a lookup may hold events: a host that never reaches handleIntent must not have
+        // every launch's events held for the whole attribution deadline.
         stubSuccessfulAuthentication()
         val manager = clipboardManager(ClipboardRig())
         manager.attributionScope = backgroundScope
         try {
             assertTrue(manager.authenticate())
-            coVerifyOrder {
-                mockEventsManager.beginLinkResolution()
-                mockEventsManager.logAppLaunchEvents()
-            }
+            coVerify { mockEventsManager.logAppLaunchEvents() }
+            verify(exactly = 0) { mockEventsManager.beginLinkResolution() }
         } finally { manager.close() }
     }
 
@@ -1151,8 +1151,9 @@ class GrovsManagerTest {
         assertNullWithContext(result, "handleIntent result", "after a clipboard no-match")
         coVerifyOrder {
             mockEventsManager.beginLinkResolution()
-            mockEventsManager.completeLinkResolution(null, delayEvents = true)
+            mockEventsManager.releaseLinkResolution(delayEvents = true)
         }
+        coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
         manager.close()
     }
 
@@ -1173,8 +1174,8 @@ class GrovsManagerTest {
         runCurrent()
 
         // Valve fired: hold cleared and a link-less flush requested while the flow is still parked.
-        coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
-        coVerify { mockEventsManager.completeLinkResolution(null, delayEvents = false) }
+        coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(delayEvents = false) }
+        coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
 
         gate.complete(LSResult.Success(true))
         val result = pending.await()
@@ -1229,7 +1230,7 @@ class GrovsManagerTest {
 
         // Valve fired while the first run is still parked on the network call.
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
-        coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
+        coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(any()) }
 
         // A second handleIntent arrives before the first run reaches a terminal outcome: it must not
         // re-hold the already-released events or arm a second valve.
@@ -1237,7 +1238,8 @@ class GrovsManagerTest {
 
         assertNullWithContext(second, "re-entrant handleIntent result", "after the valve already released the hold")
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
-        coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
+        coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(any()) }
+        coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
 
         gate.complete(LSResult.Success(true))
         val result = first.await()
@@ -1247,7 +1249,8 @@ class GrovsManagerTest {
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
         coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink) }
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
-        coVerify(exactly = 2) { mockEventsManager.completeLinkResolution(any(), any()) }
+        coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
+        coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(any()) }
         manager.close()
     }
 
@@ -1257,7 +1260,7 @@ class GrovsManagerTest {
         val resolvedLink = "https://demo.sqd.link/resolved"
         // The deadline flush fails while the lookup is still waiting on the network.
         var nullFlushes = 0
-        coEvery { mockEventsManager.completeLinkResolution(null, any()) } answers {
+        coEvery { mockEventsManager.releaseLinkResolution(any()) } answers {
             nullFlushes++
             throw IllegalStateException("events storage down")
         }
@@ -1275,7 +1278,7 @@ class GrovsManagerTest {
 
         // The valve reached the throwing flush, having already released the hold...
         assertEqualsWithContext(1, nullFlushes, "link-less flush count", "after the release valve fired")
-        coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
+        coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
         // ...and the throw never escaped: an uncaught one here would cancel this TestScope.
         assertTrue("the valve scope is still active after a throwing valve", isActive)
 
@@ -1346,6 +1349,30 @@ class GrovsManagerTest {
             assertNull(old.await())
             coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
             coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(direct, false) }
+        } finally { manager.close() }
+    }
+
+    @Test
+    fun `a referrer read by a superseded lookup is still sent by the next lookup`() = runTest {
+        servePlayInstallReferrer(referrerUrl)
+        val direct = "https://demo.sqd.link/new-direct"
+        coEvery { mockGrovsService.payloadWithLinkFor(any()) } returns
+            LSResult.Success(DeeplinkDetails(direct, null, null))
+        val manager = clipboardManager(ClipboardRig())
+        manager.attributionScope = backgroundScope
+        try {
+            val old = async { manager.handleIntent(Intent(), delayEvents = true) }
+            runCurrent()
+            assertEquals(direct, manager.handleIntent(Intent().setData(Uri.parse(direct)), false)?.link)
+            deliverServiceConnection()
+            assertNull(old.await())
+            coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
+
+            val next = async { manager.handleIntent(Intent(), delayEvents = true) }
+            runCurrent()
+            deliverServiceConnection()
+            assertEquals(direct, next.await()?.link)
+            coVerify(exactly = 1) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
         } finally { manager.close() }
     }
 

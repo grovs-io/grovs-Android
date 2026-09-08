@@ -24,6 +24,9 @@ internal interface ICustomEventsManager {
     /** Attributes queued, linkless events only after a link was resolved for this session. */
     suspend fun attributePendingEvents(link: String, sessionId: String)
 
+    /** While held, [flush] sends nothing: queued events wait for the pending link lookup. */
+    fun setEventsHeld(held: Boolean)
+
     /** Cancels periodic work owned by this manager. Safe to call more than once. */
     fun close()
 }

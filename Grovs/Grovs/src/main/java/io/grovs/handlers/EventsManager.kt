@@ -114,14 +114,8 @@ class EventsManager(
         logPurchase(event = event)
     }
 
-    /// Sets the link for future actions to associate with new events.
-    /// - Parameter link: The link to set
-    override suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
+    override fun setLinkForFutureEvents(link: String?) {
         linkForFutureActions = link
-        allowedToSendToBackend = !delayEvents && !eventsHeld
-        attributePendingEvents(link)
-        sendNormalEventsToBackend()
-        sendPaymentEventsToBackend()
     }
 
     override fun beginLinkResolution() {
@@ -129,29 +123,29 @@ class EventsManager(
         setEventsHeld(true)
     }
 
-    override suspend fun completeLinkResolution(link: String?, delayEvents: Boolean) {
+    override suspend fun completeLinkResolution(link: String, delayEvents: Boolean) {
         linkForFutureActions = link
         // Keep the gate closed while storage is updated. A background flush must not take INSTALL
         // between releasing the hold and applying the resolved link.
         try {
-            attributePendingEvents(link)
+            addLinkToEvents(link)
+            addLinkToPaymentEvents(link)
+            eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
         } finally {
-            setEventsHeld(false)
-            allowedToSendToBackend = !delayEvents
+            releaseLinkResolution(delayEvents)
         }
+    }
+
+    override suspend fun releaseLinkResolution(delayEvents: Boolean) {
+        setEventsHeld(false)
+        allowedToSendToBackend = !delayEvents
         sendNormalEventsToBackend()
         sendPaymentEventsToBackend()
     }
 
-    private suspend fun attributePendingEvents(link: String?) {
-        if (link == null) return
-        addLinkToEvents(link)
-        eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
-    }
-
     /// Holds or releases the events hold gate. While held, no normal or payment event
     /// leaves the device, regardless of `delayEvents` or the elapsed delay. Clearing the
-    /// hold does not flush by itself; call [setLinkToNewFutureActions] afterwards.
+    /// hold does not flush by itself; call [releaseLinkResolution] to do both.
     override fun setEventsHeld(held: Boolean) {
         eventsHeld = held
         if (held) {
@@ -231,6 +225,16 @@ class EventsManager(
             }
             newEvent
         }
+    }
+
+    /// Purchases logged while this session's link was still unresolved earned it too. Earlier
+    /// sessions belong to whatever resolved back then, and an attributed purchase is never rewritten.
+    private suspend fun addLinkToPaymentEvents(link: String) {
+        val sessionId = grovsContext.sessionId
+        val events = eventsStorage.getPaymentEvents()
+        if (events.none { it.link == null && it.sessionId == sessionId }) return
+        events.forEach { if (it.link == null && it.sessionId == sessionId) it.link = link }
+        eventsStorage.replacePaymentEvents(events)
     }
 
     /// Changes stored events based on a closure and performs a completion handler.
