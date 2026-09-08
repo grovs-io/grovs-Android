@@ -118,8 +118,10 @@ class EventsManager(
         linkForFutureActions = link
     }
 
+    /// Holds events; a link already committed this session stays in force. The launcher's onStart
+    /// re-fires on rotation and back navigation and its lookup may resolve nothing, which must not
+    /// unattribute the rest of the session. A commit replaces the link; backgrounding clears it.
     override fun beginLinkResolution() {
-        linkForFutureActions = null
         setEventsHeld(true)
     }
 
@@ -209,15 +211,15 @@ class EventsManager(
         eventsStorage.addEvent(event)
     }
 
-    /// Adds a link to all stored events that do not already have one.
-    /// - Parameter link: The link to add
+    /// Stamps the link on this session's stored linkless lifecycle events. Events from earlier
+    /// sessions (queued offline) keep whatever resolved back then, like purchases and custom events.
     private suspend fun addLinkToEvents(link: String) {
-        // Add a link to the stored events
+        val sessionId = grovsContext.sessionId
         changeStorageEvents { oldEvent ->
             val newEvent = oldEvent
             when (newEvent.event) {
                 EventType.APP_OPEN, EventType.VIEW, EventType.OPEN, EventType.INSTALL, EventType.REINSTALL, EventType.REACTIVATION -> {
-                    if (newEvent.link?.isValidUrl() != true) {
+                    if (newEvent.sessionId == sessionId && newEvent.link?.isValidUrl() != true) {
                         newEvent.link = link
                     }
                 }
@@ -254,6 +256,7 @@ class EventsManager(
 
     /// Sends normal events (non-time-spent, non-payment) to the backend.
     private fun sendNormalEventsToBackend() = runBlocking {
+        if (!grovsContext.settings.sdkEnabled) return@runBlocking
         checkEventsSendingAllowed()
         if (!allowedToSendToBackend) {
             return@runBlocking
@@ -282,6 +285,7 @@ class EventsManager(
 
     /// Sends time-spent events to the backend.
     private fun sendTimeSpentEventsToBackend() = runBlocking {
+        if (!grovsContext.settings.sdkEnabled) return@runBlocking
         val events = eventsStorage.getEvents()
         DebugLogger.instance.log(LogLevel.INFO, "Sending time-spent logs to the backend")
 
@@ -305,6 +309,7 @@ class EventsManager(
 
     /// Sends payment events to the backend.
     private fun sendPaymentEventsToBackend() = runBlocking {
+        if (!grovsContext.settings.sdkEnabled) return@runBlocking
         checkEventsSendingAllowed()
         if (!allowedToSendToBackend) {
             return@runBlocking

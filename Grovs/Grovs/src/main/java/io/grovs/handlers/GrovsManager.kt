@@ -118,6 +118,9 @@ internal class GrovsManager(
     /// The one fingerprint/referrer lookup per session; repeated onStart callbacks share it.
     private var sharedLookup: Lookup? = null
     private val explicitLookups = mutableListOf<Lookup>()
+    /// Every lookup between creation and exit, including shared ones a newer session replaced.
+    /// The hold stays armed while any of them can still commit.
+    private val lookupsInFlight = mutableSetOf<Lookup>()
     /// Non-null while queued events are held for a pending lookup.
     private var holdDeadline: Job? = null
 
@@ -291,8 +294,11 @@ internal class GrovsManager(
             // A resolved link from any path makes the clipboard flow moot.
             clipboardHandler.markResolved()
             val link = result.details.link
+            // A late match attributes the session it lands in, the same one future events carry.
+            // Attributing the session it was requested for would split one session's attribution.
+            val sessionId = grovsContext.sessionId
             customEventsManager.setLinkForFutureEvents(link)
-            if (link != null) customEventsManager.attributePendingEvents(link, lookup.sessionId)
+            if (link != null) customEventsManager.attributePendingEvents(link, sessionId)
             // Keep the hold closed while storage is updated: a background flush must not take
             // INSTALL between releasing the hold and applying the link.
             holdDeadline?.cancel()
@@ -447,6 +453,7 @@ internal class GrovsManager(
             if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
             Lookup(committedLinks, grovsContext.sessionId, explicit = explicitLink != null).also {
                 if (it.explicit) explicitLookups.add(it) else sharedLookup = it
+                lookupsInFlight.add(it)
                 armHold()
                 if (it.explicit) {
                     // The user opened this link: events logged from now on carry it even if the
@@ -477,9 +484,9 @@ internal class GrovsManager(
             withContext(NonCancellable) {
                 resolutionMutex.withLock {
                     if (lookup.explicit) explicitLookups.remove(lookup) else if (sharedLookup === lookup) sharedLookup = null
+                    lookupsInFlight.remove(lookup)
                     // The last lookup out with no link committed lets the queued events go as they are.
-                    val lookupsInFlight = explicitLookups.size + (if (sharedLookup == null) 0 else 1)
-                    if (lookupsInFlight == 0 && !isClosed) releaseHold(delayEvents)
+                    if (lookupsInFlight.isEmpty() && !isClosed) releaseHold(delayEvents)
                 }
                 lookup.done.complete()
             }

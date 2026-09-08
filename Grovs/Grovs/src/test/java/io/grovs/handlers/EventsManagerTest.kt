@@ -340,7 +340,7 @@ class EventsManagerTest {
 
     @Test
     fun `EventsManager completeLinkResolution associates link with existing events`() = runTest {
-        val existingEvent = Event(EventType.APP_OPEN, InstantCompat.now())
+        val existingEvent = Event(EventType.APP_OPEN, InstantCompat.now(), sessionId = grovsContext.sessionId)
         coEvery { mockEventsStorage.getEvents() } returns listOf(existingEvent)
 
         eventsManager.completeLinkResolution("https://test.link", delayEvents = false)
@@ -353,6 +353,30 @@ class EventsManagerTest {
     }
 
     // ==================== Backend Sending Tests ====================
+
+    @Test
+    fun `a disabled SDK sends no queued lifecycle or payment events`() = runTest {
+        eventsManager.allowedToSendToBackend = true
+        coEvery { mockEventsStorage.getEvents() } returns listOf(
+            Event(EventType.APP_OPEN, InstantCompat.now()),
+            Event(EventType.TIME_SPENT, InstantCompat.now(), engagementTime = 5),
+        )
+        coEvery { mockEventsStorage.getPaymentEvents() } returns listOf(
+            io.grovs.model.events.PaymentEvent(eventType = io.grovs.model.events.PaymentEventType.BUY, appId = "app",
+                priceCents = 100, currency = "USD", date = InstantCompat.now(), productId = "sku", store = false)
+        )
+        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addPaymentEvent(any()) } returns LSResult.Success(true)
+        grovsContext.settings.sdkEnabled = false
+
+        eventsManager.onAppForegrounded()
+        eventsManager.log(Event(EventType.VIEW, InstantCompat.now()))
+        eventsManager.releaseLinkResolution(delayEvents = false)
+
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addPaymentEvent(any()) }
+        assertTrue("Sending stays allowed so re-enabling delivers the retained events", eventsManager.allowedToSendToBackend)
+    }
 
     @Test
     fun `EventsManager does not send events when allowedToSendToBackend is false`() = runTest {

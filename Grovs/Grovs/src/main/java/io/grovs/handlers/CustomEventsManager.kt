@@ -120,6 +120,11 @@ internal class CustomEventsManager(
     }
 
     override suspend fun flush() {
+        if (!grovsContext.settings.sdkEnabled) {
+            // Disable pauses delivery; nothing leaves the device until re-enabled. Events stay queued.
+            DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: SDK disabled")
+            return
+        }
         if (eventsHeld) {
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: link lookup pending")
             return

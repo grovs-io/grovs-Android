@@ -29,6 +29,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import kotlin.time.Duration.Companion.seconds
 
 /** Exercises resolution through real event managers and SharedPreferences storage. */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -40,12 +41,15 @@ class LinkAttributionTest {
     private val directUrl = "https://demo.sqd.link/direct"
     private val empty = DeeplinkDetails(null, null, null)
 
-    private inner class Rig(freshInstall: Boolean) {
+    private inner class Rig(
+        freshInstall: Boolean,
+        // Persistent state survives a process restart; pass the previous rig's cache to simulate one.
+        val cache: FakeLocalCache = FakeLocalCache(numberOfOpens = if (freshInstall) 0 else 2),
+    ) {
         // Keep deadline time explicit while SharedPreferences work uses real IO threads.
         val deadlineClock = TestScope()
         val service = mockk<IGrovsService>(relaxed = true)
         val context = GrovsContext().also { it.grovsId = "device" }
-        val cache = FakeLocalCache(numberOfOpens = if (freshInstall) 0 else 2)
         val clipboard = FakeClipboard(text = clipboardUrl)
         val storage = EventsStorage(app)
         val customStorage = CustomEventsStorage(app)
@@ -400,6 +404,234 @@ class LinkAttributionTest {
             fingerprintGate.complete(Unit)
             assertNull(old.await())
             rig.assertFutureLink(directUrl)
+        } finally { rig.manager.close() }
+    }
+
+    /** Two direct links in flight: whichever the backend answers first is committed and the other,
+     *  even if the user opened it later, is stale and never delivered. Staleness is decided at
+     *  commit time, not at start time, so a rejected link can still yield to the one still pending. */
+    @Test
+    fun `the first explicit link to commit wins when the older response arrives first`() = runTest {
+        assertFirstCommittedExplicitLinkWins(olderRespondsFirst = true)
+    }
+
+    @Test
+    fun `the first explicit link to commit wins when the newer response arrives first`() = runTest {
+        assertFirstCommittedExplicitLinkWins(olderRespondsFirst = false)
+    }
+
+    private suspend fun assertFirstCommittedExplicitLinkWins(olderRespondsFirst: Boolean) = kotlinx.coroutines.coroutineScope {
+        val rig = Rig(freshInstall = false)
+        val older = "https://demo.sqd.link/product-a"
+        val newer = "https://demo.sqd.link/product-b"
+        val olderStarted = CompletableDeferred<Unit>()
+        val newerStarted = CompletableDeferred<Unit>()
+        val olderReply = CompletableDeferred<Unit>()
+        val newerReply = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == older }) } coAnswers {
+            olderStarted.complete(Unit)
+            olderReply.await()
+            LSResult.Success(DeeplinkDetails(older, mapOf("product" to "a" as Object), null))
+        }
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == newer }) } coAnswers {
+            newerStarted.complete(Unit)
+            newerReply.await()
+            LSResult.Success(DeeplinkDetails(newer, mapOf("product" to "b" as Object), null))
+        }
+        try {
+            val first = async { rig.manager.handleIntent(Intent().setData(Uri.parse(older)), false) }
+            olderStarted.await()
+            val second = async { rig.manager.handleIntent(Intent().setData(Uri.parse(newer)), false) }
+            newerStarted.await()
+            if (olderRespondsFirst) {
+                olderReply.complete(Unit)
+                first.await()
+                newerReply.complete(Unit)
+            } else {
+                newerReply.complete(Unit)
+                second.await()
+                olderReply.complete(Unit)
+            }
+            val winner = if (olderRespondsFirst) older else newer
+            val delivered = listOfNotNull(first.await(), second.await())
+            assertEquals("Only the first committed destination is delivered; the other is stale", listOf(winner), delivered.map { it.link })
+            assertEquals(if (olderRespondsFirst) "a" else "b", delivered.single().data?.get("product"))
+            rig.assertFutureLink(winner)
+        } finally {
+            olderReply.complete(Unit)
+            newerReply.complete(Unit)
+            rig.manager.close()
+        }
+    }
+
+    @Test
+    fun `old offline events keep their attribution when a new session opens another campaign`() = runTest(timeout = 40.seconds) {
+        val rig = Rig(freshInstall = false)
+        val sessionA = rig.context.sessionId
+        val campaignB = "https://demo.sqd.link/campaign-b"
+        val started = CompletableDeferred<Unit>()
+        val reply = CompletableDeferred<Unit>()
+        val offline = LSResult.Error(java.io.IOException("offline"))
+        coEvery { rig.service.addEvent(any()) } returns offline
+        coEvery { rig.service.addPaymentEvent(any()) } returns offline
+        coEvery { rig.service.addCustomEvent(any()) } returns offline
+        try {
+            rig.events.logAppLaunchEvents()
+            rig.manager.track("old_checkout", null, null)
+            rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "old_sku", InstantCompat.now())
+            rig.events.onAppForegrounded()
+            rig.custom.flush()
+            assertTrue(rig.storage.getEvents().any { it.event == EventType.APP_OPEN && it.sessionId == sessionA })
+            assertEquals(1, rig.storage.getPaymentEvents().size)
+            assertEquals(1, rig.customStorage.getEvents().size)
+
+            rig.manager.onAppBackgrounded()
+            rig.context.markBackgrounded()
+            // Advance wall time after backgrounding; persisted events keep their actual earlier timestamps.
+            val resumedAt = rig.context.backgroundedAt!!.plusMillis(31 * 60 * 1000L)
+            mockkObject(InstantCompat.Companion)
+            every { InstantCompat.now() } returns resumedAt
+            rig.context.rotateSessionIfNeeded()
+            val sessionB = rig.context.sessionId
+            assertNotEquals(sessionA, sessionB)
+
+            coEvery { rig.service.payloadWithLinkFor(any()) } coAnswers {
+                started.complete(Unit)
+                reply.await()
+                LSResult.Success(DeeplinkDetails(campaignB, null, null))
+            }
+            val lookup = async { rig.manager.handleIntent(Intent().setData(Uri.parse(campaignB)), false) }
+            started.await()
+            rig.events.logAppLaunchEvents()
+            rig.manager.track("new_checkout", null, null)
+            rig.manager.logCustomPurchase(PaymentEventType.BUY, 200, "USD", "new_sku", InstantCompat.now())
+
+            val sent = mutableListOf<String>()
+            fun record(kind: String, session: String?, link: String?) {
+                assertTrue("Unexpected session $session", session == sessionA || session == sessionB)
+                sent.add("$kind|${if (session == sessionA) "A" else "B"}|$link")
+            }
+            coEvery { rig.service.addEvent(any()) } answers {
+                val event = firstArg<Event>()
+                if (event.event == EventType.APP_OPEN) record("lifecycle", event.sessionId, event.link)
+                LSResult.Success(true)
+            }
+            coEvery { rig.service.addPaymentEvent(any()) } answers {
+                val event = firstArg<PaymentEvent>()
+                record("purchase", event.sessionId, event.link)
+                LSResult.Success(true)
+            }
+            coEvery { rig.service.addCustomEvent(any()) } answers {
+                val event = firstArg<io.grovs.model.CustomEvent>()
+                record("custom", event.sessionId, event.link)
+                LSResult.Success(true)
+            }
+            reply.complete(Unit)
+            lookup.await()
+            rig.custom.flush()
+            val expected = listOf("lifecycle", "purchase", "custom").flatMap {
+                listOf("$it|A|null", "$it|B|$campaignB")
+            }
+            assertEquals("A later campaign must not rewrite the offline session", expected.sorted(), sent.sorted())
+        } finally {
+            reply.complete(Unit)
+            rig.manager.close()
+            unmockkObject(InstantCompat.Companion)
+        }
+    }
+
+
+    // ==================== Real-world flows not previously covered ====================
+
+    /** The launcher activity's onStart runs again on rotation and whenever the user navigates back to it. */
+    private suspend fun GrovsManager.launcherOnStart(intent: Intent) = handleIntent(intent, delayEvents = true, cacheIntent = true)
+
+    @Test
+    fun `returning to the launcher activity keeps the link for later events`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val launcherIntent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl))
+        try {
+            // Cold start from the link.
+            assertEquals(directUrl, rig.manager.launcherOnStart(launcherIntent)?.link)
+            rig.assertFutureLink(directUrl)
+
+            // The user opens another screen and comes back, or rotates the phone: onStart fires
+            // again with the same intent and the backend has nothing new to match.
+            assertNull(rig.manager.launcherOnStart(launcherIntent))
+
+            rig.manager.track("viewed_product", null, null)
+            rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "sku", InstantCompat.now())
+            assertEquals(directUrl, rig.customStorage.getEvents().last().link)
+            assertEquals(listOf(directUrl), rig.sentPurchases)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `queued events stay held while a superseded lookup is still in flight`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val firstSession = rig.context.sessionId
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadFor(match { it.sessionId == firstSession }) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        coEvery { rig.service.payloadFor(match { it.sessionId != firstSession }) } returns LSResult.Success(empty)
+        try {
+            val old = async { rig.manager.launcherOnStart(Intent()) }
+            started.await()
+
+            rig.context.markBackgrounded()
+            GrovsContext::class.java.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+                .set(rig.context, InstantCompat.now().minusMillis((GrovsContext.SESSION_TIMEOUT_MINUTES + 1) * 60_000))
+            rig.context.rotateSessionIfNeeded()
+            assertNull(rig.manager.launcherOnStart(Intent()))
+
+            rig.manager.track("while_pending", null, null)
+            rig.custom.flush()
+            assertEquals("The empty new-session lookup must not release events the older lookup may still attribute",
+                emptyList<String?>(), rig.sentCustom)
+
+            gate.complete(Unit)
+            assertEquals(directUrl, old.await()?.link)
+            rig.custom.flush()
+            assertEquals(listOf(directUrl), rig.sentCustom)
+        } finally { rig.manager.close() }
+    }
+
+    @Test
+    fun `a match arriving after a session rotation attributes the new session consistently`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val firstSession = rig.context.sessionId
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        // The first lookup is parked (offline, retrying); later ones answer immediately.
+        coEvery { rig.service.payloadFor(match { it.sessionId == firstSession }) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(directUrl, null, null))
+        }
+        coEvery { rig.service.payloadFor(match { it.sessionId != firstSession }) } returns LSResult.Success(empty)
+        try {
+            val old = async { rig.manager.launcherOnStart(Intent()) }
+            started.await()
+
+            // Backgrounded for longer than the session timeout, then brought back.
+            rig.context.markBackgrounded()
+            GrovsContext::class.java.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+                .set(rig.context, InstantCompat.now().minusMillis((GrovsContext.SESSION_TIMEOUT_MINUTES + 1) * 60_000))
+            rig.context.rotateSessionIfNeeded()
+            assertNotEquals(firstSession, rig.context.sessionId)
+            assertNull(rig.manager.launcherOnStart(Intent()))
+            rig.manager.track("before_late_match", null, null)
+
+            gate.complete(Unit)
+            assertEquals(directUrl, old.await()?.link)
+            rig.manager.track("after_late_match", null, null)
+
+            val links = rig.customStorage.getEvents().filter { it.sessionId == rig.context.sessionId }.map { it.eventName to it.link }
+            assertEquals(links.toString(), 1, links.map { it.second }.distinct().size)
         } finally { rig.manager.close() }
     }
 }
