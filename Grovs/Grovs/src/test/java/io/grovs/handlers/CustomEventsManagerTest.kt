@@ -7,13 +7,16 @@ import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.IGrovsService
 import io.grovs.storage.ICustomEventsStorage
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -55,6 +58,13 @@ class CustomEventsManagerTest {
         coEvery { storage.removeEvents(any()) } answers {
             val doomed = firstArg<List<CustomEvent>>().map { it.eventId }.toSet()
             stored.removeAll { doomed.contains(it.eventId) }
+            Unit
+        }
+        coEvery { storage.updateEvents(any()) } answers {
+            val transform = firstArg<(CustomEvent) -> CustomEvent>()
+            val updated = stored.map(transform)
+            stored.clear()
+            stored.addAll(updated)
             Unit
         }
         coEvery { service.addCustomEvent(any()) } returns LSResult.Success(true)
@@ -224,5 +234,73 @@ class CustomEventsManagerTest {
 
         assertEquals(0, stored.size)
         coVerify(exactly = 2) { service.addCustomEvent(any()) }
+    }
+
+    /** A manager whose backfill coroutine runs on the test scheduler rather than a real dispatcher. */
+    private fun TestScope.backfillManager() = CustomEventsManager(
+        context = context,
+        grovsContext = grovsContext,
+        grovsService = service,
+        customEventsStorage = storage,
+        timerDispatcher = StandardTestDispatcher(testScheduler),
+        startFlushTimer = false,
+    )
+
+    @Test
+    fun `a resolved link backfills events tracked earlier in the same session`() = runTest {
+        val manager = backfillManager()
+        manager.track("checkout_started", null, null)
+
+        manager.setLinkForFutureEvents("https://grovs.io/abc")
+        advanceUntilIdle()
+
+        assertEquals(
+            "https://grovs.io/abc",
+            stored.first { it.eventName == "checkout_started" }.link
+        )
+        manager.close()
+    }
+
+    @Test
+    fun `the backfill leaves earlier sessions and already-attributed events alone`() = runTest {
+        val manager = backfillManager()
+        stored.add(
+            CustomEvent(
+                eventName = "previous_session",
+                sessionId = "a-previous-session",
+                createdAt = InstantCompat.now(),
+            )
+        )
+        stored.add(
+            CustomEvent(
+                eventName = "already_attributed",
+                sessionId = grovsContext.sessionId,
+                link = "https://grovs.io/original",
+                createdAt = InstantCompat.now(),
+            )
+        )
+
+        manager.setLinkForFutureEvents("https://grovs.io/abc")
+        advanceUntilIdle()
+
+        assertEquals(null, stored.first { it.eventName == "previous_session" }.link)
+        assertEquals(
+            "https://grovs.io/original",
+            stored.first { it.eventName == "already_attributed" }.link
+        )
+        manager.close()
+    }
+
+    @Test
+    fun `clearing the link does not touch stored events`() = runTest {
+        val manager = backfillManager()
+        manager.track("checkout_started", null, null)
+
+        manager.setLinkForFutureEvents(null)
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { storage.updateEvents(any()) }
+        assertEquals(null, stored.first { it.eventName == "checkout_started" }.link)
+        manager.close()
     }
 }

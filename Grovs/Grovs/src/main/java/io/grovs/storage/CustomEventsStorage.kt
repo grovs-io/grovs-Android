@@ -44,6 +44,10 @@ internal class CustomEventsStorage(context: Context) : ICustomEventsStorage {
         readAll().filter { it.createdAt.isAfter(cutoff) }
     }
 
+    override suspend fun updateEvents(transform: (CustomEvent) -> CustomEvent) = withContext(storageSerialDispatcher) {
+        write(readAll().map(transform))
+    }
+
     private fun readAll(): List<CustomEvent> {
         val jsonString = preferences.getString(STORED_CUSTOM_EVENTS, null)
         val type = object : TypeToken<List<CustomEvent>>() {}.type

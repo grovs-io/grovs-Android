@@ -17,4 +17,7 @@ class GrovsSettings {
     /// Defaults to true, matching the iOS SDK.
     var autoTrackScreenViews: Boolean = true
 
+    /// Custom link hosts accepted by clipboard-assisted deferred deep linking, already normalized.
+    var clipboardDomains: List<String> = emptyList()
+
 }

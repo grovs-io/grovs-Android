@@ -38,6 +38,7 @@ class EventsManager(
     // Internal state - exposed for testing
     internal var linkForFutureActions: String? = null
     internal var allowedToSendToBackend = false
+    internal var eventsHeld = false
     internal var firstRequestTime: InstantCompat? = null
     internal var eventsDelaySeconds = 14
 
@@ -91,7 +92,7 @@ class EventsManager(
         }
 
         for (event in events) {
-            logPurchase(event = event)
+            logPurchase(event = event.withSessionId(grovsContext.sessionId))
         }
     }
 
@@ -105,7 +106,8 @@ class EventsManager(
             currency = currency,
             date = startDate,
             productId = productId,
-            store = false
+            store = false,
+            sessionId = grovsContext.sessionId
         )
 
         logPurchase(event = event)
@@ -115,13 +117,23 @@ class EventsManager(
     /// - Parameter link: The link to set
     override suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
         linkForFutureActions = link
-        allowedToSendToBackend = !delayEvents
+        allowedToSendToBackend = !delayEvents && !eventsHeld
         link?.let {
             addLinkToEvents(link)
             eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
         } ?: kotlin.run {
             sendNormalEventsToBackend()
             sendPaymentEventsToBackend()
+        }
+    }
+
+    /// Holds or releases the events hold gate. While held, no normal or payment event
+    /// leaves the device, regardless of `delayEvents` or the elapsed delay. Clearing the
+    /// hold does not flush by itself; call [setLinkToNewFutureActions] afterwards.
+    override fun setEventsHeld(held: Boolean) {
+        eventsHeld = held
+        if (held) {
+            allowedToSendToBackend = false
         }
     }
 
@@ -301,6 +313,11 @@ class EventsManager(
                 sendNormalEventsToBackend()
                 sendPaymentEventsToBackend()
             }
+        }
+
+        if (eventsHeld) {
+            allowedToSendToBackend = false
+            return
         }
 
         if (!allowedToSendToBackend) {

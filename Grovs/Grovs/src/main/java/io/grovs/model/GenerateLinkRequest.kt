@@ -22,6 +22,10 @@ class GenerateLinkRequest(
     val showPreviewIos: Boolean?,
     @SerializedName("show_preview_android")
     val showPreviewAndroid: Boolean?,
+    @SerializedName("copy_to_clipboard_ios")
+    val copyToClipboardIos: Boolean? = null,
+    @SerializedName("copy_to_clipboard_android")
+    val copyToClipboardAndroid: Boolean? = null,
     @SerializedName("tracking_campaign")
     val trackingCampaign: String?,
     @SerializedName("tracking_source")

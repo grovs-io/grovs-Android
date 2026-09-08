@@ -3,6 +3,8 @@ package io.grovs.viewmodels
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import io.grovs.model.DebugLogger
+import io.grovs.model.LogLevel
 import io.grovs.model.notifications.Notification
 import io.grovs.service.GrovsService
 import io.grovs.utils.LSResult
@@ -24,16 +26,31 @@ class NotificationsMainViewModel(application: Application) : AndroidViewModel(ap
     private var currentPage = 1
 
     fun loadMoreNotifications() {
+        // Set synchronously, before the launch: two taps in the same frame would both get past a
+        // guard that the coroutine only raises once it is dispatched.
+        if (_isLoading.value) return
+        _isLoading.value = true
+
         viewModelScope.launch {
-            _isLoading.value = true
-            val result = grovsService.notifications(currentPage)
-            when (result) {
-                is LSResult.Success -> {
-                    _notifications.value += result.data.notifications ?: emptyList()
-                    currentPage += 1
-                    _isLoading.value = false
+            try {
+                when (val result = grovsService.notifications(currentPage)) {
+                    is LSResult.Success -> {
+                        _notifications.value += result.data.notifications ?: emptyList()
+                        currentPage += 1
+                    }
+                    is LSResult.Error -> {
+                        // currentPage stays put so the next call retries this page rather than
+                        // skipping past it and leaving a hole in the list.
+                        DebugLogger.instance.log(
+                            LogLevel.ERROR,
+                            "Failed to load messages page $currentPage. ${result.exception.message}"
+                        )
+                    }
                 }
-                is LSResult.Error -> {}
+            } finally {
+                // Whatever happened, the spinner comes down - otherwise the guard above would
+                // block every later page load for good.
+                _isLoading.value = false
             }
         }
     }

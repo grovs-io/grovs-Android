@@ -4,6 +4,7 @@ import io.grovs.api.GrovsApi
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.ClipboardStatusResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkRequest
@@ -39,6 +40,7 @@ class MockGrovsApi : GrovsApi {
     var generateLinkResponse: Response<GenerateLinkResponse>? = null
     var payloadResponse: Response<DeeplinkDetails>? = null
     var payloadWithLinkResponse: Response<DeeplinkDetails>? = null
+    var clipboardStatusResponse: Response<ClipboardStatusResponse>? = null
     var linkDetailsResponse: Response<ResponseBody>? = null
     var getDeviceResponse: Response<GetDeviceResponse>? = null
     var notificationsResponse: Response<NotificationsResponse>? = null
@@ -60,17 +62,27 @@ class MockGrovsApi : GrovsApi {
     var updateAttributesCalls = mutableListOf<UpdateAttributesRequest>()
     var linkDetailsCalls = mutableListOf<LinkDetailsRequest>()
     var lastScreenAliases: ScreenAliasesRequest? = null
+    var clipboardStatusCalls = 0
+    var payloadCalls = mutableListOf<AppDetails>()
+    var payloadWithLinkCalls = mutableListOf<AppDetails>()
 
     // =====================================================================
     // GrovsApi Implementation
     // =====================================================================
 
     override suspend fun payloadFor(request: AppDetails): Response<DeeplinkDetails> {
+        payloadCalls.add(request)
         return payloadResponse ?: createSuccessDeeplinkResponse()
     }
 
     override suspend fun payloadWithLinkFor(request: AppDetails): Response<DeeplinkDetails> {
+        payloadWithLinkCalls.add(request)
         return payloadWithLinkResponse ?: createSuccessDeeplinkResponse()
+    }
+
+    override suspend fun clipboardStatus(): Response<ClipboardStatusResponse> {
+        clipboardStatusCalls++
+        return clipboardStatusResponse ?: Response.success(ClipboardStatusResponse(clipboardActive = false))
     }
 
     override suspend fun authenticate(request: AppDetails): Response<AuthenticationResponse> {
@@ -142,6 +154,7 @@ class MockGrovsApi : GrovsApi {
         generateLinkResponse = null
         payloadResponse = null
         payloadWithLinkResponse = null
+        clipboardStatusResponse = null
         linkDetailsResponse = null
         getDeviceResponse = null
         notificationsResponse = null
@@ -162,6 +175,9 @@ class MockGrovsApi : GrovsApi {
         updateAttributesCalls.clear()
         linkDetailsCalls.clear()
         lastScreenAliases = null
+        clipboardStatusCalls = 0
+        payloadCalls.clear()
+        payloadWithLinkCalls.clear()
     }
 
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()

@@ -95,6 +95,34 @@ internal class CustomEventsManager(
 
     override fun setLinkForFutureEvents(link: String?) {
         linkForFutureEvents = link
+        if (link == null) return
+
+        // Events tracked before the deeplink resolved belong to this same session, so they earned
+        // the attribution too. Only linkless events of the current session are touched: an earlier
+        // session's events belong to whatever resolved back then, and an already-attributed event
+        // must not be overwritten.
+        // Best effort: an event a concurrent flush has already snapshotted goes out without the
+        // link, exactly as it does today. The backfill only ever improves attribution, never
+        // delays or blocks a send.
+        val sessionId = grovsContext.sessionId
+        timerScope.launch {
+            try {
+                customEventsStorage.updateEvents { event ->
+                    if (event.link == null && event.sessionId == sessionId) {
+                        event.copy(link = link)
+                    } else {
+                        event
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DebugLogger.instance.log(
+                    LogLevel.ERROR,
+                    "Failed to attribute pending custom events to the resolved link: ${e.message}"
+                )
+            }
+        }
     }
 
     override suspend fun flush() {

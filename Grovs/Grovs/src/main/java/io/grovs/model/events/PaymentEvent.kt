@@ -35,7 +35,26 @@ class PaymentEvent(
     val store: Boolean = false,
 
     var link: String? = null,
+
+    /// The analytics session the purchase was logged in. Null for events persisted before this field existed.
+    @SerializedName("session_id")
+    val sessionId: String? = null,
 ) : Parcelable {
+
+    /** Rebuilds the event with the analytics session stamped. Used for events parsed from Play Billing JSON. */
+    internal fun withSessionId(sessionId: String) = PaymentEvent(
+        eventType = eventType,
+        appId = appId,
+        priceCents = priceCents,
+        currency = currency,
+        date = date,
+        transactionToken = transactionToken,
+        originalTransactionId = originalTransactionId,
+        productId = productId,
+        store = store,
+        link = link,
+        sessionId = sessionId,
+    )
 
     companion object {
         // Internal data class to parse the purchase JSON

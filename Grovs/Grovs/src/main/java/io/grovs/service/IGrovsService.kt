@@ -41,7 +41,13 @@ interface IGrovsService {
      * Get deeplink payload with specific link.
      */
     suspend fun payloadWithLinkFor(appDetails: AppDetails): LSResult<DeeplinkDetails>
-    
+
+    /**
+     * Whether the project had clipboard-enabled link clicks recently.
+     * Single attempt: an [LSResult.Error] means "unknown, retry later", never "inactive".
+     */
+    suspend fun clipboardStatus(): LSResult<Boolean>
+
     /**
      * Generate a new deep link.
      */
@@ -54,6 +60,8 @@ interface IGrovsService {
         customRedirects: CustomRedirects?,
         showPreviewIos: Boolean?,
         showPreviewAndroid: Boolean?,
+        copyToClipboardIos: Boolean?,
+        copyToClipboardAndroid: Boolean?,
         tracking: TrackingParams?
     ): LSResult<GenerateLinkResponse>
     

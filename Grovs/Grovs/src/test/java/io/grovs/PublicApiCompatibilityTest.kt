@@ -55,4 +55,19 @@ class PublicApiCompatibilityTest {
         assertNotNull(Grovs.Companion.javaClass.getDeclaredMethod("configure", *parameters))
         assertNotNull(Grovs::class.java.getDeclaredMethod("configure", *parameters))
     }
+
+    @Test
+    fun `six parameter configure overload with clipboard domains is present`() {
+        val parameters = arrayOf(
+            Application::class.java,
+            String::class.java,
+            booleanType,
+            String::class.java,
+            booleanType,
+            List::class.java,
+        )
+
+        assertNotNull(Grovs.Companion.javaClass.getDeclaredMethod("configure", *parameters))
+        assertNotNull(Grovs::class.java.getDeclaredMethod("configure", *parameters))
+    }
 }

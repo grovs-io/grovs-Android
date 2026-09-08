@@ -110,6 +110,25 @@ class CustomEventsStorageTest {
     }
 
     @Test
+    fun `updateEvents rewrites stored events through the transform`() = runTest {
+        storage.addEvent(CustomEvent(eventName = "a", createdAt = InstantCompat.now()))
+        storage.addEvent(CustomEvent(eventName = "b", createdAt = InstantCompat.now(), link = "kept"))
+
+        storage.updateEvents { if (it.link == null) it.copy(link = "backfilled") else it }
+
+        val byName = storage.getEvents().associateBy { it.eventName }
+        assertEquals("backfilled", byName.getValue("a").link)
+        assertEquals("kept", byName.getValue("b").link)
+    }
+
+    @Test
+    fun `updateEvents on empty storage is a no-op`() = runTest {
+        storage.updateEvents { it.copy(link = "x") }
+
+        assertEquals(emptyList<CustomEvent>(), storage.getEvents())
+    }
+
+    @Test
     fun `instants are serialized as ISO-8601 strings not epochMillis objects`() = runTest {
         storage.addEvent(event("test_event"))
 

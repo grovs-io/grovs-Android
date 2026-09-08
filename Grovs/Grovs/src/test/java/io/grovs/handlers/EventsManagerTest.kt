@@ -372,4 +372,74 @@ class EventsManagerTest {
 
         coVerify { mockEventsStorage.removeEvent(any()) }
     }
+
+    // ==================== session_id on payment events ====================
+
+    @Test
+    fun `logCustomPurchase stamps the current session id on the payment event`() = runTest {
+        val captured = slot<io.grovs.model.events.PaymentEvent>()
+        coEvery { mockEventsStorage.addPaymentEvent(capture(captured)) } just Runs
+        coEvery { mockEventsStorage.getPaymentEvents() } returns emptyList()
+
+        eventsManager.logCustomPurchase(
+            type = io.grovs.model.events.PaymentEventType.BUY,
+            priceInCents = 499,
+            currency = "USD",
+            productId = "pro",
+            startDate = InstantCompat.now()
+        )
+
+        assertEqualsWithContext(
+            grovsContext.sessionId,
+            captured.captured.sessionId,
+            "paymentEvent.sessionId",
+            "after logCustomPurchase()"
+        )
+    }
+
+    // ==================== Events hold ====================
+
+    @Test
+    fun `held events never flush even when delayEvents is false`() = runTest {
+        val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
+        coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
+        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+
+        eventsManager.setEventsHeld(true)
+        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        assertAllowedToSendToBackend(eventsManager, expected = false, context = "while events are held")
+    }
+
+    @Test
+    fun `held events never flush even after the delay window has passed`() = runTest {
+        val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
+        coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
+        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        eventsManager.eventsDelaySeconds = 0
+        eventsManager.firstRequestTime = InstantCompat.ofEpochMilli(0)
+
+        eventsManager.setEventsHeld(true)
+        eventsManager.setLinkToNewFutureActions(null, delayEvents = true)
+
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+    }
+
+    @Test
+    fun `clearing the hold then setting the link flushes`() = runTest {
+        val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
+        coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
+        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+
+        eventsManager.setEventsHeld(true)
+        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+
+        eventsManager.setEventsHeld(false)
+        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }   // clearing alone does not flush
+
+        eventsManager.setLinkToNewFutureActions(null, delayEvents = false)
+        coVerify(exactly = 1) { mockGrovsService.addEvent(any()) }
+    }
 }

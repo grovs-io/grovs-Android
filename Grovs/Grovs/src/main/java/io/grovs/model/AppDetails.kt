@@ -26,5 +26,7 @@ data class AppDetails (
     var webglVendor: String? = null,
     @SerializedName("webgl_renderer")
     var webglRenderer: String? = null,
+    @SerializedName("session_id")
+    var sessionId: String? = null,
 ) : Parcelable {
 }

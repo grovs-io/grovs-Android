@@ -21,4 +21,10 @@ interface ILocalCache {
      * The timestamp when the app was last started.
      */
     var lastStartTimestamp: InstantCompat?
+
+    /**
+     * Whether the one-shot clipboard-assisted deferred deep link flow is still armed for this install.
+     * Armed on a fresh install; cleared for good once the flow reaches a terminal outcome.
+     */
+    var clipboardFlowPending: Boolean
 }

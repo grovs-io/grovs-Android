@@ -299,7 +299,7 @@ class GrovsSingletonTest {
     fun `Grovs generateLink invokes callback with link URL when authenticated`() {
         val mockManager = mockk<GrovsManager>(relaxed = true)
         every { mockManager.authenticationState } returns GrovsManager.AuthenticationState.AUTHENTICATED
-        coEvery { mockManager.generateLink(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
+        coEvery { mockManager.generateLink(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns
             LSResult.Success(GenerateLinkResponse("https://test.grovs.io/generated-link"))
 
         injectMockGrovsManagerDirectly(mockManager)

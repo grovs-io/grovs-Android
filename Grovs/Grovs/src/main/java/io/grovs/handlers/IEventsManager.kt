@@ -43,4 +43,11 @@ interface IEventsManager {
      * @param delayEvents Whether to delay sending events
      */
     suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean)
+
+    /**
+     * Holds every normal and payment event on the device while true, regardless of `delayEvents`
+     * or the first-batch delay. Used while the clipboard flow decides the INSTALL link.
+     * Clearing the hold does not flush; call [setLinkToNewFutureActions] afterwards.
+     */
+    fun setEventsHeld(held: Boolean)
 }

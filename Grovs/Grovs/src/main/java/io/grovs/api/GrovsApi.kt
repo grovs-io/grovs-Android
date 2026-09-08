@@ -4,6 +4,7 @@ import android.os.Parcelable
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.ClipboardStatusResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
@@ -31,6 +32,10 @@ interface GrovsApi {
 
     @POST("data_for_device_and_url")
     suspend fun payloadWithLinkFor(@Body request: AppDetails): Response<DeeplinkDetails>
+
+    /** Whether the project had clipboard-enabled link clicks recently. Retrofit sends an empty body for a bodiless POST. */
+    @POST("clipboard_status")
+    suspend fun clipboardStatus(): Response<ClipboardStatusResponse>
 
     @POST("authenticate")
     suspend fun authenticate(@Body request: AppDetails): Response<AuthenticationResponse>

@@ -14,8 +14,16 @@ class GrovsContext {
     val serialDispatcher = Dispatchers.IO.limitedParallelism(1)
     val settings = GrovsSettings()
     var grovsId: String? = null
+
+    // Written by the host app on whatever thread it likes and read from the SDK's own coroutines,
+    // so the write has to be visible to the reader without a lock between them.
+    @Volatile
     var identifier: String? = null
+
+    @Volatile
     var pushToken: String? = null
+
+    @Volatile
     var attributes: Map<String, Any>? = null
     var lastSeen: InstantCompat? = null
 

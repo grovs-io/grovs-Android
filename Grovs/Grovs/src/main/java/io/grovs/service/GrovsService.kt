@@ -39,6 +39,7 @@ import io.grovs.utils.LSJsonDateTypeAdapterFactory
 import io.grovs.utils.LSJsonInstantCompatTypeAdapterFactory
 import io.grovs.utils.LSJsonInstantTypeAdapterFactory
 import io.grovs.utils.LSResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -189,6 +190,24 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
+    override suspend fun clipboardStatus(): LSResult<Boolean> {
+        DebugLogger.instance.log(LogLevel.INFO, "Clipboard status")
+
+        return try {
+            val response = grovsApi.clipboardStatus()
+            val active = response.body()?.clipboardActive
+            if (response.isSuccessful && active != null) {
+                DebugLogger.instance.log(LogLevel.INFO, "Clipboard status - Active: $active")
+                LSResult.Success(active)
+            } else {
+                DebugLogger.instance.log(LogLevel.INFO, "Clipboard status - Failed (${response.code()})")
+                LSResult.Error(java.io.IOException("Failed to fetch clipboard status (${response.code()})."))
+            }
+        } catch (e: Exception) {
+            LSResult.Error(e)
+        }
+    }
+
     /// Authenticates the app.
     ///
     /// - Parameters:
@@ -228,6 +247,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                              customRedirects: CustomRedirects?,
                              showPreviewIos: Boolean?,
                              showPreviewAndroid: Boolean?,
+                             copyToClipboardIos: Boolean?,
+                             copyToClipboardAndroid: Boolean?,
                              tracking: TrackingParams?): LSResult<GenerateLinkResponse> {
         try {
             val stringData = gson.toJson(data)
@@ -242,6 +263,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 desktopCustomRedirect = customRedirects?.desktop,
                 showPreviewIos = showPreviewIos,
                 showPreviewAndroid = showPreviewAndroid,
+                copyToClipboardIos = copyToClipboardIos,
+                copyToClipboardAndroid = copyToClipboardAndroid,
                 trackingCampaign = tracking?.utmCampaign,
                 trackingMedium = tracking?.utmMedium,
                 trackingSource = tracking?.utmSource)
@@ -418,6 +441,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
                     return LSResult.Error(java.io.IOException("Failed to set attributes. ${error.error}"))
                 }
+            } catch (e: CancellationException) {
+                // A newer attribute update supersedes this one. Swallowing cancellation here would
+                // make the retry loop uncancellable.
+                throw e
             } catch (e: Exception) { }
 
             delay(if (retryCount < EAGER_RETRY_COUNT) EAGER_RETRY_FALLBACK_TIME else RETRY_FALLBACK_TIME)
@@ -578,8 +605,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     }
 
     override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
-        if (aliases.isEmpty()) return LSResult.Success(true)
-
+        // An empty map is not a no-op: it is how a caller clears the aliases the backend holds, so
+        // it has to go out on the wire rather than being answered locally.
         return try {
             val request = ScreenAliasesRequest(
                 screenAliases = aliases.map { ScreenAlias(identifier = it.key, alias = it.value) }

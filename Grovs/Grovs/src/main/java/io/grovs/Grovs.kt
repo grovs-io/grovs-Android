@@ -14,6 +14,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
+import io.grovs.handlers.ClipboardHandler
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.NavigationScreenTracker
@@ -134,6 +135,30 @@ public class Grovs: ActivityProvider {
             )
         }
 
+        /**
+         * Configures Grovs with custom link hosts for clipboard-assisted deferred deep linking.
+         * - clipboardDomains: hosts your links are served from (e.g. `["links.example.com"]`).
+         *   `*.sqd.link` and `*.grovs.link` hosts are always accepted; content on any other host is
+         *   never read or sent.
+         */
+        fun configure(
+            application: Application,
+            apiKey: String,
+            useTestEnvironment: Boolean,
+            baseURL: String?,
+            autoTrackScreenViews: Boolean,
+            clipboardDomains: List<String>?,
+        ) {
+            instance.configure(
+                application = application,
+                apiKey = apiKey,
+                useTestEnvironment = useTestEnvironment,
+                baseURL = baseURL,
+                autoTrackScreenViews = autoTrackScreenViews,
+                clipboardDomains = clipboardDomains,
+            )
+        }
+
         /// Disables the Grovs SDK.
         /// - Parameter enabled: The log level to set.
         /// Default is true.
@@ -157,6 +182,8 @@ public class Grovs: ActivityProvider {
         ///   - customRedirects: Override the default redirects for a link.
         ///   - showPreviewIos: Show the link preview before redirecting on iOS platform.
         ///   - showPreviewAndroid: Show the link preview before redirecting on Android platform.
+        ///   - copyToClipboardIos: Override the project's copy-to-clipboard setting for iOS; `null` inherits it.
+        ///   - copyToClipboardAndroid: Override the project's copy-to-clipboard setting for Android; `null` inherits it.
         ///   - tracking: Provide utm tracking parameters for your link.
         suspend fun generateLink(title: String? = null,
                                  subtitle: String? = null,
@@ -166,6 +193,8 @@ public class Grovs: ActivityProvider {
                                  customRedirects: CustomRedirects? = null,
                                  showPreviewIos: Boolean? = null,
                                  showPreviewAndroid: Boolean? = null,
+                                 copyToClipboardIos: Boolean? = null,
+                                 copyToClipboardAndroid: Boolean? = null,
                                  tracking: TrackingParams? = null): String {
             return instance.generateLink(title = title,
                 subtitle = subtitle,
@@ -175,6 +204,8 @@ public class Grovs: ActivityProvider {
                 customRedirects = customRedirects,
                 showPreviewIos = showPreviewIos,
                 showPreviewAndroid = showPreviewAndroid,
+                copyToClipboardIos = copyToClipboardIos,
+                copyToClipboardAndroid = copyToClipboardAndroid,
                 tracking = tracking)
         }
 
@@ -189,6 +220,8 @@ public class Grovs: ActivityProvider {
         ///   - customRedirects: Override the default redirects for a link.
         ///   - showPreviewIos: Show the link preview before redirecting on iOS platform.
         ///   - showPreviewAndroid: Show the link preview before redirecting on Android platform.
+        ///   - copyToClipboardIos: Override the project's copy-to-clipboard setting for iOS; `null` inherits it.
+        ///   - copyToClipboardAndroid: Override the project's copy-to-clipboard setting for Android; `null` inherits it.
         ///   - tracking: Provide utm tracking parameters for your link.
         ///   - lifecycleOwner: An optional LifecycleOwner to use when calling the listener, by default global one will be used.
         ///   - listener: A closure to be executed after generating the link.
@@ -200,11 +233,13 @@ public class Grovs: ActivityProvider {
                          customRedirects: CustomRedirects? = null,
                          showPreviewIos: Boolean? = null,
                          showPreviewAndroid: Boolean? = null,
+                         copyToClipboardIos: Boolean? = null,
+                         copyToClipboardAndroid: Boolean? = null,
                          tracking: TrackingParams? = null,
                          lifecycleOwner: LifecycleOwner? = null,
                          listener: GrovsLinkGenerationListener
         ) {
-            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreviewIos, showPreviewAndroid, tracking, lifecycleOwner, listener)
+            instance.generateLink(title, subtitle, imageURL, data, tags, customRedirects, showPreviewIos, showPreviewAndroid, copyToClipboardIos, copyToClipboardAndroid, tracking, lifecycleOwner, listener)
         }
 
         /// Get link details using kotlin coroutine style.
@@ -538,11 +573,30 @@ public class Grovs: ActivityProvider {
         baseURL: String?,
         autoTrackScreenViews: Boolean,
     ) {
+        configure(
+            application = application,
+            apiKey = apiKey,
+            useTestEnvironment = useTestEnvironment,
+            baseURL = baseURL,
+            autoTrackScreenViews = autoTrackScreenViews,
+            clipboardDomains = null,
+        )
+    }
+
+    fun configure(
+        application: Application,
+        apiKey: String,
+        useTestEnvironment: Boolean,
+        baseURL: String?,
+        autoTrackScreenViews: Boolean,
+        clipboardDomains: List<String>?,
+    ) {
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
         this.grovsContext.settings.baseURL = baseURL
         this.grovsContext.settings.autoTrackScreenViews = autoTrackScreenViews
+        this.grovsContext.settings.clipboardDomains = ClipboardHandler.normalizeDomains(clipboardDomains)
 
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
@@ -550,7 +604,8 @@ public class Grovs: ActivityProvider {
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,
             grovsContext = grovsContext,
-            apiKey = apiKey)
+            apiKey = apiKey,
+            activityProvider = this)
 
         notificationsManager = NotificationsManager(context = application.applicationContext,
             grovsContext = grovsContext,
@@ -581,6 +636,8 @@ public class Grovs: ActivityProvider {
                              customRedirects: CustomRedirects? = null,
                              showPreviewIos: Boolean? = null,
                              showPreviewAndroid: Boolean? = null,
+                             copyToClipboardIos: Boolean? = null,
+                             copyToClipboardAndroid: Boolean? = null,
                              tracking: TrackingParams?): String {
         var link: String? = null
         grovsManager?.let { manager ->
@@ -601,6 +658,8 @@ public class Grovs: ActivityProvider {
                     customRedirects = customRedirects,
                     showPreviewIos = showPreviewIos,
                     showPreviewAndroid = showPreviewAndroid,
+                    copyToClipboardIos = copyToClipboardIos,
+                    copyToClipboardAndroid = copyToClipboardAndroid,
                     tracking = tracking
                 )
 
@@ -635,6 +694,8 @@ public class Grovs: ActivityProvider {
                      customRedirects: CustomRedirects? = null,
                      showPreviewIos: Boolean? = null,
                      showPreviewAndroid: Boolean? = null,
+                     copyToClipboardIos: Boolean? = null,
+                     copyToClipboardAndroid: Boolean? = null,
                      tracking: TrackingParams?,
                      lifecycleOwner: LifecycleOwner? = null,
                      listener: GrovsLinkGenerationListener
@@ -663,6 +724,8 @@ public class Grovs: ActivityProvider {
                     customRedirects = customRedirects,
                     showPreviewIos = showPreviewIos,
                     showPreviewAndroid = showPreviewAndroid,
+                    copyToClipboardIos = copyToClipboardIos,
+                    copyToClipboardAndroid = copyToClipboardAndroid,
                     tracking = tracking
                 )
 

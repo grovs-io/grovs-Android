@@ -180,6 +180,8 @@ class GrovsServiceTest {
             customRedirects = null,
             showPreviewIos = true,
             showPreviewAndroid = true,
+            copyToClipboardIos = null,
+            copyToClipboardAndroid = null,
             tracking = null
         )
 
@@ -208,6 +210,8 @@ class GrovsServiceTest {
             customRedirects = null,
             showPreviewIos = null,
             showPreviewAndroid = null,
+            copyToClipboardIos = null,
+            copyToClipboardAndroid = null,
             tracking = null
         )
 
@@ -480,6 +484,20 @@ class TestableGrovsService(
         }
     }
 
+    override suspend fun clipboardStatus(): LSResult<Boolean> {
+        return try {
+            val response = testApi.clipboardStatus()
+            val active = response.body()?.clipboardActive
+            if (response.isSuccessful && active != null) {
+                LSResult.Success(active)
+            } else {
+                LSResult.Error(java.io.IOException("Failed to fetch clipboard status (${response.code()})."))
+            }
+        } catch (e: Exception) {
+            LSResult.Error(e)
+        }
+    }
+
     override suspend fun generateLink(
         title: String?,
         subtitle: String?,
@@ -489,6 +507,8 @@ class TestableGrovsService(
         customRedirects: CustomRedirects?,
         showPreviewIos: Boolean?,
         showPreviewAndroid: Boolean?,
+        copyToClipboardIos: Boolean?,
+        copyToClipboardAndroid: Boolean?,
         tracking: TrackingParams?
     ): LSResult<GenerateLinkResponse> {
         return try {
@@ -503,6 +523,8 @@ class TestableGrovsService(
                 desktopCustomRedirect = customRedirects?.desktop,
                 showPreviewIos = showPreviewIos,
                 showPreviewAndroid = showPreviewAndroid,
+                copyToClipboardIos = copyToClipboardIos,
+                copyToClipboardAndroid = copyToClipboardAndroid,
                 trackingCampaign = tracking?.utmCampaign,
                 trackingMedium = tracking?.utmMedium,
                 trackingSource = tracking?.utmSource
@@ -655,8 +677,7 @@ class TestableGrovsService(
     }
 
     override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
-        if (aliases.isEmpty()) return LSResult.Success(true)
-
+        // Mirrors GrovsService: an empty map is a clear, so it goes out rather than short-circuiting.
         return try {
             val request = io.grovs.model.ScreenAliasesRequest(
                 screenAliases = aliases.map {

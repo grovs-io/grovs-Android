@@ -15,4 +15,10 @@ internal interface ICustomEventsStorage {
 
     /** Retrieves all stored custom events, dropping any older than the staleness threshold. */
     suspend fun getEvents(): List<CustomEvent>
+
+    /**
+     * Rewrites every stored event through [transform]. Read and write happen on the storage's own
+     * serial dispatcher, so a concurrent add or remove cannot interleave and lose the update.
+     */
+    suspend fun updateEvents(transform: (CustomEvent) -> CustomEvent)
 }

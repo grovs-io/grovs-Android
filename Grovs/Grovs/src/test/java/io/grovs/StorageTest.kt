@@ -162,4 +162,16 @@ class StorageTest {
             "when called with valid context"
         )
     }
+
+    @Test
+    fun `LocalCache persists clipboardFlowPending across instances`() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val first = io.grovs.storage.LocalCache(context)
+        assertEquals(false, first.clipboardFlowPending)
+
+        first.clipboardFlowPending = true
+
+        val second = io.grovs.storage.LocalCache(context)
+        assertEquals(true, second.clipboardFlowPending)
+    }
 }

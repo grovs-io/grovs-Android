@@ -176,6 +176,25 @@ Grovs.linkDetails(path = "/my-link-path", lifecycleOwner = this) { details, erro
 val details = Grovs.linkDetails(path = "/my-link-path")
 ```
 
+### 5. Clipboard-assisted deferred deep linking
+
+When a link with copy-to-clipboard enabled is opened in the browser, the preview page copies the link to the visitor's clipboard before sending them to Google Play. On the first launch after install, if fingerprint matching found nothing, the SDK checks the clipboard and attributes the install deterministically. The deferred link is delivered through the same `GrovsDeeplinkListener` as fingerprint matches. This works out of the box.
+
+On that first launch Android 12+ shows its system "pasted from your clipboard" toast once. The check is skipped entirely for projects with no clipboard-enabled link clicks in the last 48h and for devices whose clipboard holds no web URL, so an organic installer on a project with active clipboard links may see the toast once. Content on any host other than your Grovs link hosts is never read or sent.
+
+If your project serves links from a custom domain, list it so the SDK recognizes your links on the clipboard:
+
+```kotlin
+Grovs.configure(
+    this,
+    "your-api-key",
+    useTestEnvironment = false,
+    baseURL = null,
+    autoTrackScreenViews = true,
+    clipboardDomains = listOf("links.yourdomain.com")
+)
+```
+
 ## Tracking events
 
 ### Custom events
@@ -284,6 +303,18 @@ lifecycleScope.launch {
         Log.e("Grovs", "Error: ${e.message}")
     }
 }
+```
+
+To override the project's copy-to-clipboard setting for a single link (used for clipboard-assisted deferred deep linking), pass the platform flags. `null` inherits the project default:
+
+```kotlin
+Grovs.generateLink(
+    title = "Link Title",
+    copyToClipboardIos = true,
+    copyToClipboardAndroid = true,
+    lifecycleOwner = this,
+    listener = { link, _ -> link?.let { Log.d("Grovs", "Generated: $it") } }
+)
 ```
 
 ### Custom redirects
@@ -477,7 +508,7 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 
 | Method | Description |
 |---|---|
-| `configure(application, apiKey, useTestEnvironment, baseURL)` | Initialize the SDK |
+| `configure(application, apiKey, useTestEnvironment, baseURL, autoTrackScreenViews, clipboardDomains)` | Initialize the SDK (shorter overloads keep the defaults) |
 | `setSDK(enabled)` | Enable or disable the SDK |
 | `setDebug(level)` | Set logging level (`INFO`, `ERROR`) |
 | `onStart(activity)` | Forward launcher activity's `onStart()` |

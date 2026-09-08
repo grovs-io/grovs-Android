@@ -11,6 +11,7 @@ class LocalCache(val context: Context) : ILocalCache {
         private const val GROVS_NUMBER_OF_OPENS = "grovs_number_of_opens"
         private const val GROVS_RESIGN_TIMESTAMP = "grovs_resign_timestamp"
         private const val GROVS_LAST_START_TIMESTAMP = "grovs_last_start_timestamp"
+        private const val GROVS_CLIPBOARD_FLOW_PENDING = "grovs_clipboard_flow_pending"
     }
 
     override var numberOfOpens:Int
@@ -54,5 +55,11 @@ class LocalCache(val context: Context) : ILocalCache {
                 return null
             }
         }
+
+    override var clipboardFlowPending: Boolean
+        set(value) {
+            preferences.edit().putBoolean(GROVS_CLIPBOARD_FLOW_PENDING, value).apply()
+        }
+        get() = preferences.getBoolean(GROVS_CLIPBOARD_FLOW_PENDING, false)
 
 }
