@@ -6,6 +6,7 @@ import io.grovs.Grovs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.*
@@ -164,13 +165,14 @@ class NotificationsE2ETest {
     @Test
     fun `Number of unread messages with callback style API works`() {
         runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 3)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 3)
+            // Startup lookup and notification requests can overlap; route replies by endpoint.
+            fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
+            E2ETestUtils.setUrlDispatcher(mockWebServer, mapOf(
+                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+                "device_for_vendor_id" to json("""{"last_seen":null}"""),
+                "clipboard_status" to json("""{"clipboard_active":false}"""),
+                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":3}"""),
+            ))
 
             configureAndWaitForAuth()
             delay(200)

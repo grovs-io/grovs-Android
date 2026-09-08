@@ -180,6 +180,8 @@ val details = Grovs.linkDetails(path = "/my-link-path")
 
 When a link with copy-to-clipboard enabled is opened in the browser, the preview page copies the link to the visitor's clipboard before sending them to Google Play. On the first launch after install, if fingerprint matching found nothing, the SDK checks the clipboard and attributes the install deterministically. The deferred link is delivered through the same `GrovsDeeplinkListener` as fingerprint matches. This works out of the box.
 
+Install attribution has a single 25-second waiting budget covering install-referrer lookup, fingerprint matching, and clipboard fallback. Queued lifecycle and purchase events are held during resolution. If the deadline expires, they may upload without attribution; a later match still applies to events that remain queued. A new explicit deep link takes precedence over a pending launch lookup. Custom-event backfill uses only resolved links from the same session.
+
 On that first launch Android 12+ shows its system "pasted from your clipboard" toast once. The check is skipped entirely for projects with no clipboard-enabled link clicks in the last 48h and for devices whose clipboard holds no web URL, so an organic installer on a project with active clipboard links may see the toast once. Content on any host other than your Grovs link hosts is never read or sent.
 
 If your project serves links from a custom domain, list it so the SDK recognizes your links on the clipboard:

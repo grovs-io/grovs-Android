@@ -32,6 +32,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
@@ -93,24 +98,25 @@ internal class GrovsManager(
         clipboardDomains = grovsContext.settings.clipboardDomains,
     )
 
-    /// Release valve: if the clipboard flow stalls this long, held events flush without a link.
-    /// A match landing later still patches events the flush hasn't taken. Internal for tests.
-    internal var clipboardFlowReleaseTimeoutMs: Long = 10_000
-
-    /// Scope the release valve is launched on. Its dispatcher governs the delay, so tests can swap in
-    /// a `TestScope` bound to `runTest`'s scheduler to make the valve respect virtual time.
-    /// SupervisorJob so a failed valve can never cancel the scope for a later launch's valve.
-    internal var clipboardValveScope: CoroutineScope =
+    /** One deadline covers install referrer, fingerprint lookup and clipboard fallback. */
+    internal var attributionTimeoutMs: Long = 25_000
+    internal var attributionScope: CoroutineScope =
         CoroutineScope(grovsContext.serialDispatcher + SupervisorJob())
 
-    /// The one outstanding valve; re-entrant runs must not stack a second one.
-    private var clipboardReleaseValve: Job? = null
+    private sealed class AttributionWait {
+        object NotStarted : AttributionWait()
+        class Waiting(val deadline: Job) : AttributionWait()
+        object Released : AttributionWait()
+    }
 
-    /// True from the call that starts a clipboard flow run until that same call's [ClipboardHandler.runFlow]
-    /// returns. Independent from [clipboardReleaseValve] (which may already have fired and nulled itself
-    /// while the run is still parked), so a re-entrant call never re-holds already-released events or
-    /// arms a second valve.
-    private var clipboardFlowRunning = false
+    private var attributionWait: AttributionWait = AttributionWait.NotStarted
+
+    /** Identity determines which lookup may commit; a new explicit link replaces the owner. */
+    private class LinkResolution(val sessionId: String)
+    private var activeResolution: LinkResolution? = null
+    private val resolutionMutex = Mutex()
+
+    private data class ResolvedDeeplink(val details: DeeplinkDetails, val eventLink: String?)
 
     /// Scope the attribute update runs on. Its dispatcher governs ordering, so tests can swap in a
     /// `TestScope` bound to `runTest`'s scheduler. SupervisorJob so one failed update can never
@@ -134,6 +140,7 @@ internal class GrovsManager(
 
     /// Bumped by every setScreenAliases, so an in-flight sync can tell whether its response is stale.
     private var aliasSyncGeneration: Int = 0
+    @Volatile
     private var isClosed = false
 
     /// A flag indicating whether the user is authenticated with the Grovs backend.
@@ -192,103 +199,85 @@ internal class GrovsManager(
         DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
     }
 
-    private suspend fun getDataForDevice(link: String? = null, delayEvents: Boolean): DeeplinkDetails? {
-        eventsManager.setLinkToNewFutureActions(link, delayEvents = delayEvents)
-        customEventsManager.setLinkForFutureEvents(link)
+    private fun ownsResolution(resolution: LinkResolution): Boolean =
+        !isClosed && activeResolution === resolution
 
-        val appDetails = appDetailsHelperForIntent.toAppDetails()
-        appDetails.url = link
-        // The backend mints the OPEN event for this call, so the session must ride along.
-        appDetails.sessionId = grovsContext.sessionId
-        val result = if (link == null) grovsService.payloadFor(appDetails) else grovsService.payloadWithLinkFor(appDetails)
-        when (result) {
-            is LSResult.Success -> {
-                if (result.data.link != null) {
-                    // A resolved link from any path makes the clipboard flow moot.
-                    clipboardHandler.markResolved()
-                } else if (clipboardHandler.isPending) {
-                    // Only an empty resolve on a fresh install runs the clipboard flow.
-                    return runClipboardFlow(appDetails, delayEvents = delayEvents)
-                }
-
-                eventsManager.setLinkToNewFutureActions(result.data.link, delayEvents = delayEvents)
-                customEventsManager.setLinkForFutureEvents(result.data.link)
-                // if link and data are null we consider we have no deeplink
-                if ((result.data.data == null) && (result.data.link == null)) {
-                    return null
-                } else {
-                    return result.data
+    private fun beginAttributionWait() {
+        if (attributionWait !is AttributionWait.NotStarted) return
+        eventsManager.beginLinkResolution()
+        val deadline = attributionScope.launch {
+            delay(attributionTimeoutMs)
+            resolutionMutex.withLock {
+                if (isClosed || attributionWait !is AttributionWait.Waiting) return@withLock
+                // Do not cancel this deadline from inside its own coroutine: the flush suspends.
+                attributionWait = AttributionWait.Released
+                try {
+                    DebugLogger.instance.log(LogLevel.INFO, "Link attribution timed out; releasing queued events")
+                    eventsManager.completeLinkResolution(null, delayEvents = false)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DebugLogger.instance.log(LogLevel.ERROR, "Link attribution release failed: ${e.message}")
                 }
             }
+        }
+        attributionWait = AttributionWait.Waiting(deadline)
+    }
+
+    private fun releaseAttributionWait() {
+        val waiting = attributionWait as? AttributionWait.Waiting ?: return
+        attributionWait = AttributionWait.Released
+        waiting.deadline.cancel()
+        eventsManager.setEventsHeld(false)
+    }
+
+    /** Resolves a candidate without assigning it to events. Only the current owner may commit. */
+    private suspend fun getDataForDevice(
+        link: String?,
+        resolution: LinkResolution,
+    ): ResolvedDeeplink? {
+        val request = appDetailsHelperForIntent.toAppDetails().copy(
+            url = link,
+            sessionId = resolution.sessionId,
+        )
+        val result = if (link == null) grovsService.payloadFor(request) else grovsService.payloadWithLinkFor(request)
+        if (!ownsResolution(resolution)) return null
+
+        return when (result) {
             is LSResult.Error -> {
                 DebugLogger.instance.log(LogLevel.ERROR, "Error occurred while trying to resolve the deeplink. ${result.exception.message}")
-                return null
+                null
+            }
+            is LSResult.Success -> {
+                if (result.data.link != null) {
+                    clipboardHandler.markResolved()
+                    ResolvedDeeplink(result.data, result.data.link)
+                } else if (clipboardHandler.isPending) {
+                    when (val outcome = clipboardHandler.runFlow(request) { ownsResolution(resolution) }) {
+                        is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
+                        else -> null
+                    }
+                } else {
+                    result.data.takeIf { it.data != null }?.let { ResolvedDeeplink(it, null) }
+                }
             }
         }
     }
 
-    /// INSTALL stays held (events hold gate) until the flow's terminal state or the release valve.
-    private suspend fun runClipboardFlow(appDetails: AppDetails, delayEvents: Boolean): DeeplinkDetails? {
-        if (clipboardFlowRunning) {
-            // A run is already in flight - possibly still parked even after the valve already fired
-            // and released the hold. It owns the hold and the valve; this call must touch neither.
-            return null
-        }
-        clipboardFlowRunning = true
+    private suspend fun commitResolution(
+        resolution: LinkResolution,
+        result: ResolvedDeeplink?,
+        delayEvents: Boolean,
+    ) = resolutionMutex.withLock {
+        if (!ownsResolution(resolution)) return@withLock
+        val link = result?.details?.link
+        customEventsManager.setLinkForFutureEvents(link)
+        if (link != null) customEventsManager.attributePendingEvents(link, resolution.sessionId)
+        if (!ownsResolution(resolution)) return@withLock
 
-        eventsManager.setEventsHeld(true)
-
-        if (clipboardReleaseValve == null) {
-            // No explicit dispatcher here: this inherits clipboardValveScope's own dispatcher, which
-            // is grovsContext.serialDispatcher in production and a TestScope's dispatcher in tests.
-            clipboardReleaseValve = clipboardValveScope.launch {
-                delay(clipboardFlowReleaseTimeoutMs)
-                // Nothing below may escape: this runs unattended on the SDK's own scope, so an
-                // uncaught throw (events storage, disk) would reach the host app's default handler.
-                try {
-                    DebugLogger.instance.log(LogLevel.ERROR, "Clipboard flow stalled - releasing held events without a link")
-                    clipboardReleaseValve = null
-                    eventsManager.setEventsHeld(false)
-                    eventsManager.setLinkToNewFutureActions(null, delayEvents = delayEvents)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    DebugLogger.instance.log(LogLevel.ERROR, "Clipboard release valve failed: ${e.message}")
-                }
-            }
-        }
-
-        val outcome = try {
-            clipboardHandler.runFlow(appDetails)
-        } finally {
-            clipboardFlowRunning = false
-        }
-
-        if (outcome is ClipboardFlowOutcome.AlreadyRunning) {
-            // Unreachable in practice - reentry is gated above - but kept defensive: never touch the hold.
-            return null
-        }
-
-        // The valve may already have fired (and nulled itself) while this call was parked.
-        clipboardReleaseValve?.let {
-            it.cancel()
-            clipboardReleaseValve = null
-            eventsManager.setEventsHeld(false)
-        }
-
-        return when (outcome) {
-            is ClipboardFlowOutcome.Matched -> {
-                // INSTALL carries the clipboard string verbatim; custom events get the resolved link.
-                eventsManager.setLinkToNewFutureActions(outcome.clipboardUrl, delayEvents = delayEvents)
-                customEventsManager.setLinkForFutureEvents(outcome.details.link)
-                outcome.details
-            }
-            else -> {
-                eventsManager.setLinkToNewFutureActions(null, delayEvents = delayEvents)
-                customEventsManager.setLinkForFutureEvents(null)
-                null
-            }
-        }
+        (attributionWait as? AttributionWait.Waiting)?.deadline?.cancel()
+        attributionWait = AttributionWait.Released
+        eventsManager.completeLinkResolution(result?.eventLink, delayEvents = delayEvents)
     }
 
     suspend fun authenticate(): Boolean {
@@ -333,6 +322,9 @@ internal class GrovsManager(
                         grovsContext.attributes = result.data.sdkAttributes
                     }
 
+                    if (clipboardHandler.isPending) {
+                        resolutionMutex.withLock { if (!isClosed) beginAttributionWait() }
+                    }
                     eventsManager.logAppLaunchEvents()
 
                     // Aliases set before the SDK was ready are held; send them now.
@@ -406,6 +398,9 @@ internal class GrovsManager(
     internal fun close() {
         if (isClosed) return
         isClosed = true
+        activeResolution = null
+        releaseAttributionWait()
+        attributionScope.cancel()
         attributesUpdateJob?.cancel()
         attributesUpdateJob = null
         customEventsManager.close()
@@ -421,39 +416,55 @@ internal class GrovsManager(
             return null
         }
 
-        // avoid handling same link multiple times (onStart gives same intent each time)
-        if (intent.hashCode() == lastIntentHandledReference?.get()?.hashCode()) {
-            DebugLogger.instance.log(LogLevel.INFO, " Avoid double handling assume, no link provided, trying to infer it.")
-            return getDataForDevice(null, delayEvents = delayEvents)
-        }
+        if (isClosed) return null
+
+        val repeatedIntent = intent.hashCode() == lastIntentHandledReference?.get()?.hashCode() ||
+            (cacheIntent && handledIntentTokens.contains(intent.hashCode()))
         lastIntentHandledReference = WeakReference(intent)
+        if (cacheIntent && !repeatedIntent) handledIntentTokens.add(intent.hashCode())
 
-        if (cacheIntent) {
-            if (handledIntentTokens.contains(intent.hashCode())) {
-                DebugLogger.instance.log(LogLevel.INFO, "Intent already handled, ignoring it.")
-                return getDataForDevice(null, delayEvents = delayEvents)
-            } else {
-                handledIntentTokens.add(intent.hashCode())
+        val explicitLink = if (repeatedIntent) null else intent.data?.toString()
+        val resolution = resolutionMutex.withLock {
+            // Repeated lifecycle callbacks share the pending lookup; explicit links take precedence.
+            if (activeResolution?.sessionId == grovsContext.sessionId && explicitLink == null) return@withLock null
+            if (isClosed) return@withLock null
+            LinkResolution(grovsContext.sessionId).also {
+                activeResolution = it
+                beginAttributionWait()
+                customEventsManager.setLinkForFutureEvents(null)
             }
-        }
+        } ?: return null
 
-        intent.data?.toString()?.let { link ->
-            return getDataForDevice(intent.data?.toString(), delayEvents = delayEvents)
-        } ?: run {
-            try {
-                getInstallReferrer()?.let {
-                    val result = getDataForDevice(it, delayEvents = delayEvents)
-                    
-                    return result
+        try {
+            val link = explicitLink ?: if (repeatedIntent) null else readInstallReferrer()
+            if (!ownsResolution(resolution)) return null
+
+            val result = getDataForDevice(link, resolution)
+            if (!ownsResolution(resolution)) return null
+
+            commitResolution(resolution, result, delayEvents)
+            return if (ownsResolution(resolution)) result?.details else null
+        } finally {
+            withContext(NonCancellable) {
+                resolutionMutex.withLock {
+                    if (ownsResolution(resolution)) {
+                        activeResolution = null
+                        releaseAttributionWait()
+                        attributionWait = AttributionWait.NotStarted
+                    }
                 }
-            } catch (exception: SecurityException) {
-                DebugLogger.instance.log(LogLevel.ERROR, "Security exception while trying to use install referrer.")
-            } catch (exception: DeadObjectException) {
-                DebugLogger.instance.log(LogLevel.ERROR, "Dead object exception while trying to use install referrer.")
             }
-
-            return getDataForDevice(null, delayEvents = delayEvents)
         }
+    }
+
+    private suspend fun readInstallReferrer(): String? = try {
+        getInstallReferrer()
+    } catch (e: SecurityException) {
+        DebugLogger.instance.log(LogLevel.ERROR, "Security exception while trying to use install referrer.")
+        null
+    } catch (e: DeadObjectException) {
+        DebugLogger.instance.log(LogLevel.ERROR, "Dead object exception while trying to use install referrer.")
+        null
     }
 
     suspend fun logInAppPurchase(originalJson: String) {

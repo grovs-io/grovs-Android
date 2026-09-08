@@ -251,7 +251,7 @@ class CustomEventsManagerTest {
         val manager = backfillManager()
         manager.track("checkout_started", null, null)
 
-        manager.setLinkForFutureEvents("https://grovs.io/abc")
+        manager.attributePendingEvents("https://grovs.io/abc", grovsContext.sessionId)
         advanceUntilIdle()
 
         assertEquals(
@@ -280,7 +280,7 @@ class CustomEventsManagerTest {
             )
         )
 
-        manager.setLinkForFutureEvents("https://grovs.io/abc")
+        manager.attributePendingEvents("https://grovs.io/abc", grovsContext.sessionId)
         advanceUntilIdle()
 
         assertEquals(null, stored.first { it.eventName == "previous_session" }.link)
@@ -289,6 +289,16 @@ class CustomEventsManagerTest {
             stored.first { it.eventName == "already_attributed" }.link
         )
         manager.close()
+    }
+
+    @Test
+    fun `setting a future link does not backfill queued events`() = runTest {
+        manager.track("before_link", null, null)
+        manager.setLinkForFutureEvents("https://grovs.io/future")
+        manager.track("after_link", null, null)
+
+        assertEquals(listOf(null, "https://grovs.io/future"), stored.map { it.link })
+        coVerify(exactly = 0) { storage.updateEvents(any()) }
     }
 
     @Test

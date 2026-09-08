@@ -38,6 +38,7 @@ class EventsManager(
     // Internal state - exposed for testing
     internal var linkForFutureActions: String? = null
     internal var allowedToSendToBackend = false
+    @Volatile
     internal var eventsHeld = false
     internal var firstRequestTime: InstantCompat? = null
     internal var eventsDelaySeconds = 14
@@ -118,13 +119,34 @@ class EventsManager(
     override suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean) {
         linkForFutureActions = link
         allowedToSendToBackend = !delayEvents && !eventsHeld
-        link?.let {
-            addLinkToEvents(link)
-            eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
-        } ?: kotlin.run {
-            sendNormalEventsToBackend()
-            sendPaymentEventsToBackend()
+        attributePendingEvents(link)
+        sendNormalEventsToBackend()
+        sendPaymentEventsToBackend()
+    }
+
+    override fun beginLinkResolution() {
+        linkForFutureActions = null
+        setEventsHeld(true)
+    }
+
+    override suspend fun completeLinkResolution(link: String?, delayEvents: Boolean) {
+        linkForFutureActions = link
+        // Keep the gate closed while storage is updated. A background flush must not take INSTALL
+        // between releasing the hold and applying the resolved link.
+        try {
+            attributePendingEvents(link)
+        } finally {
+            setEventsHeld(false)
+            allowedToSendToBackend = !delayEvents
         }
+        sendNormalEventsToBackend()
+        sendPaymentEventsToBackend()
+    }
+
+    private suspend fun attributePendingEvents(link: String?) {
+        if (link == null) return
+        addLinkToEvents(link)
+        eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
     }
 
     /// Holds or releases the events hold gate. While held, no normal or payment event
@@ -209,9 +231,6 @@ class EventsManager(
             }
             newEvent
         }
-
-        sendNormalEventsToBackend()
-        sendPaymentEventsToBackend()
     }
 
     /// Changes stored events based on a closure and performs a completion handler.
@@ -241,6 +260,7 @@ class EventsManager(
 
         for (event in events) {
             if (event.event != EventType.TIME_SPENT) {
+                if (eventsHeld) return@runBlocking
                 val result = grovsService.addEvent(event)
                 when (result) {
                     is LSResult.Success -> {
@@ -290,6 +310,7 @@ class EventsManager(
         DebugLogger.instance.log(LogLevel.INFO, "Sending payment logs to the backend: $events")
 
         for (event in events) {
+            if (eventsHeld) return@runBlocking
             val result = grovsService.addPaymentEvent(event)
             when (result) {
                 is LSResult.Success -> {

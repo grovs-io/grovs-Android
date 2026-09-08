@@ -115,7 +115,7 @@ class RevenueTrackingE2ETest {
             // Arrange
             installPaymentCapturingDispatcher()
 
-            E2ETestUtils.configureAndWaitForAuthOnly(
+            E2ETestUtils.configureAndWaitForAuth(
                 application,
                 baseURL = mockWebServer.url("/").toString()
             )
@@ -144,7 +144,7 @@ class RevenueTrackingE2ETest {
             // Arrange
             installPaymentCapturingDispatcher()
 
-            E2ETestUtils.configureAndWaitForAuthOnly(
+            E2ETestUtils.configureAndWaitForAuth(
                 application,
                 baseURL = mockWebServer.url("/").toString()
             )
@@ -178,7 +178,7 @@ class RevenueTrackingE2ETest {
             // Arrange
             installPaymentCapturingDispatcher()
 
-            E2ETestUtils.configureAndWaitForAuthOnly(
+            E2ETestUtils.configureAndWaitForAuth(
                 application,
                 baseURL = mockWebServer.url("/").toString()
             )
@@ -214,7 +214,7 @@ class RevenueTrackingE2ETest {
             // Act - log purchase before SDK is configured
             // The SDK should queue the event and send after auth
 
-            E2ETestUtils.configureAndWaitForAuthOnly(
+            E2ETestUtils.configureAndWaitForAuth(
                 application,
                 baseURL = mockWebServer.url("/").toString()
             )

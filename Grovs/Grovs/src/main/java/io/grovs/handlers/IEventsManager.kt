@@ -44,9 +44,15 @@ interface IEventsManager {
      */
     suspend fun setLinkToNewFutureActions(link: String?, delayEvents: Boolean)
 
+    /** Starts a lookup hold. Pending events wait for a resolved link or the attribution deadline. */
+    fun beginLinkResolution()
+
+    /** Commits attribution before releasing the lookup hold and allowing queued events to flush. */
+    suspend fun completeLinkResolution(link: String?, delayEvents: Boolean)
+
     /**
      * Holds every normal and payment event on the device while true, regardless of `delayEvents`
-     * or the first-batch delay. Used while the clipboard flow decides the INSTALL link.
+     * or the first-batch delay. Used while link attribution is unresolved.
      * Clearing the hold does not flush; call [setLinkToNewFutureActions] afterwards.
      */
     fun setEventsHeld(held: Boolean)

@@ -23,6 +23,9 @@ internal sealed class ClipboardFlowOutcome {
     /** Terminal for this run only: a transient failure kept the flag armed. */
     object Retry : ClipboardFlowOutcome()
 
+    /** A newer link lookup owns attribution; this run must not change clipboard state. */
+    object Superseded : ClipboardFlowOutcome()
+
     /** A run is already in flight; the caller must do nothing. */
     object AlreadyRunning : ClipboardFlowOutcome()
 }
@@ -79,14 +82,20 @@ internal class ClipboardHandler(
         localCache.clipboardFlowPending = false
     }
 
-    suspend fun runFlow(appDetails: AppDetails): ClipboardFlowOutcome {
+    suspend fun runFlow(
+        appDetails: AppDetails,
+        isCurrent: () -> Boolean = { true },
+    ): ClipboardFlowOutcome {
+        if (!isCurrent()) return ClipboardFlowOutcome.Superseded
         if (!isPending) return ClipboardFlowOutcome.Resolved
         // Re-entry mid-flight (a second onStart) must not release the held INSTALL or stack a valve.
         if (running) return ClipboardFlowOutcome.AlreadyRunning
         running = true
 
         try {
-            when (val status = grovsService.clipboardStatus()) {
+            val status = grovsService.clipboardStatus()
+            if (!isCurrent()) return ClipboardFlowOutcome.Superseded
+            when (status) {
                 is LSResult.Error -> {
                     DebugLogger.instance.log(LogLevel.INFO, "Clipboard flow - status unavailable, will retry")
                     return ClipboardFlowOutcome.Retry
@@ -101,7 +110,7 @@ internal class ClipboardHandler(
             if (!isPending) return ClipboardFlowOutcome.Retry
 
             // A string cached by an earlier match failure skips detection and the second toast.
-            cachedClipboardString?.let { return sendMatch(appDetails, it) }
+            cachedClipboardString?.let { return sendMatch(appDetails, it, isCurrent) }
 
             val accessGranted = try {
                 clipboard.awaitAccess(FOCUS_TIMEOUT_MS)
@@ -110,6 +119,7 @@ internal class ClipboardHandler(
             } catch (e: Exception) {
                 false
             }
+            if (!isCurrent()) return ClipboardFlowOutcome.Superseded
             if (!accessGranted) {
                 DebugLogger.instance.log(LogLevel.INFO, "Clipboard flow - no window focus, will retry")
                 return ClipboardFlowOutcome.Retry
@@ -122,6 +132,7 @@ internal class ClipboardHandler(
             } catch (e: Exception) {
                 ClipDescriptionResult.INACCESSIBLE
             }
+            if (!isCurrent()) return ClipboardFlowOutcome.Superseded
             when (description) {
                 ClipDescriptionResult.NO_CONTENT, ClipDescriptionResult.NOT_URL -> {
                     DebugLogger.instance.log(LogLevel.INFO, "Clipboard flow - no probable web URL")
@@ -151,7 +162,7 @@ internal class ClipboardHandler(
                 return resolve()
             }
 
-            return sendMatch(appDetails, clipboardString)
+            return sendMatch(appDetails, clipboardString, isCurrent)
         } finally {
             running = false
         }
@@ -162,8 +173,14 @@ internal class ClipboardHandler(
         return ClipboardFlowOutcome.Resolved
     }
 
-    private suspend fun sendMatch(appDetails: AppDetails, clipboardString: String): ClipboardFlowOutcome {
-        return when (val result = grovsService.payloadWithLinkFor(appDetails.copy(url = clipboardString))) {
+    private suspend fun sendMatch(
+        appDetails: AppDetails,
+        clipboardString: String,
+        isCurrent: () -> Boolean,
+    ): ClipboardFlowOutcome {
+        val result = grovsService.payloadWithLinkFor(appDetails.copy(url = clipboardString))
+        if (!isCurrent()) return ClipboardFlowOutcome.Superseded
+        return when (result) {
             is LSResult.Error -> {
                 DebugLogger.instance.log(LogLevel.INFO, "Clipboard flow - match request failed, will retry")
                 cachedClipboardString = clipboardString

@@ -21,6 +21,9 @@ internal interface ICustomEventsManager {
     /** The link attributed to subsequently tracked events. */
     fun setLinkForFutureEvents(link: String?)
 
+    /** Attributes queued, linkless events only after a link was resolved for this session. */
+    suspend fun attributePendingEvents(link: String, sessionId: String)
+
     /** Cancels periodic work owned by this manager. Safe to call more than once. */
     fun close()
 }
