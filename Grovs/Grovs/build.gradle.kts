@@ -118,6 +118,8 @@ android {
     }
 
     testOptions {
+        // Library device-test APKs otherwise inherit minSdk (21), which Android 14 rejects.
+        targetSdk = 35
         unitTests.isReturnDefaultValues = true
         unitTests.isIncludeAndroidResources = true
         unitTests.all {

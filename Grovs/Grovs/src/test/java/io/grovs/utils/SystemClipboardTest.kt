@@ -6,6 +6,12 @@ import android.content.ClipboardManager
 import android.content.Context
 import io.grovs.handlers.ActivityProvider
 import io.grovs.GrovsNotificationsListener
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -117,6 +123,29 @@ class SystemClipboardTest {
         val noActivity = SystemClipboard(context, FixedActivityProvider(null))
 
         assertEquals(ClipDescriptionResult.INACCESSIBLE, noActivity.describe())
+    }
+
+    @Test
+    @Config(sdk = [29])
+    fun `a real window focus callback resumes a waiting clipboard read`() = runTest {
+        Dispatchers.setMain(StandardTestDispatcher(testScheduler))
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        try {
+            controller.windowFocusChanged(false)
+            manager.setPrimaryClip(ClipData.newPlainText("referral", "https://demo.sqd.link/a?gd=1"))
+            val clipboard = SystemClipboard(context, FixedActivityProvider(controller.get()))
+            val waiting = async { clipboard.awaitAccess(3_000) }
+            runCurrent()
+            assertEquals(false, waiting.isCompleted)
+
+            controller.windowFocusChanged(true)
+            runCurrent()
+            assertTrue("A window focus event must wake the installed listener", waiting.await())
+            assertEquals("https://demo.sqd.link/a?gd=1", clipboard.readText())
+        } finally {
+            controller.pause().stop().destroy()
+            Dispatchers.resetMain()
+        }
     }
 
     private class FixedActivityProvider(private val activity: Activity?) : ActivityProvider {
