@@ -15,6 +15,7 @@ import io.grovs.service.IGrovsService
 import io.grovs.service.useConsentController
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.IAppDetailsHelper
+import io.grovs.utils.LSResult
 import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -23,6 +24,8 @@ import io.mockk.mockk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -39,6 +42,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -239,5 +243,110 @@ class GrovsManagerConsentTest {
         assertEquals("the admitted commit records exactly one launch", 1, launches.get())
         assertAuthenticated(manager, context = "after a launch commit admitted before revocation")
         enabled.priorWork.join()
+    }
+
+    // ==================== A05-A07: desired configuration under consent ====================
+
+    /** A05 */
+    @Test
+    fun `A05 identifier, push token and attributes set while disabled are sent as one latest snapshot on enable`() = runTest {
+        manager.attributesUpdateScope = this
+        authenticateSuccessfully()
+
+        grovsContext.settings.sdkEnabled = false
+        // Several writes, including a clear, while nothing may be sent.
+        manager.identifier = "user-1"
+        manager.identifier = "user-2"
+        manager.pushToken = "token-1"
+        manager.attributes = mapOf("plan" to "pro")
+        manager.pushToken = null
+        advanceUntilIdle()
+        coVerify(exactly = 0) { service.updateAttributes(any(), any(), any()) }
+
+        grovsContext.settings.sdkEnabled = true
+        manager.onEnabled()
+        advanceUntilIdle()
+
+        // Exactly one request, carrying the last value of each field - the null push token included.
+        coVerify(exactly = 1) { service.updateAttributes("user-2", mapOf("plan" to "pro"), null) }
+    }
+
+    /** A06 */
+    @Test
+    fun `A06 a stale attribute success cannot clear the dirty state a newer value established`() = runTest {
+        holdCleanup()
+        manager.attributesUpdateScope = this
+        authenticateSuccessfully()
+
+        val oldSent = CompletableDeferred<Unit>()
+        val releaseOld = CompletableDeferred<Unit>()
+        val sent = CopyOnWriteArrayList<String?>()
+        coEvery { service.updateAttributes(any(), any(), any()) } coAnswers {
+            val identifier = firstArg<String?>()
+            sent += identifier
+            if (identifier == "old") {
+                oldSent.complete(Unit)
+                // Non-cooperative on purpose: this success is released after the revocation and
+                // after a newer value exists, so only a revision check can reject it.
+                withContext(NonCancellable) { releaseOld.await() }
+                LSResult.Success(true)
+            } else {
+                // The newer value is never acknowledged, so its dirty state must survive.
+                LSResult.Error(java.io.IOException("transport failure"))
+            }
+        }
+
+        releasing(releaseOld) {
+            manager.identifier = "old"
+            runCurrent()
+            oldSent.await()
+
+            grovsContext.settings.sdkEnabled = false
+            grovsContext.settings.sdkEnabled = true
+            // Queued behind the parked old job, which the setter cancels but which is unwinding
+            // non-cooperatively; releasing it lets the stale success land first.
+            manager.identifier = "new"
+            releaseOld.complete(Unit)
+            advanceUntilIdle()
+            assertTrue("the newer value must have been sent, got $sent", sent.contains("new"))
+        }
+
+        // The stale success belongs to a revision and a generation that are both gone. If it were
+        // allowed to clear the dirty state, the unacknowledged newer value would never be retried.
+        val before = sent.count { it == "new" }
+        manager.onEnabled()
+        advanceUntilIdle()
+        assertEquals(
+            "the unacknowledged newer value must still be pending, sends so far: $sent",
+            before + 1,
+            sent.count { it == "new" },
+        )
+    }
+
+    /** A07' */
+    @Test
+    fun `A07 aliases staged while disabled are synced once on enable, an empty map included`() = runTest {
+        authenticateSuccessfully()
+        coEvery { service.syncScreenAliases(any()) } returns LSResult.Success(true)
+
+        grovsContext.settings.sdkEnabled = false
+        manager.setScreenAliases(mapOf("io.grovs.Home" to "Home"))
+        manager.setScreenAliases(emptyMap())
+        advanceUntilIdle()
+        coVerify(exactly = 0) { service.syncScreenAliases(any()) }
+
+        grovsContext.settings.sdkEnabled = true
+        manager.onEnabled()
+        advanceUntilIdle()
+
+        // The latest pending set wins, and clearing the aliases is a set like any other.
+        coVerify(exactly = 1) { service.syncScreenAliases(emptyMap()) }
+    }
+
+    /** Drives the manager to AUTHENTICATED through the ordinary path. */
+    private suspend fun authenticateSuccessfully() {
+        deviceRespondsImmediately()
+        every { service.authenticate(any()) } returns flowOf(GVRetryResult.Success(authResponse()))
+        assertTrue("the fixture must authenticate", manager.authenticate())
     }
 }

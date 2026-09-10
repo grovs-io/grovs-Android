@@ -139,6 +139,10 @@ internal class GrovsManager(
     /// Stores if attributes needs to be updated after auth
     private var shouldUpdateAttributes = false
 
+    /// Bumped by every identifier/push-token/attributes write, so an update still in flight can
+    /// tell whether its response still describes the caller's latest intent.
+    private var attributesRevision: Int = 0
+
     /// The one outstanding attribute update. A newer one cancels it so the last write wins.
     /// Volatile because the public setters call in on whatever thread the host app uses; every
     /// mutation is additionally serialised by the monitor (see [updateAttributesIfNeeded]).
@@ -604,15 +608,19 @@ internal class GrovsManager(
      * backend already holds - so it is sent rather than skipped.
      */
     private suspend fun syncScreenAliasesIfNeeded() {
-        if (authenticationState != AuthenticationState.AUTHENTICATED || !grovsContext.settings.sdkEnabled) return
+        if (authenticationState != AuthenticationState.AUTHENTICATED) return
+        val consent = grovsContext.consent
+        val token = currentConsentToken() ?: consent.tryAcquire(configuration) ?: return
+        if (!consent.isCurrent(token)) return
         val pending = pendingScreenAliases ?: return
 
         val generation = aliasSyncGeneration
         when (grovsService.syncScreenAliases(pending)) {
             is LSResult.Success -> {
-                // A newer setScreenAliases landed while this was in flight; that set owns the
-                // pending state now and must not be cleared by this stale response.
-                if (generation == aliasSyncGeneration) {
+                // A newer setScreenAliases landed while this was in flight, or consent was withdrawn
+                // and granted again; either way that response no longer describes the pending set
+                // and must not clear it.
+                if (generation == aliasSyncGeneration && consent.isCurrent(token)) {
                     pendingScreenAliases = null
                 }
             }
@@ -715,8 +723,17 @@ internal class GrovsManager(
      */
     @Synchronized
     private fun updateAttributesIfNeeded() {
-        if (authenticationState != AuthenticationState.AUTHENTICATED || !grovsContext.settings.sdkEnabled) {
-            shouldUpdateAttributes = true
+        // Every write makes the desired configuration dirty, whether or not it can be sent now.
+        // Only a success that still describes this exact write, under a consent operation that is
+        // still valid, may clear it - so an update interrupted by a revocation or superseded by a
+        // newer value stays pending and goes out on the next grant.
+        val revision = ++attributesRevision
+        shouldUpdateAttributes = true
+
+        val consent = grovsContext.consent
+        val token = consent.tryAcquire(configuration)
+        if (authenticationState != AuthenticationState.AUTHENTICATED || token == null) {
+            // Retained, not sent. The latest values leave once the SDK is authenticated and consented.
             return
         }
 
@@ -724,7 +741,7 @@ internal class GrovsManager(
         // concurrent updates race with no ordering and the stale one can land last.
         val superseded = attributesUpdateJob
         superseded?.cancel()
-        attributesUpdateJob = attributesUpdateScope.launch {
+        attributesUpdateJob = consent.launchOperation(token, scope = attributesUpdateScope) {
             // Cancellation is a request, not an instant stop: the superseded call may still be
             // unwinding. Wait for it to actually finish before issuing ours, so the two never sit
             // in the backend's queue at once and land out of order.
@@ -737,11 +754,8 @@ internal class GrovsManager(
             val pushToken = pushToken
 
             val result = grovsService.updateAttributes(identifier = identifier, attributes = attributes, pushToken = pushToken)
-            when (result) {
-                is LSResult.Success -> {
-                    shouldUpdateAttributes = false
-                }
-                is LSResult.Error -> {}
+            if (result is LSResult.Success && revision == attributesRevision && consent.isCurrent(token)) {
+                shouldUpdateAttributes = false
             }
         }
     }
