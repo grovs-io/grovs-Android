@@ -99,7 +99,10 @@ class S03BottomNavNavControllerE2ETest {
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
             .filter { it.first == "/api/v1/sdk/events/batch" }
-            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0) }
+            .flatMap { (_, body) ->
+                val events = JSONObject(body).getJSONArray("events")
+                (0 until events.length()).map { events.getJSONObject(it) }
+            }
             .filter { it.optString("event_name") == "screen_view" }
             .map { it.getJSONObject("properties").getString("screen_name") }
     }

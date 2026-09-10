@@ -5,8 +5,6 @@ import io.grovs.model.CustomEvent
 import io.grovs.model.CustomEventRules
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
-import io.grovs.model.exceptions.GrovsErrorCode
-import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.IGrovsService
 import io.grovs.storage.CustomEventsStorage
 import io.grovs.storage.ICustomEventsStorage
@@ -19,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns consumer-tracked analytics events. Runs parallel to [EventsManager], which owns the SDK's own
@@ -40,6 +39,11 @@ internal class CustomEventsManager(
     @Volatile
     private var eventsHeld = false
     private val timerScope = CoroutineScope(timerDispatcher + SupervisorJob())
+
+    // serialDispatcher is Dispatchers.IO.limitedParallelism(1), which releases its slot whenever a
+    // coroutine suspends. So the periodic timer tick and a flush triggered from GrovsManager can
+    // overlap; without this lock both would read the same stored events and POST the same batch twice.
+    private val flushMutex = kotlinx.coroutines.sync.Mutex()
 
     companion object {
         /** Events sent per flush cycle. */
@@ -119,15 +123,15 @@ internal class CustomEventsManager(
         eventsHeld = held
     }
 
-    override suspend fun flush() {
+    override suspend fun flush() = flushMutex.withLock {
         if (!grovsContext.settings.sdkEnabled) {
             // Disable pauses delivery; nothing leaves the device until re-enabled. Events stay queued.
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: SDK disabled")
-            return
+            return@withLock
         }
         if (eventsHeld) {
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: link lookup pending")
-            return
+            return@withLock
         }
         if (grovsContext.grovsId == null) {
             // Without a device id the backend rejects the send as terminal, which would drop the
@@ -136,44 +140,22 @@ internal class CustomEventsManager(
                 LogLevel.INFO,
                 "Skipping custom events flush: not yet authenticated"
             )
-            return
+            return@withLock
         }
 
         val pending = customEventsStorage.getEvents().take(BATCH_SIZE)
-        if (pending.isEmpty()) return
+        if (pending.isEmpty()) return@withLock
 
         DebugLogger.instance.log(LogLevel.INFO, "Flushing ${pending.size} custom events")
-
-        val done = mutableListOf<CustomEvent>()
-        for (event in pending) {
-            when (val result = grovsService.addCustomEvents(listOf(event))) {
-                is LSResult.Success -> done.add(event)
-                is LSResult.Error -> {
-                    val exception = result.exception
-                    val terminal = exception is GrovsException &&
-                        exception.errorCode == GrovsErrorCode.EVENT_DISPATCH_ERROR
-
-                    if (terminal) {
-                        // The server said no. Retrying can never succeed, so drop it.
-                        DebugLogger.instance.log(
-                            LogLevel.ERROR,
-                            "Dropping custom event ${event.eventName}: ${exception.message}"
-                        )
-                        done.add(event)
-                    } else {
-                        // Transient. Keep it and stop this cycle — the next flush retries.
-                        DebugLogger.instance.log(
-                            LogLevel.INFO,
-                            "Custom event ${event.eventName} failed, keeping for retry: ${exception.message}"
-                        )
-                        break
-                    }
-                }
-            }
-        }
-
-        if (done.isNotEmpty()) {
-            customEventsStorage.removeEvents(done)
+        when (val result = grovsService.addCustomEvents(pending)) {
+            // Consumed. Items the backend rejected are reported in the response and can never be
+            // accepted, so they leave the queue with the rest.
+            is LSResult.Success -> customEventsStorage.removeEvents(pending)
+            // Nothing was consumed. Keep the batch; the next tick retries.
+            is LSResult.Error -> DebugLogger.instance.log(
+                LogLevel.INFO,
+                "Custom events batch failed, keeping for retry: ${result.exception.message}"
+            )
         }
     }
 }

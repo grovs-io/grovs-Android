@@ -106,7 +106,11 @@ class S07ManualFragmentsE2ETest {
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
             .filter { it.first == "/api/v1/sdk/events/batch" }
-            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name") }
+            .flatMap { (_, body) ->
+                val events = JSONObject(body).getJSONArray("events")
+                (0 until events.length()).map { events.getJSONObject(it) }
+            }
+            .map { it.getJSONObject("properties").getString("screen_name") }
     }
 
     /** Build the host resumed (root Home installed) and run Home's resolution job. */

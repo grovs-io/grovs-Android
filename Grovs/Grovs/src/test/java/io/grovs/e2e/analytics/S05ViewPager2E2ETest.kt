@@ -157,12 +157,15 @@ class S05ViewPager2E2ETest {
         val requests = E2ETestUtils.collectAllRequests(mockWebServer)
         return requests
             .filter { it.first == "/api/v1/sdk/events/batch" }
-            .mapNotNull { (_, body) ->
+            .flatMap { (_, body) ->
                 runCatching {
-                    val json = JSONObject(body).getJSONArray("events").getJSONObject(0)
-                    if (json.getString("event_name") != "screen_view") return@runCatching null
-                    json.getJSONObject("properties").getString("screen_name")
-                }.getOrNull()
+                    val events = JSONObject(body).getJSONArray("events")
+                    (0 until events.length()).map { events.getJSONObject(it) }
+                }.getOrDefault(emptyList())
+            }
+            .mapNotNull { json ->
+                if (json.getString("event_name") != "screen_view") null
+                else json.getJSONObject("properties").getString("screen_name")
             }
     }
 

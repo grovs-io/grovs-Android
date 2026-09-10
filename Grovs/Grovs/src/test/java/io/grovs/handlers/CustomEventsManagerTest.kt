@@ -2,10 +2,9 @@ package io.grovs.handlers
 
 import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.grovs.model.BatchEventError
 import io.grovs.model.BatchEventsResponse
 import io.grovs.model.CustomEvent
-import io.grovs.model.exceptions.GrovsErrorCode
-import io.grovs.model.exceptions.GrovsException
 import io.grovs.service.IGrovsService
 import io.grovs.storage.ICustomEventsStorage
 import io.grovs.utils.InstantCompat
@@ -14,6 +13,8 @@ import io.mockk.MockKAnnotations
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -28,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.util.concurrent.atomic.AtomicInteger
 
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
@@ -152,21 +154,51 @@ class CustomEventsManagerTest {
 
         manager.flush()
 
-        coVerify(exactly = 2) { service.addCustomEvents(any()) }
+        coVerify(exactly = 1) { service.addCustomEvents(match { it.size == 2 }) }
         assertEquals(0, stored.size)
     }
 
     @Test
-    fun `flush drops events the server terminally rejects`() = runTest {
-        coEvery { service.addCustomEvents(any()) } returns LSResult.Error(
-            GrovsException("rejected", GrovsErrorCode.EVENT_DISPATCH_ERROR)
-        )
+    fun `flush sends one batch of at most BATCH_SIZE and removes it on success`() = runTest {
+        val events = List(CustomEventsManager.BATCH_SIZE + 5) {
+            CustomEvent(eventName = "e$it", createdAt = InstantCompat.ofEpochMilli(1_000L + it), sessionId = "s")
+        }
+        coEvery { storage.getEvents() } returns events
+        coEvery { service.addCustomEvents(any()) } answers {
+            LSResult.Success(BatchEventsResponse(accepted = firstArg<List<CustomEvent>>().size, rejected = 0))
+        }
 
-        manager.track("a", null, null)
         manager.flush()
 
-        // Terminal rejection: the event must NOT stay in storage retrying forever.
-        assertEquals(0, stored.size)
+        coVerify(exactly = 1) { service.addCustomEvents(events.take(CustomEventsManager.BATCH_SIZE)) }
+        coVerify(exactly = 1) { storage.removeEvents(events.take(CustomEventsManager.BATCH_SIZE)) }
+    }
+
+    @Test
+    fun `a failed batch is kept for the next tick`() = runTest {
+        val events = listOf(CustomEvent(eventName = "a", createdAt = InstantCompat.now(), sessionId = "s"))
+        coEvery { storage.getEvents() } returns events
+        coEvery { service.addCustomEvents(any()) } returns LSResult.Error(java.io.IOException("down"))
+
+        manager.flush()
+
+        coVerify(exactly = 0) { storage.removeEvents(any()) }
+    }
+
+    @Test
+    fun `a batch the backend consumed with rejections is removed`() = runTest {
+        val events = listOf(
+            CustomEvent(eventName = "ok", createdAt = InstantCompat.now(), sessionId = "s"),
+            CustomEvent(eventName = "install", createdAt = InstantCompat.now(), sessionId = "s"),
+        )
+        coEvery { storage.getEvents() } returns events
+        coEvery { service.addCustomEvents(any()) } returns LSResult.Success(
+            BatchEventsResponse(accepted = 1, rejected = 1, rawErrors = listOf(BatchEventError(1, "event_name 'install' is reserved")))
+        )
+
+        manager.flush()
+
+        coVerify(exactly = 1) { storage.removeEvents(events) }
     }
 
     @Test
@@ -203,7 +235,7 @@ class CustomEventsManagerTest {
 
         manager.flush()
 
-        coVerify(exactly = CustomEventsManager.BATCH_SIZE) { service.addCustomEvents(any()) }
+        coVerify(exactly = 1) { service.addCustomEvents(match { it.size == CustomEventsManager.BATCH_SIZE }) }
         assertEquals(10, stored.size)
     }
 
@@ -315,5 +347,69 @@ class CustomEventsManagerTest {
         coVerify(exactly = 0) { storage.updateEvents(any()) }
         assertEquals(null, stored.first { it.eventName == "checkout_started" }.link)
         manager.close()
+    }
+
+    /** A minimal real (non-mock) storage so removal genuinely happens between overlapping flushes. */
+    private class FakeCustomEventsStorage : ICustomEventsStorage {
+        private val events = mutableListOf<CustomEvent>()
+
+        override suspend fun addEvent(event: CustomEvent) {
+            events.add(event)
+        }
+
+        override suspend fun removeEvents(events: List<CustomEvent>) {
+            val doomed = events.map { it.eventId }.toSet()
+            this.events.removeAll { doomed.contains(it.eventId) }
+        }
+
+        override suspend fun getEvents(): List<CustomEvent> = events.toList()
+
+        override suspend fun updateEvents(transform: (CustomEvent) -> CustomEvent) {
+            val updated = events.map(transform)
+            events.clear()
+            events.addAll(updated)
+        }
+    }
+
+    @Test
+    fun `overlapping flushes post each custom event exactly once`() = runTest {
+        val fakeStorage = FakeCustomEventsStorage()
+        val overlappingService = mockk<IGrovsService>(relaxed = true)
+        val postedEventIds = mutableListOf<String>()
+        val callCount = AtomicInteger(0)
+        val gate = CompletableDeferred<Unit>()
+
+        coEvery { overlappingService.addCustomEvents(any()) } coAnswers {
+            val batch = firstArg<List<CustomEvent>>()
+            if (callCount.getAndIncrement() == 0) {
+                // Only the first caller waits: this is what lets a second, concurrent flush() race
+                // it and read the same still-unremoved events if the mutex is missing.
+                gate.await()
+            }
+            postedEventIds.addAll(batch.map { it.eventId })
+            LSResult.Success(BatchEventsResponse(accepted = batch.size, rejected = 0))
+        }
+
+        val overlappingManager = CustomEventsManager(
+            context = context,
+            grovsContext = grovsContext,
+            grovsService = overlappingService,
+            customEventsStorage = fakeStorage,
+            startFlushTimer = false,
+        )
+        repeat(5) { overlappingManager.track("e$it", null, null) }
+        val allEventIds = fakeStorage.getEvents().map { it.eventId }
+
+        val job1 = launch { overlappingManager.flush() }
+        val job2 = launch { overlappingManager.flush() }
+        advanceUntilIdle()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        job1.join()
+        job2.join()
+
+        assertEquals(1, callCount.get())
+        assertEquals(allEventIds.sorted(), postedEventIds.sorted())
+        overlappingManager.close()
     }
 }

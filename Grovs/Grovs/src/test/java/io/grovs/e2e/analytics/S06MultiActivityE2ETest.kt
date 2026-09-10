@@ -107,7 +107,11 @@ class S06MultiActivityE2ETest {
     private fun drainScreenNames(): List<String> {
         return E2ETestUtils.collectAllRequests(mockWebServer)
             .filter { it.first == "/api/v1/sdk/events/batch" }
-            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name") }
+            .flatMap { (_, body) ->
+                val events = JSONObject(body).getJSONArray("events")
+                (0 until events.length()).map { events.getJSONObject(it) }
+            }
+            .map { it.getJSONObject("properties").getString("screen_name") }
     }
 
     // ---- SDK lifecycle-observer reflection (for transitions the controller won't drive) ----

@@ -101,10 +101,11 @@ class S01NavComponentE2ETest {
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
             .filter { it.first == "/api/v1/sdk/events/batch" }
-            .map { (_, body) ->
-                val json = JSONObject(body).getJSONArray("events").getJSONObject(0)
-                json.getJSONObject("properties").getString(SCREEN_NAME)
+            .flatMap { (_, body) ->
+                val events = JSONObject(body).getJSONArray("events")
+                (0 until events.length()).map { events.getJSONObject(it) }
             }
+            .map { it.getJSONObject("properties").getString(SCREEN_NAME) }
     }
 
     /** Settle + flush + drain, discarding everything emitted so far (keeps dedup state intact). */
