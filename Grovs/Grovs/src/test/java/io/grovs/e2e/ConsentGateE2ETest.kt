@@ -1,13 +1,24 @@
 package io.grovs.e2e
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.os.Looper
 import io.grovs.Grovs
+import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.model.DeeplinkDetails
 import io.grovs.storage.EventsStorage
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,9 +28,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 
 /** The consent gate: a disabled SDK touches neither the network nor the events store. */
@@ -87,6 +101,111 @@ class ConsentGateE2ETest {
         val types = storedEventTypes()
         assertEquals("INSTALL and APP_OPEN once each, got $types", 1, types.count { it == "INSTALL" })
         assertEquals(1, types.count { it == "APP_OPEN" })
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `granting consent does not replay the launch link but an explicit onStart resolves it`() {
+        val scheduler = TestCoroutineScheduler()
+        val context = GrovsContext(StandardTestDispatcher(scheduler))
+        Grovs::class.java.getDeclaredField("grovsContext").apply {
+            isAccessible = true
+            set(E2ETestUtils.getGrovsInstance(), context)
+        }
+
+        val launchLink = "https://demo.sqd.link/consent-launch?campaign=summer"
+        val requests = CopyOnWriteArrayList<Pair<String, String>>()
+        val received = mutableListOf<DeeplinkDetails>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val path = request.requestUrl!!.encodedPath
+                requests += path to request.body.readUtf8()
+                return when (path) {
+                    "/api/v1/sdk/device_for_vendor_id" -> json("""{"last_seen":null}""")
+                    "/api/v1/sdk/authenticate" -> json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}""")
+                    "/api/v1/sdk/notifications_to_display_automatically" -> json("""{"notifications":[]}""")
+                    "/api/v1/sdk/events/batch" -> json("""{"accepted":50,"rejected":0,"errors":[]}""")
+                    "/api/v1/sdk/data_for_device_and_url" -> json(
+                        """{"link":"$launchLink","data":{"product":"sku-123"}}"""
+                    )
+                    else -> MockResponse().setResponseCode(404).setBody("""{"error":"unexpected endpoint"}""")
+                }
+            }
+        }
+
+        fun pumpSdk() {
+            scheduler.runCurrent()
+            shadowOf(Looper.getMainLooper()).idle()
+            scheduler.runCurrent()
+        }
+
+        configure(enabled = false)
+        val controller = Robolectric.buildActivity(
+            TestActivity::class.java,
+            Intent(Intent.ACTION_VIEW, Uri.parse(launchLink)),
+        )
+        Grovs.setOnDeeplinkReceivedListener(controller.get()) { received += it }
+        try {
+            // TestActivity forwards its actual onStart to Grovs. Drain that work while still
+            // disabled, so a queued launch cannot accidentally execute only after we enable.
+            controller.create().start().resume()
+            pumpSdk()
+            assertTrue(requireNotNull(E2ETestUtils.getAuthenticationJob()).isCompleted)
+            assertEquals(GrovsManager.AuthenticationState.UNAUTHENTICATED, manager().authenticationState)
+            assertTrue("Disabled startup must make no requests: $requests", requests.isEmpty())
+            assertTrue(received.isEmpty())
+            assertNull(Grovs.openedLinkDetails)
+
+            Grovs.setSDK(true)
+            val authentication = requireNotNull(E2ETestUtils.getAuthenticationJob())
+            E2ETestUtils.waitForCondition(description = "authentication after consent") {
+                pumpSdk()
+                authentication.isCompleted
+            }
+            assertFalse("Authentication must finish successfully, not be cancelled", authentication.isCancelled)
+            assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
+            assertEquals(1, requests.count { it.first == "/api/v1/sdk/authenticate" })
+            assertEquals(1, storedEventTypes().count { it == "INSTALL" })
+            assertEquals(1, storedEventTypes().count { it == "APP_OPEN" })
+
+            Grovs.setSDK(true) // Repeated consent grants must not become implicit onStart calls.
+            // Exercise delayed SDK work as well as immediate work. Real HTTP and main-looper
+            // callbacks get a bounded observation window after authentication has completed.
+            scheduler.advanceTimeBy(30_001)
+            val observeUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+            E2ETestUtils.waitForCondition(description = "no automatic launch-link replay after consent") {
+                pumpSdk()
+                val lookups = requests.filter {
+                    it.first == "/api/v1/sdk/data_for_device" ||
+                        it.first == "/api/v1/sdk/data_for_device_and_url" ||
+                        it.first == "/api/v1/sdk/clipboard_status"
+                }
+                assertTrue("Consent alone must not start attribution: $lookups", lookups.isEmpty())
+                assertTrue("Consent alone must not deliver a deep link", received.isEmpty())
+                assertNull(Grovs.openedLinkDetails)
+                System.nanoTime() >= observeUntil
+            }
+
+            // Positive control: the same Activity, intent, backend and listener must work when
+            // the host explicitly forwards onStart again, without recreating the Activity.
+            Grovs.onStart(controller.get())
+            E2ETestUtils.waitForCondition(description = "explicit onStart deep-link callback") {
+                pumpSdk()
+                received.isNotEmpty()
+            }
+            assertEquals(1, received.size)
+            assertEquals(launchLink, received.single().link)
+            assertEquals("sku-123", received.single().data?.get("product"))
+            assertEquals(launchLink, Grovs.openedLinkDetails?.link)
+            val lookup = requests.filter { it.first == "/api/v1/sdk/data_for_device_and_url" }.single()
+            assertEquals(launchLink, JSONObject(lookup.second).getString("url"))
+            assertEquals(1, requests.count { it.first == "/api/v1/sdk/authenticate" })
+        } finally {
+            Grovs.setSDK(false)
+            controller.pause().stop().destroy()
+            E2ETestUtils.resetGrovsSingleton()
+            pumpSdk()
+        }
     }
 
     @Test

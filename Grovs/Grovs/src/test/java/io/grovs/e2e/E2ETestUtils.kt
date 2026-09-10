@@ -508,6 +508,42 @@ object E2ETestUtils {
                 errors.add("Failed to reset grovsContext: ${e.message}")
             }
 
+            // openedLinkDetails is backed by a FlowDelegate, not a plain field named
+            // "openedLinkDetails" (its backing field is the delegate itself), so resetting it
+            // has to go through the property's own public setter rather than raw field
+            // reflection - otherwise a deep link delivered by an earlier test class leaks into
+            // the next one via Grovs.openedLinkDetails.
+            try {
+                (instance as Grovs).openedLinkDetails = null
+            } catch (e: Exception) {
+                errors.add("Failed to reset 'openedLinkDetails': ${e.message}")
+            }
+
+            // lastLinkMatched/handleIntentConflict/lastOnStartTime are plain fields, but not
+            // part of the blanket "reset nullable fields to null" loop above: the two latter are
+            // primitives (Boolean/Long can't be set to null), so they get explicit resets here.
+            try {
+                val field = grovsClass.getDeclaredField("lastLinkMatched")
+                field.isAccessible = true
+                field.set(instance, null)
+            } catch (e: Exception) {
+                errors.add("Failed to reset 'lastLinkMatched': ${e.message}")
+            }
+            try {
+                val field = grovsClass.getDeclaredField("handleIntentConflict")
+                field.isAccessible = true
+                field.setBoolean(instance, false)
+            } catch (e: Exception) {
+                errors.add("Failed to reset 'handleIntentConflict': ${e.message}")
+            }
+            try {
+                val field = grovsClass.getDeclaredField("lastOnStartTime")
+                field.isAccessible = true
+                field.setLong(instance, 0L)
+            } catch (e: Exception) {
+                errors.add("Failed to reset 'lastOnStartTime': ${e.message}")
+            }
+
         } catch (e: Exception) {
             throw AssertionError(
                 "Critical failure resetting Grovs singleton - tests will leak state: ${e.message}",
