@@ -184,9 +184,10 @@ public class Grovs: ActivityProvider {
             )
         }
 
-        /// Disables the Grovs SDK.
-        /// - Parameter enabled: The log level to set.
-        /// Default is true.
+        /// Toggles SDK consent at runtime.
+        /// - Parameter enabled: `false` stops collection and sending immediately; queued events
+        ///   stay on the device. `true` authenticates if the SDK is not authenticated yet (which
+        ///   records install/open once), or otherwise sends what was held. Not persisted.
         fun setSDK(enabled: Boolean) {
             instance.setSDK(enabled)
         }
@@ -666,8 +667,23 @@ public class Grovs: ActivityProvider {
     }
 
     fun setSDK(enabled: Boolean) {
+        if (grovsContext.settings.sdkEnabled == enabled) return
         grovsContext.settings.sdkEnabled = enabled
-        grovsManager?.setEnabled(enabled)
+        DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
+
+        if (!enabled) {
+            // Stops an authentication that is running or waiting to retry. Nothing else needs
+            // stopping: every sender and writer checks the flag before touching disk or network.
+            authenticationJob?.cancel()
+            return
+        }
+
+        val manager = grovsManager ?: return
+        if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
+            GlobalScope.launch(grovsContext.serialDispatcher) { manager.onEnabled() }
+        } else {
+            checkConfiguration()
+        }
     }
 
     fun setDebug(level: LogLevel) {
@@ -1001,6 +1017,12 @@ public class Grovs: ActivityProvider {
                 val previousAuthenticationJob = authenticationJob
                 authenticationJob = GlobalScope.launch(grovsContext.serialDispatcher) {
                     previousAuthenticationJob?.join()
+                    // The joined job may itself have just authenticated this same manager (for
+                    // example a configure(enabled = false) job that raced setSDK(true) flipping the
+                    // flag before it ran). Re-authenticating here would record a second launch.
+                    if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
+                        return@launch
+                    }
                     val response = try {
                         manager.authenticate()
                     } catch (e: CancellationException) {

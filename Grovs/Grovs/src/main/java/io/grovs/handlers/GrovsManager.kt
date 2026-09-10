@@ -203,8 +203,14 @@ internal class GrovsManager(
         eventsManager.onAppBackgrounded()
     }
 
-    fun setEnabled(enabled: Boolean) {
-        DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
+    /// Consent granted on an already-authenticated SDK: send what was held while disabled.
+    /// An unauthenticated SDK is instead re-authenticated by Grovs.setSDK, which records the launch.
+    suspend fun onEnabled() {
+        if (authenticationState != AuthenticationState.AUTHENTICATED) return
+        if (shouldUpdateAttributes) updateAttributesIfNeeded()
+        syncScreenAliasesIfNeeded()
+        customEventsManager.flush()
+        eventsManager.flush()
     }
 
     private fun isCurrent(lookup: Lookup): Boolean = !isClosed && committedLinks == lookup.generation
@@ -309,6 +315,13 @@ internal class GrovsManager(
         }
 
     suspend fun authenticate(): Boolean {
+        // Consent gate. Authentication sends the device details and records the launch, so a
+        // disabled SDK does neither. setSDK(true) authenticates from there.
+        if (!grovsContext.settings.sdkEnabled) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK disabled - not authenticating")
+            return false
+        }
+
         if (!context.hasURISchemesConfigured()) {
             DebugLogger.instance.log(LogLevel.INFO, "URI schemes are not configured. Deep linking won't work!")
             return false
@@ -339,6 +352,14 @@ internal class GrovsManager(
         }.collect { result ->
             when (result) {
                 is GVRetryResult.Success -> {
+                    // Consent withdrawn while the request was out: do not come up authenticated,
+                    // do not record the launch. Re-enabling authenticates again.
+                    if (!grovsContext.settings.sdkEnabled) {
+                        DebugLogger.instance.log(LogLevel.INFO, "SDK disabled during authentication - discarding the response")
+                        authenticationState = AuthenticationState.UNAUTHENTICATED
+                        return@collect
+                    }
+
                     authenticationState = AuthenticationState.AUTHENTICATED
                     grovsContext.grovsId = result.data.grovsId
 
