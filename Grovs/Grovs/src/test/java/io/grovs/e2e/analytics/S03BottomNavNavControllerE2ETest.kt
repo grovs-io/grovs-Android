@@ -11,7 +11,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
 import okhttp3.mockwebserver.MockWebServer
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
@@ -97,12 +96,7 @@ class S03BottomNavNavControllerE2ETest {
     private fun drained(): List<String> {
         settle()
         E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/events/batch" }
-            .flatMap { (_, body) ->
-                val events = JSONObject(body).getJSONArray("events")
-                (0 until events.length()).map { events.getJSONObject(it) }
-            }
+        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
             .filter { it.optString("event_name") == "screen_view" }
             .map { it.getJSONObject("properties").getString("screen_name") }
     }

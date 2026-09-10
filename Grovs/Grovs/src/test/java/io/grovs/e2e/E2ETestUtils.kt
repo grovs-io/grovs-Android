@@ -23,6 +23,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.robolectric.Robolectric
 import org.robolectric.Shadows
@@ -713,6 +714,30 @@ object E2ETestUtils {
      */
     fun findRequestsByPath(requests: List<Pair<String, String>>, pathContains: String): List<Pair<String, String>> {
         return requests.filter { it.first.contains(pathContains) }
+    }
+
+    /**
+     * Extracts every event object from every `/api/v1/sdk/events/batch` request in [requests], in
+     * request order and then in-batch order. Non-batch requests (authenticate, device_for_vendor_id,
+     * ...) are excluded by path before any JSON parsing happens; a request that DOES match the batch
+     * path but isn't a JSON object with an "events" array is a real regression and fails loudly rather
+     * than being silently skipped.
+     */
+    fun eventsFromBatchRequests(requests: List<Pair<String, String>>): List<JSONObject> {
+        return requests
+            .filter { (path, _) -> path == "/api/v1/sdk/events/batch" }
+            .flatMap { (path, body) ->
+                val events = try {
+                    JSONObject(body).getJSONArray("events")
+                } catch (e: Exception) {
+                    throw AssertionError(
+                        "events/batch request body was not a JSON object with an \"events\" array " +
+                            "(path=$path): $body",
+                        e
+                    )
+                }
+                (0 until events.length()).map { events.getJSONObject(it) }
+            }
     }
 
     // ==================== Assertion Helpers ====================
