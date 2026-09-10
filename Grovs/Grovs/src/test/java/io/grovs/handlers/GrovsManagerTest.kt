@@ -50,6 +50,7 @@ import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
@@ -470,6 +471,54 @@ class GrovsManagerTest {
                     sdkAttributes = null,
                 )
             )
+        )
+    }
+
+    // ==================== Consent Gate Tests ====================
+
+    @Test
+    fun `authenticate re-checks consent after the device lookup and never calls authenticate when it was withdrawn`() = runTest {
+        // Consent is withdrawn from inside the device-lookup answer itself, so it is false by the
+        // time authenticate() re-checks it right after that collect finishes.
+        every { mockGrovsService.getDeviceFor(any()) } answers {
+            grovsContext.settings.sdkEnabled = false
+            flowOf(GVRetryResult.Success(GetDeviceResponse(lastSeen = null)))
+        }
+
+        val result = grovsManager.authenticate()
+
+        assertFalse(
+            "authenticate() must fail when consent is withdrawn between the device lookup and the authenticate call",
+            result
+        )
+        verify(exactly = 0) { mockGrovsService.authenticate(any()) }
+        assertUnauthenticated(
+            grovsManager,
+            context = "after consent withdrawn between the device lookup and the authenticate call"
+        )
+    }
+
+    @Test
+    fun `logAppLaunchEvents runs to completion even if the authenticate job is cancelled while it is writing`() = runTest {
+        stubSuccessfulAuthentication()
+        val gate = CompletableDeferred<Unit>()
+        val completed = AtomicBoolean(false)
+        coEvery { mockEventsManager.logAppLaunchEvents() } coAnswers {
+            gate.await()
+            completed.set(true)
+        }
+
+        val job = launch { grovsManager.authenticate() }
+        runCurrent()
+        assertFalse("logAppLaunchEvents should still be parked on the gate", completed.get())
+
+        job.cancel()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertTrue(
+            "logAppLaunchEvents must run to completion despite the job being cancelled mid-write",
+            completed.get()
         )
     }
 

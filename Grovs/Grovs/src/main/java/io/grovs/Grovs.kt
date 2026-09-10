@@ -647,6 +647,10 @@ public class Grovs: ActivityProvider {
 
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
+        // A job chained off the previous manager must not keep retrying against a manager that is
+        // about to be replaced: checkConfiguration() joins this (now cancelled) job before it
+        // authenticates the new one, so joining returns immediately instead of waiting out retries.
+        authenticationJob?.cancel()
 
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,

@@ -7,8 +7,10 @@ import io.grovs.storage.EventsStorage
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -102,15 +104,26 @@ class ConsentGateE2ETest {
 
     @Test
     fun `disabling during an authentication retry discards it and enabling starts over`() {
-        // First authenticate attempt fails so the SDK sits in its retry delay.
+        // A 500 with a parseable error body does not throw: GrovsService.authenticate emits
+        // GVRetryResult.Error and completes, it never reaches retryWhen. Force the transport itself
+        // to fail instead, so the flow really throws, retryWhen actually retries, and the job parks
+        // in its 5-second delay in AuthenticationState.RETRYING.
+        //
+        // DISCONNECT_AT_START is checked against Dispatcher.peek(), whose default implementation
+        // (unrelated to our path-based dispatch()) always reports KEEP_OPEN, so it's a silent no-op
+        // through a custom Dispatcher like ours. DISCONNECT_AFTER_REQUEST is instead checked against
+        // the MockResponse dispatch() actually returns, so it reliably closes the socket with nothing
+        // written back, which is what makes the client's authenticate call throw.
         E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
-            "authenticate" to MockResponse().setResponseCode(500).setBody("{}"),
+            "authenticate" to MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST),
             "device_for_vendor_id" to json("""{"last_seen":null}"""),
             "data_for_device" to json("""{"link":null,"data":null}"""),
             "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
         ))
         configure(enabled = true)
-        assertNotNull(E2ETestUtils.awaitRequestFor(server, "/api/v1/sdk/authenticate", timeoutMs = 5_000))
+        E2ETestUtils.waitForCondition(5_000, "authentication to reach its retry delay") {
+            manager().authenticationState == GrovsManager.AuthenticationState.RETRYING
+        }
 
         Grovs.setSDK(false)
         val cancelled = E2ETestUtils.getAuthenticationJob()
@@ -130,5 +143,43 @@ class ConsentGateE2ETest {
 
         assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
         assertEquals(1, storedEventTypes().count { it == "APP_OPEN" })
+    }
+
+    @Test
+    fun `re-configuring while retrying stops the replaced manager's chained job from sending anything`() {
+        // Every authenticate attempt disconnects, so both the original and the replacement manager
+        // sit in AuthenticationState.RETRYING for as long as the test lets them. See the comment in
+        // the retry-discard test above for why DISCONNECT_AFTER_REQUEST, not DISCONNECT_AT_START.
+        E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
+            "authenticate" to MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST),
+            "device_for_vendor_id" to json("""{"last_seen":null}"""),
+            "data_for_device" to json("""{"link":null,"data":null}"""),
+            "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
+        ))
+        configure(enabled = true)
+        E2ETestUtils.waitForCondition(5_000, "the first manager to reach its retry delay") {
+            manager().authenticationState == GrovsManager.AuthenticationState.RETRYING
+        }
+
+        // Re-configure while the old manager's job is parked in its retry delay: checkConfiguration
+        // chains the new job onto it, so unless the old job is explicitly cancelled, it keeps
+        // retrying against a manager that configure() just replaced.
+        configure(enabled = true)
+        E2ETestUtils.waitForCondition(5_000, "the replacement manager to reach its retry delay") {
+            manager().authenticationState == GrovsManager.AuthenticationState.RETRYING
+        }
+
+        Grovs.setSDK(false)
+        E2ETestUtils.collectAllRequests(server) // drain whatever both managers already sent
+
+        val deadline = System.currentTimeMillis() + 7_000 // longer than one 5s retry interval
+        while (System.currentTimeMillis() < deadline) {
+            val request = server.takeRequest(500, TimeUnit.MILLISECONDS) ?: continue
+            val path = request.path.orEmpty()
+            assertTrue(
+                "No authenticate or device_for_vendor_id request may arrive once disabled, got $path",
+                !path.contains("authenticate") && !path.contains("device_for_vendor_id")
+            )
+        }
     }
 }

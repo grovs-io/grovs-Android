@@ -152,6 +152,7 @@ internal class GrovsManager(
     private var isClosed = false
 
     /// A flag indicating whether the user is authenticated with the Grovs backend.
+    @Volatile
     var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
 
     private val prefs = context.getSharedPreferences(GROVS_PREFS_NAME, Context.MODE_PRIVATE)
@@ -344,6 +345,13 @@ internal class GrovsManager(
             }
         }
 
+        // Re-checked here: consent can be withdrawn while the device lookup was in flight, and this
+        // is the last point before the authenticate request (and the launch it would record) goes out.
+        if (!grovsContext.settings.sdkEnabled) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK disabled - not authenticating")
+            return false
+        }
+
         DebugLogger.instance.log(LogLevel.INFO, "Device getting finished. Authenticating...")
 
         grovsService.authenticate(appDetails = appDetails).transformWhile {
@@ -371,7 +379,10 @@ internal class GrovsManager(
                         grovsContext.attributes = result.data.sdkAttributes
                     }
 
-                    eventsManager.logAppLaunchEvents()
+                    // Non-cancellable: a setSDK(false) racing this suspension point must not cancel
+                    // the job mid-write and leave the SDK AUTHENTICATED with no launch ever recorded.
+                    // Storage-only, no flush, so running it to completion here is safe.
+                    withContext(NonCancellable) { eventsManager.logAppLaunchEvents() }
 
                     // Aliases set before the SDK was ready are held; send them now.
                     syncScreenAliasesIfNeeded()
