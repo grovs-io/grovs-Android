@@ -202,7 +202,12 @@ internal class GrovsManager(
     }
 
     fun onAppBackgrounded() {
-        if (!grovsContext.settings.sdkEnabled) return
+        if (!grovsContext.settings.sdkEnabled) {
+            // Disabled: no storage writes, but the committed link still ends with the session,
+            // exactly as when enabled, so it cannot leak into the next session's events.
+            eventsManager.setLinkForFutureEvents(null)
+            return
+        }
         eventsManager.onAppBackgrounded()
     }
 

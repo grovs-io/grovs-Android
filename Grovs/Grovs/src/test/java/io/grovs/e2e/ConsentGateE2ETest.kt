@@ -8,7 +8,6 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
-import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -242,8 +241,17 @@ class ConsentGateE2ETest {
         Grovs.track("while_disabled") // dropped: CustomEventsManager.track() no-ops while disabled
         E2ETestUtils.flushCustomEvents() // returns early while disabled; nothing sent
 
-        // Drain anything in flight, then prove nothing more goes out while disabled.
-        allRequests += E2ETestUtils.collectAllRequests(server)
+        // Drain anything in flight into its own list first: if the flush() consent gate were
+        // missing, the disabled-phase flush would actually POST, and folding the drain straight
+        // into allRequests would let the later "before_disable must be delivered" assertion pass
+        // off this leaked request instead of the one from re-enabling.
+        val whileDisabledRequests = E2ETestUtils.collectAllRequests(server)
+        allRequests += whileDisabledRequests
+        assertTrue(
+            "No custom-events batch may leave the device while disabled, got " +
+                whileDisabledRequests.filter { it.first.contains("/api/v1/sdk/events/batch") },
+            whileDisabledRequests.none { it.first.contains("/api/v1/sdk/events/batch") }
+        )
         assertNull("No request may leave the device while disabled", server.takeRequest(500, TimeUnit.MILLISECONDS))
 
         // Backend recovers.

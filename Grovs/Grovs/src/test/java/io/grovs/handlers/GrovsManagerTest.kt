@@ -35,6 +35,8 @@ import io.grovs.utils.IAppDetailsHelper
 import io.grovs.utils.LSResult
 import io.grovs.FakeClipboard
 import io.grovs.FakeLocalCache
+import io.grovs.storage.EventsStorage
+import io.grovs.storage.ILocalCache
 import io.grovs.utils.ClipDescriptionResult
 import io.mockk.*
 import kotlinx.coroutines.CancellationException
@@ -228,7 +230,7 @@ class GrovsManagerTest {
     }
 
     @Test
-    fun `foreground and background do nothing while disabled`() = runTest {
+    fun `foreground does nothing and background only clears the future-events link while disabled`() = runTest {
         grovsContext.settings.sdkEnabled = false
 
         grovsManager.onAppForegrounded()
@@ -236,6 +238,62 @@ class GrovsManagerTest {
 
         coVerify(exactly = 0) { mockEventsManager.onAppForegrounded() }
         verify(exactly = 0) { mockEventsManager.onAppBackgrounded() }
+        verify(exactly = 1) { mockEventsManager.setLinkForFutureEvents(null) }
+    }
+
+    @Test
+    fun `session link committed before a disabled background never reaches the next session's events`() = runTest {
+        context.getSharedPreferences(EventsStorage.GROVS_STORAGE, Context.MODE_PRIVATE)
+            .edit().clear().commit()
+
+        val realEventsStorage = EventsStorage(context)
+        val mockLocalCacheForEvents = mockk<ILocalCache>(relaxed = true)
+        val eventsGrovsService = mockk<IGrovsService>(relaxed = true)
+        // Nothing is sent or held: keep every event queued so the test observes storage state.
+        coEvery { eventsGrovsService.addPaymentEvent(any()) } returns LSResult.Error(Exception("not sent in test"))
+        coEvery { eventsGrovsService.addEvents(any()) } returns LSResult.Error(Exception("not sent in test"))
+
+        val realEventsManager = EventsManager(
+            context = context,
+            grovsContext = grovsContext,
+            apiKey = testApiKey,
+            grovsService = eventsGrovsService,
+            eventsStorage = realEventsStorage,
+            localCache = mockLocalCacheForEvents,
+        )
+
+        val manager = GrovsManager(
+            context = context,
+            application = application,
+            grovsContext = grovsContext,
+            apiKey = testApiKey,
+            grovsService = mockGrovsService,
+            eventsManager = realEventsManager,
+            appDetailsHelper = mockAppDetailsHelper,
+        )
+
+        realEventsManager.setLinkForFutureEvents("https://test.grovs.io/session-a")
+
+        grovsContext.settings.sdkEnabled = false
+        manager.onAppBackgrounded()
+
+        grovsContext.settings.sdkEnabled = true
+        manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "p")
+
+        val storedPaymentEvents = realEventsStorage.getPaymentEvents()
+        assertEqualsWithContext(
+            1,
+            storedPaymentEvents.size,
+            "storedPaymentEvents.size",
+            "after logging a purchase in the next session"
+        )
+        assertNullWithContext(
+            storedPaymentEvents.first().link,
+            "storedPaymentEvents.first().link",
+            "session A's link must not leak onto a session B purchase"
+        )
+
+        manager.close()
     }
 
     private fun managerWithCustomEvents(customEventsManager: ICustomEventsManager) = GrovsManager(

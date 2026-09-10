@@ -230,6 +230,31 @@ class CustomEventsManagerTest {
     }
 
     @Test
+    fun `flush sends nothing while the SDK is disabled`() = runTest {
+        manager.track("checkout_completed", null, null)
+        assertEquals(1, stored.size)
+
+        // grovsId is set so the disabled gate, not the unauthenticated gate, is what stops this flush.
+        grovsContext.settings.sdkEnabled = false
+        manager.flush()
+
+        coVerify(exactly = 0) { service.addCustomEvents(any()) }
+        assertEquals(1, stored.size)
+    }
+
+    @Test
+    fun `flush sends nothing while events are held`() = runTest {
+        manager.track("checkout_completed", null, null)
+        assertEquals(1, stored.size)
+
+        manager.setEventsHeld(true)
+        manager.flush()
+
+        coVerify(exactly = 0) { service.addCustomEvents(any()) }
+        assertEquals(1, stored.size)
+    }
+
+    @Test
     fun `flush sends at most BATCH_SIZE events per cycle`() = runTest {
         repeat(CustomEventsManager.BATCH_SIZE + 10) { manager.track("e$it", null, null) }
 
