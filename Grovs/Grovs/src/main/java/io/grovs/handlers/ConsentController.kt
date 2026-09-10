@@ -4,6 +4,7 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableJob
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.DisposableHandle
 import kotlinx.coroutines.Dispatchers
@@ -22,11 +23,17 @@ import kotlin.coroutines.CoroutineContext
  * uses the same API key. Compared by reference.
  *
  * [scope] is the configuration's SDK-owned lifetime: work launched in it is cancelled when the
- * configuration is retired.
+ * configuration is retired. It is supervised, so one failed operation never cancels its siblings,
+ * and a failure is logged and swallowed rather than reaching the host's uncaught-exception handler
+ * (which would crash the app). It has no dispatcher of its own: pass one in the launch context.
  */
 internal class ConsentConfiguration internal constructor(val serial: Long) {
     internal val lifetime: CompletableJob = SupervisorJob()
-    val scope: CoroutineScope = CoroutineScope(lifetime)
+    val scope: CoroutineScope = CoroutineScope(
+        lifetime + CoroutineExceptionHandler { _, e ->
+            DebugLogger.instance.log(LogLevel.ERROR, "Grovs SDK operation failed (configuration $serial): $e")
+        }
+    )
 
     override fun toString(): String = "ConsentConfiguration#$serial"
 }

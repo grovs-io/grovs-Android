@@ -72,6 +72,9 @@ internal suspend fun <T> ConsentController.runOperation(
  * Launches [block] in [scope] as a registered operation of [token]. Returns null, having started
  * nothing, if [token] is not current. The body re-checks the token when it is dispatched, so work
  * queued before a revocation cannot run even if the cancellation has not been delivered yet.
+ *
+ * [context] must not contain a [Job]: that would replace [scope]'s job as the parent, so host
+ * cancellation would no longer reach the operation. Pass the parent as [scope].
  */
 internal fun ConsentController.launchOperation(
     token: ConsentToken,
@@ -79,6 +82,7 @@ internal fun ConsentController.launchOperation(
     context: CoroutineContext = EmptyCoroutineContext,
     block: suspend CoroutineScope.() -> Unit,
 ): Job? {
+    requireNoJob(context)
     val job = scope.launch(context + token, start = CoroutineStart.LAZY) {
         ensureCurrent(token)
         block()
@@ -99,8 +103,16 @@ internal fun ConsentController.launchOperation(
     context: CoroutineContext = EmptyCoroutineContext,
     block: suspend CoroutineScope.() -> Unit,
 ): Job? {
+    requireNoJob(context)
     val token = tryAcquire(configuration) ?: return null
     return launchOperation(token, scope, context, block)
+}
+
+private fun requireNoJob(context: CoroutineContext) {
+    require(context[Job] == null) {
+        "launchOperation: pass the parent as scope, not as a Job in context. A Job in context replaces " +
+            "the parent, so host cancellation would no longer reach the operation."
+    }
 }
 
 /** Runs [block] under this admitted permit and closes it on every path. */

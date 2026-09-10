@@ -4,9 +4,11 @@ import android.os.Looper
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
 import io.grovs.settings.GrovsSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -24,6 +26,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -357,39 +360,57 @@ class ConsentControllerTest {
     fun `C03 bounded real-thread registration stress never leaves an admitted child uncancelled`() {
         val consent = controller(executor = inline)
         val workers = 6
-        val maxAttemptsPerWorker = 20_000
-        val toggles = 150
+        val minToggles = 150
+        // Attempts that must happen while the toggler is still running. The toggler keeps toggling
+        // until the workers have made them, so a loaded machine cannot starve the overlap.
+        val minOverlapAttempts = 1_200
+        val maxAttemptsPerWorker = 50_000
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
         val start = CyclicBarrier(workers + 1)
-        val togglerDone = AtomicBoolean(false)
+        val stop = AtomicBoolean(false)
+        val overlapAttempts = AtomicInteger(0)
+        val toggles = AtomicInteger(0)
 
         class Attempt(val token: ConsentToken, val handle: RecordingHandle, val admitted: Boolean)
         val attempts = ConcurrentLinkedQueue<Attempt>()
 
+        fun attempt() {
+            val token = consent.tryAcquire(consent.currentConfiguration) ?: return
+            val handle = RecordingHandle()
+            attempts += Attempt(token, handle, consent.register(token, handle) != null)
+        }
+
         val threads = (1..workers).map { index ->
             RaceThread("c03-stress-$index") {
                 start.awaitOrFail()
-                // Keep registering for as long as the toggler runs (bounded), so attempts overlap every transition.
                 var tries = 0
-                while (!togglerDone.get() && tries++ < maxAttemptsPerWorker) {
-                    val token = consent.tryAcquire(consent.currentConfiguration) ?: continue
-                    val handle = RecordingHandle()
-                    attempts += Attempt(token, handle, consent.register(token, handle) != null)
+                while (!stop.get() && tries++ < maxAttemptsPerWorker) {
+                    overlapAttempts.incrementAndGet()
+                    attempt()
                 }
+                // The toggler always ends enabled, so these run uncontended and must be admitted.
+                repeat(5) { attempt() }
             }.start()
         } + RaceThread("c03-stress-toggler") {
             start.awaitOrFail()
-            repeat(toggles) {
+            while ((toggles.get() < minToggles || overlapAttempts.get() < minOverlapAttempts) &&
+                System.nanoTime() < deadline
+            ) {
                 consent.revoke()
                 consent.enable()
+                toggles.incrementAndGet()
             }
-            togglerDone.set(true)
+            stop.set(true)
         }.start()
         threads.forEach { it.joinOrFail(30) }
 
         consent.revoke()
 
         val admitted = attempts.filter { it.admitted }
-        assertTrue("the stress run must admit some registrations", admitted.isNotEmpty())
+        val summary = "${toggles.get()} toggles, ${overlapAttempts.get()} overlapping attempts, " +
+            "${attempts.size} registrations, ${admitted.size} admitted"
+        assertTrue("workers were starved of overlap with the toggler ($summary)", overlapAttempts.get() >= minOverlapAttempts)
+        assertTrue("the uncontended tail attempts must be admitted ($summary)", admitted.isNotEmpty())
         for (attempt in attempts) {
             if (attempt.admitted) {
                 assertEquals("an admitted registration must be cancelled exactly once", 1, attempt.handle.causes.size)
@@ -399,7 +420,6 @@ class ConsentControllerTest {
             }
         }
         assertEquals(0, consent.registrationCount())
-        println("C03 stress: ${attempts.size} registrations, ${admitted.size} admitted, ${attempts.size - admitted.size} rejected")
     }
 
     // ==================== C04 ====================
@@ -588,7 +608,15 @@ class ConsentControllerTest {
             }
             continuedAfterRevoke.set(true)
         }
-        val cancelledCaller = host.launch { consent.runOperation(token) { awaitCancellation() } }
+        val seenByCancelledCaller = AtomicReference<Throwable?>()
+        val cancelledCaller = host.launch {
+            try {
+                consent.runOperation(token) { awaitCancellation() }
+            } catch (e: Throwable) {
+                seenByCancelledCaller.set(e)
+                throw e
+            }
+        }
         val launchedIntoHost = consent.launchOperation(token, host) { awaitCancellation() }!!
         scheduler.advanceUntilIdle()
         assertEquals(3, consent.registrationCount())
@@ -597,6 +625,10 @@ class ConsentControllerTest {
         cancelledCaller.cancel()
         scheduler.advanceUntilIdle()
         assertTrue(cancelledCaller.isCancelled)
+        val seen = seenByCancelledCaller.get()
+        assertTrue("host cancellation must reach the caller as cancellation, got $seen", seen is CancellationException)
+        assertFalse("host cancellation was turned into a consent revocation: $seen", seen is ConsentRevokedException)
+        assertFalse(cancelledCaller.awaitCompletionCause("the cancelled caller") is ConsentRevokedException)
         assertEquals(2, consent.registrationCount())
         assertTrue(survivingCaller.isActive)
         assertTrue(sibling.isActive)
@@ -933,6 +965,68 @@ class ConsentControllerTest {
         assertEquals(0, consent.registrationCount())
     }
 
+    // ==================== Fixture and scope hardening ====================
+
+    @Test
+    fun `resetting the singleton retires its consent configuration and cancels the work it owns`() {
+        val context = configureSingleton()
+        val consent = context.consent
+        val configuration = currentGrovsManager().configuration
+        val started = CountDownLatch(1)
+        val operation = consent.launchOperation(configuration, context = Dispatchers.Default) {
+            started.countDown()
+            awaitCancellation()
+        }
+        assertNotNull("positive control: the singleton's configuration admits work", operation)
+        started.awaitOrFail("the operation to start")
+
+        E2ETestUtils.resetGrovsSingleton()
+
+        assertRevokedBy(
+            RevocationReason.CONFIGURATION_RETIRED,
+            operation!!.awaitCompletionCause("the operation owned by the reset configuration"),
+        )
+        assertNull("the reset configuration must not admit new work", consent.tryAcquire(configuration))
+        assertFalse(configuration.lifetime.isActive)
+    }
+
+    @Test
+    fun `a failing operation in the configuration scope never reaches the uncaught handler and spares siblings`() {
+        val consent = controller()
+        val configuration = consent.currentConfiguration
+        val uncaught = CopyOnWriteArrayList<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> uncaught += e }
+        try {
+            val sibling = consent.launchOperation(configuration) { awaitCancellation() }!!
+            val failing = consent.launchOperation(configuration) { throw IllegalStateException("operation bug") }!!
+
+            val cause = failing.awaitCompletionCause("the failing operation")
+            assertTrue("positive control: the body really failed, got $cause", cause is IllegalStateException)
+            assertEquals("an SDK operation failure reached the host's uncaught handler", emptyList<Throwable>(), uncaught)
+            assertTrue("one failure must not cancel a sibling operation", sibling.isActive)
+            assertTrue(configuration.lifetime.isActive)
+            sibling.cancel()
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
+
+    @Test
+    fun `launchOperation rejects a Job in its context so the caller cannot replace the parent`() {
+        val consent = controller()
+        val host = CoroutineScope(SupervisorJob())
+        teardown += { host.cancel() }
+
+        assertThrows(IllegalArgumentException::class.java) {
+            consent.launchOperation(consent.acquire(), host, Job()) { }
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            consent.launchOperation(consent.currentConfiguration, host, Job()) { }
+        }
+        assertEquals(0, consent.registrationCount())
+    }
+
     // ==================== Singleton helpers ====================
 
     private fun configureSingleton(apiKey: String = "test-api-key"): GrovsContext {
@@ -944,10 +1038,7 @@ class ConsentControllerTest {
         E2ETestUtils.setupMockScreenResolution()
         // Never advanced: configure() hands authentication to this dispatcher and nothing runs.
         val context = GrovsContext(serialDispatcher = StandardTestDispatcher())
-        Grovs::class.java.getDeclaredField("grovsContext").apply {
-            isAccessible = true
-            set(E2ETestUtils.getGrovsInstance(), context)
-        }
+        E2ETestUtils.installGrovsContext(context)
         teardown += { E2ETestUtils.resetGrovsSingleton() }
         Grovs.configure(application, apiKey, useTestEnvironment = true)
         return context

@@ -28,6 +28,7 @@ import org.junit.Assert.*
 import org.robolectric.Robolectric
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.logging.ConsoleHandler
 import java.util.logging.Formatter
@@ -499,10 +500,15 @@ object E2ETestUtils {
                 }
             }
 
-            // Reset grovsContext to a fresh instance so settings/session state don't leak.
+            // Reset grovsContext to a fresh instance so settings/session state don't leak. The replaced
+            // context's consent configuration is retired first, and its cleanup awaited (bounded), so
+            // operations admitted in this test cannot survive into the next one with a valid token.
             try {
                 val contextField = grovsClass.getDeclaredField("grovsContext")
                 contextField.isAccessible = true
+                (contextField.get(instance) as? GrovsContext)?.let { replaced ->
+                    retireConsentConfiguration(replaced)?.let { errors.add(it) }
+                }
                 contextField.set(instance, GrovsContext())
             } catch (e: Exception) {
                 errors.add("Failed to reset grovsContext: ${e.message}")
@@ -669,6 +675,34 @@ object E2ETestUtils {
     /**
      * Get the Grovs singleton instance via reflection.
      */
+    /**
+     * Retires [context]'s current consent configuration and waits, for at most [timeoutMs], for its
+     * cleanup: registered operations cancelled and completed, admitted commits closed, lifetime
+     * scope disposed. Returns a description of the problem on timeout, or null once cleanup is done.
+     */
+    fun retireConsentConfiguration(context: GrovsContext, timeoutMs: Long = 5_000): String? {
+        val retirement = context.consent.retireConfiguration(enabled = false)
+        val done = CountDownLatch(1)
+        retirement.cleanup.invokeOnCompletion { done.countDown() }
+        return if (done.await(timeoutMs, TimeUnit.MILLISECONDS)) {
+            null
+        } else {
+            "Consent cleanup of ${retirement.retired} did not finish within ${timeoutMs}ms"
+        }
+    }
+
+    /**
+     * Installs [context] as the singleton's GrovsContext, first retiring the context it replaces.
+     * Fails loudly if that cleanup does not finish in time.
+     */
+    fun installGrovsContext(context: GrovsContext) {
+        val field = Grovs::class.java.getDeclaredField("grovsContext").apply { isAccessible = true }
+        (field.get(getGrovsInstance()) as? GrovsContext)?.let { replaced ->
+            retireConsentConfiguration(replaced)?.let { throw AssertionError(it) }
+        }
+        field.set(getGrovsInstance(), context)
+    }
+
     fun getGrovsInstance(): Any? {
         return try {
             val companionClass = Class.forName("io.grovs.Grovs\$Companion")
