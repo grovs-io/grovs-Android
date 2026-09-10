@@ -259,6 +259,25 @@ Give screens friendly names in the dashboard:
 Grovs.setScreenAliases(mapOf("MainActivity" to "Home", "CartFragment" to "Shopping Cart"))
 ```
 
+### Consent
+
+If your app needs user consent before collecting analytics, configure the SDK disabled and enable it once consent is granted:
+
+```kotlin
+Grovs.configure(
+    this, "your-api-key", useTestEnvironment = false, baseURL = null,
+    autoTrackScreenViews = true, clipboardDomains = null,
+    enabled = ConsentStore.hasConsent(),
+)
+
+// later
+Grovs.setSDK(true)
+```
+
+While disabled the SDK performs no network requests, resolves no links, does not read the clipboard, and records no events; install and open are recorded when the SDK is enabled. The flag is not persisted: pass the current consent state on every launch. `setSDK(false)` at runtime stops collection immediately; events already queued stay on the device and are sent when the SDK is enabled again.
+
+Pass the current consent state through `configure`'s `enabled` parameter on every launch, and call `setSDK` only after `configure` — the shorter `configure` overloads reset the flag to `true`, so a `setSDK(false)` made before `configure` would be overwritten by the next launch's `configure` call.
+
 ## Link Generation
 
 Create smart links with metadata, payload data, and tracking parameters:
@@ -510,8 +529,8 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 
 | Method | Description |
 |---|---|
-| `configure(application, apiKey, useTestEnvironment, baseURL, autoTrackScreenViews, clipboardDomains)` | Initialize the SDK (shorter overloads keep the defaults) |
-| `setSDK(enabled)` | Enable or disable the SDK |
+| `configure(application, apiKey, useTestEnvironment, baseURL, autoTrackScreenViews, clipboardDomains, enabled)` | Initialize the SDK (shorter overloads keep the defaults) |
+| `setSDK(enabled)` | Enable or disable collection at runtime (consent) |
 | `setDebug(level)` | Set logging level (`INFO`, `ERROR`) |
 | `onStart(activity)` | Forward launcher activity's `onStart()` |
 | `onNewIntent(intent, activity)` | Forward launcher activity's `onNewIntent()` |

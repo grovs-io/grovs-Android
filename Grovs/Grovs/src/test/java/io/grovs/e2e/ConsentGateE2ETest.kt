@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -198,5 +199,93 @@ class ConsentGateE2ETest {
                 !path.contains("authenticate") && !path.contains("device_for_vendor_id")
             )
         }
+    }
+
+    // Extracts the "event_name" of every custom event across a set of raw (path, body) requests.
+    // System events carry "event" instead, so they never appear here.
+    private fun customEventNames(requests: List<Pair<String, String>>): List<String> =
+        E2ETestUtils.eventsFromBatchRequests(requests).mapNotNull { it.optString("event_name", null) }
+
+    // The brief's version of this test flushes `before_disable` to a 200 before the disable, which
+    // sends it rather than leaving it queued — that can't demonstrate "queued before a disable,
+    // delivered on enable". Instead: make events/batch answer 503 so the pre-disable track() is
+    // attempted and kept (not delivered), disable and prove nothing leaves while disabled, then swap
+    // the endpoint back to 200 and prove enabling flushes exactly the queued event and nothing the
+    // disabled period tried to add.
+    @Test
+    fun `disable then enable on an authenticated SDK flushes what was queued before the disable`() {
+        E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
+            "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+            "device_for_vendor_id" to json("""{"last_seen":null}"""),
+            "data_for_device" to json("""{"link":null,"data":null}"""),
+            "events/batch" to MockResponse().setResponseCode(503)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"error":"events backend unavailable"}"""),
+        ))
+        configure(enabled = true)
+        E2ETestUtils.runWithLooperPumping(10_000) { E2ETestUtils.getAuthenticationJob()?.join() }
+        assertNotNull(E2ETestUtils.awaitRequestFor(server, "/api/v1/sdk/authenticate"))
+
+        val allRequests = mutableListOf<Pair<String, String>>()
+
+        // Attempt the flush against a 503'd endpoint: it must be tried (proving delivery was really
+        // attempted, not skipped) and kept queued (proving a failed send does not drop it).
+        Grovs.track("before_disable")
+        E2ETestUtils.flushCustomEvents()
+        allRequests += E2ETestUtils.collectAllRequests(server)
+        assertTrue(
+            "before_disable must have been attempted against the failing endpoint, got ${customEventNames(allRequests)}",
+            "before_disable" in customEventNames(allRequests)
+        )
+
+        Grovs.setSDK(false)
+        Grovs.track("while_disabled") // dropped: CustomEventsManager.track() no-ops while disabled
+        E2ETestUtils.flushCustomEvents() // returns early while disabled; nothing sent
+
+        // Drain anything in flight, then prove nothing more goes out while disabled.
+        allRequests += E2ETestUtils.collectAllRequests(server)
+        assertNull("No request may leave the device while disabled", server.takeRequest(500, TimeUnit.MILLISECONDS))
+
+        // Backend recovers.
+        E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
+            "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+            "device_for_vendor_id" to json("""{"last_seen":null}"""),
+            "data_for_device" to json("""{"link":null,"data":null}"""),
+            "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
+        ))
+
+        Grovs.setSDK(true)
+
+        // Poll requests arriving from this point on, in a list of their own: allRequests already
+        // contains the 503'd before_disable batch from the pre-disable attempt above, so checking
+        // "before_disable" against allRequests here would pass vacuously off that stale batch
+        // without proving enable actually resent anything. Don't assume the first batch after
+        // enable is the custom one either: onEnabled() also flushes system events to the same
+        // endpoint.
+        val afterEnableRequests = mutableListOf<Pair<String, String>>()
+        val deadline = System.currentTimeMillis() + 5_000
+        var flushed = false
+        while (System.currentTimeMillis() < deadline && !flushed) {
+            val request = server.takeRequest(200, TimeUnit.MILLISECONDS)
+            if (request != null) {
+                afterEnableRequests += Pair(request.path.orEmpty(), request.body.readUtf8())
+            }
+            flushed = "before_disable" in customEventNames(afterEnableRequests)
+        }
+        assertTrue(
+            "Enable must flush before_disable within 5s; custom events seen after enable so far: " +
+                "${customEventNames(afterEnableRequests)}",
+            flushed
+        )
+
+        // Drain whatever else is still in flight before making the final, whole-test assertion.
+        afterEnableRequests += E2ETestUtils.collectAllRequests(server)
+        allRequests += afterEnableRequests
+        val allCustomNames = customEventNames(allRequests)
+        assertTrue("before_disable must be delivered, got $allCustomNames", "before_disable" in allCustomNames)
+        assertTrue(
+            "while_disabled must never appear in any batch seen in this test, got $allCustomNames",
+            "while_disabled" !in allCustomNames
+        )
     }
 }
