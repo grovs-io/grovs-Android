@@ -577,6 +577,13 @@ object E2ETestUtils {
      * dispatcher so it is ordered after any previously enqueued work (track() etc.), after the
      * authentication job has finished.
      */
+    /** Publishes [manager] as the singleton's manager, without running a real configure(). */
+    internal fun injectGrovsManager(manager: GrovsManager) {
+        val instance = getGrovsInstance()
+        Grovs::class.java.getDeclaredField("grovsManager").apply { isAccessible = true }.set(instance, manager)
+        Grovs::class.java.getDeclaredField("authenticationJob").apply { isAccessible = true }.set(instance, null)
+    }
+
     fun flushCustomEvents() {
         val manager = getGrovsManager() as? GrovsManager ?: return
         val grovsContext = grovsField("grovsContext") as? GrovsContext ?: return

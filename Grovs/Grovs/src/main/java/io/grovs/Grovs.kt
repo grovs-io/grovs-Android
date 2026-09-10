@@ -15,6 +15,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
 import io.grovs.handlers.ClipboardHandler
+import io.grovs.handlers.ConsentRevokedException
+import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.ConsentTransition
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
@@ -22,6 +24,7 @@ import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.handlers.launchOperation
+import io.grovs.handlers.runOperation
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
@@ -564,15 +567,15 @@ public class Grovs: ActivityProvider {
             grovsContext.rotateSessionIfNeeded()
             val sessionRotated = grovsContext.sessionId != previousSession
 
-            GlobalScope.launch(grovsContext.serialDispatcher) {
+            collect { manager ->
                 // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
                 // than on the caller's thread. Must precede any screen tracking on this dispatcher.
                 if (sessionRotated) {
-                    grovsManager?.resetScreenDedup()
+                    manager.resetScreenDedup()
                 }
 
                 authenticationJob?.join()
-                grovsManager?.onAppForegrounded()
+                manager.onAppForegrounded()
             }
         }
 
@@ -725,9 +728,10 @@ public class Grovs: ActivityProvider {
                 throw GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR)
             }
 
-            withContext(grovsContext.serialDispatcher) {
-                authenticationJob?.join()
-                val result = manager.generateLink(
+            val token = explicitToken(manager)
+                ?: throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR)
+            val result = explicitRequest(token) {
+                manager.generateLink(
                     title = title,
                     subtitle = subtitle,
                     imageURL = imageURL,
@@ -740,15 +744,18 @@ public class Grovs: ActivityProvider {
                     copyToClipboardAndroid = copyToClipboardAndroid,
                     tracking = tracking
                 )
+            } ?: throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR)
 
-                withContext(Dispatchers.Main) {
-                    when (result) {
-                        is LSResult.Success -> {
-                            link = result.data.link
-                        }
-                        is LSResult.Error -> {
-                            throw GrovsException(result.exception.message, GrovsErrorCode.LINK_GENERATION_ERROR)
-                        }
+            withContext(Dispatchers.Main) {
+                if (!isConsented(token)) {
+                    throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR)
+                }
+                when (result) {
+                    is LSResult.Success -> {
+                        link = result.data.link
+                    }
+                    is LSResult.Error -> {
+                        throw GrovsException(result.exception.message, GrovsErrorCode.LINK_GENERATION_ERROR)
                     }
                 }
             }
@@ -790,24 +797,33 @@ public class Grovs: ActivityProvider {
                 DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
             }
 
+            val token = explicitToken(manager) ?: run {
+                listener.onLinkGenerated(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR))
+                return
+            }
             val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
-            scope.launch(grovsContext.serialDispatcher) {
-                authenticationJob?.join()
-                val result = manager.generateLink(
-                    title = title,
-                    subtitle = subtitle,
-                    imageURL = imageURL,
-                    data = data,
-                    tags = tags,
-                    customRedirects = customRedirects,
-                    showPreviewIos = showPreviewIos,
-                    showPreviewAndroid = showPreviewAndroid,
-                    copyToClipboardIos = copyToClipboardIos,
-                    copyToClipboardAndroid = copyToClipboardAndroid,
-                    tracking = tracking
-                )
+            scope.launch {
+                val result = explicitRequest(token) {
+                    manager.generateLink(
+                        title = title,
+                        subtitle = subtitle,
+                        imageURL = imageURL,
+                        data = data,
+                        tags = tags,
+                        customRedirects = customRedirects,
+                        showPreviewIos = showPreviewIos,
+                        showPreviewAndroid = showPreviewAndroid,
+                        copyToClipboardIos = copyToClipboardIos,
+                        copyToClipboardAndroid = copyToClipboardAndroid,
+                        tracking = tracking
+                    )
+                }
 
                 withContext(Dispatchers.Main) {
+                    if (result == null || !isConsented(token)) {
+                        listener.onLinkGenerated(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR))
+                        return@withContext
+                    }
                     when (result) {
                         is LSResult.Success -> {
                             listener.onLinkGenerated(result.data.link, null)
@@ -834,18 +850,21 @@ public class Grovs: ActivityProvider {
                 throw GrovsException(message, GrovsErrorCode.LINK_GENERATION_ERROR)
             }
 
-            withContext(grovsContext.serialDispatcher) {
-                authenticationJob?.join()
-                val result = manager.linkDetails(path = path)
+            val token = explicitToken(manager)
+                ?: throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR)
+            val result = explicitRequest(token) { manager.linkDetails(path = path) }
+                ?: throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR)
 
-                withContext(Dispatchers.Main) {
-                    when (result) {
-                        is LSResult.Success -> {
-                            linkDetails = result.data.link
-                        }
-                        is LSResult.Error -> {
-                            throw GrovsException(result.exception.message, GrovsErrorCode.LINK_DETAILS_ERROR)
-                        }
+            withContext(Dispatchers.Main) {
+                if (!isConsented(token)) {
+                    throw GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR)
+                }
+                when (result) {
+                    is LSResult.Success -> {
+                        linkDetails = result.data.link
+                    }
+                    is LSResult.Error -> {
+                        throw GrovsException(result.exception.message, GrovsErrorCode.LINK_DETAILS_ERROR)
                     }
                 }
             }
@@ -877,12 +896,19 @@ public class Grovs: ActivityProvider {
                 DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
             }
 
+            val token = explicitToken(manager) ?: run {
+                listener.onLinkDetails(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR))
+                return
+            }
             val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
-            scope.launch(grovsContext.serialDispatcher) {
-                authenticationJob?.join()
-                val result = manager.linkDetails(path = path)
+            scope.launch {
+                val result = explicitRequest(token) { manager.linkDetails(path = path) }
 
                 withContext(Dispatchers.Main) {
+                    if (result == null || !isConsented(token)) {
+                        listener.onLinkDetails(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR))
+                        return@withContext
+                    }
                     when (result) {
                         is LSResult.Success -> {
                             listener.onLinkDetails(result.data.link, null)
@@ -927,16 +953,14 @@ public class Grovs: ActivityProvider {
     }
 
     fun logInAppPurchase(originalJson: String) {
-        GlobalScope.launch(grovsContext.serialDispatcher) {
+        collect { manager ->
             authenticationJob?.join()
-            grovsManager?.logInAppPurchase(originalJson = originalJson)
+            manager.logInAppPurchase(originalJson = originalJson)
         }
     }
 
     fun track(name: String, properties: Map<String, Any>? = null, tags: List<String>? = null) {
-        GlobalScope.launch(grovsContext.serialDispatcher) {
-            grovsManager?.track(name = name, properties = properties, tags = tags)
-        }
+        collect { manager -> manager.track(name = name, properties = properties, tags = tags) }
     }
 
     fun setGlobalTags(tags: List<String>? = null) {
@@ -947,9 +971,7 @@ public class Grovs: ActivityProvider {
     }
 
     fun trackScreenView(screenName: String, properties: Map<String, Any>? = null) {
-        GlobalScope.launch(grovsContext.serialDispatcher) {
-            grovsManager?.trackScreenView(screenName = screenName, properties = properties)
-        }
+        collect { manager -> manager.trackScreenView(screenName = screenName, properties = properties) }
     }
 
     fun trackNavigation(navController: NavController) {
@@ -969,9 +991,9 @@ public class Grovs: ActivityProvider {
     }
 
     fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
-        GlobalScope.launch(grovsContext.serialDispatcher) {
+        collect { manager ->
             authenticationJob?.join()
-            grovsManager?.logCustomPurchase(type = type,
+            manager.logCustomPurchase(type = type,
                 priceInCents = priceInCents,
                 currency = currency,
                 productId = productId,
@@ -984,6 +1006,13 @@ public class Grovs: ActivityProvider {
     }
 
     fun displayMessagesFragment(onDismissed: (()->Unit)?): Boolean {
+        val manager = grovsManager ?: return false
+        // Checked before anything is created: a disabled SDK starts no request and shows no
+        // fragment, and answers false rather than opening a view it may not populate.
+        if (explicitToken(manager) == null) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - not displaying the messages fragment")
+            return false
+        }
         notificationsManager?.let { notificationsManager ->
             return notificationsManager.displayNotificationsViewController(onDismissed = onDismissed)
         } ?: run {
@@ -998,9 +1027,18 @@ public class Grovs: ActivityProvider {
             return null
         }
 
-        authenticationJob?.join()
-
-        return notificationsManager?.numberOfUnreadNotifications()
+        val manager = grovsManager ?: return null
+        val token = explicitToken(manager) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - no unread count")
+            return null
+        }
+        val result = explicitRequest(token) {
+            notificationsManager?.numberOfUnreadNotifications() ?: NO_COUNT
+        } ?: return null
+        // Checked once more before the caller sees it, so a count that went stale while it was
+        // handed back is reported as no answer rather than as a fresh one.
+        if (!isConsented(token) || result === NO_COUNT) return null
+        return result as? Int
     }
 
     fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
@@ -1015,26 +1053,89 @@ public class Grovs: ActivityProvider {
             DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
         }
 
+        val manager = grovsManager
+        val token = manager?.let { explicitToken(it) }
+        if (token == null) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted or SDK not configured - no unread count")
+        }
         val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
-        scope.launch(grovsContext.serialDispatcher) {
-            authenticationJob?.join()
-            val result = notificationsManager?.numberOfUnreadNotifications()
+        scope.launch {
+            // Answered on the main thread like every other outcome, never inline on the caller's
+            // thread: an unconfigured or unconsented SDK keeps the callback's existing contract.
+            if (token == null) {
+                withContext(Dispatchers.Main) { onResult?.invoke(null) }
+                return@launch
+            }
+            val result = explicitRequest(token) {
+                notificationsManager?.numberOfUnreadNotifications() ?: NO_COUNT
+            }
 
             withContext(Dispatchers.Main) {
-                onResult?.invoke(result)
+                // Exactly one callback on every path: a revoked request answers null rather than
+                // leaving the caller waiting, and a stale success is not reported as a count.
+                onResult?.invoke(if (result == null || !isConsented(token)) null else result as? Int)
             }
         }
 
     }
 
     /**
-     * Starts (or restarts) authentication as a consent operation owned by the current configuration.
-     *
-     * Returns without launching anything while consent is not granted, so a disabled configure
-     * queues no work that a later grant could revive - that grant starts a fresh operation instead.
-     * [awaiting] is the previous consent generation's cleanup: the new authentication waits for it
-     * asynchronously so it can never race an admitted launch commit into a second launch record.
+     * The message an explicit request fails with when consent does not admit it, or was withdrawn
+     * before its result could be handed back. It is the method's existing error shape, not a new
+     * one: suspend callers get a [GrovsException], listener callers get one error completion.
      */
+    private val CONSENT_REJECTED: String
+        get() = "The SDK is not enabled. Grant consent with Grovs.setSDK(true) and try again."
+
+    /**
+     * Stands in for a null unread count inside a consent operation, so "the request was revoked"
+     * and "the backend answered no count" stay distinguishable through a non-null-typed helper.
+     */
+    private val NO_COUNT: Any get() = NoCount
+
+    private object NoCount
+
+    private fun explicitToken(manager: GrovsManager): ConsentToken? =
+        grovsContext.consent.tryAcquire(manager.configuration)
+
+    /**
+     * Runs one explicit public request under [token] and returns its result, or null when consent
+     * revoked it before it could be handed back.
+     *
+     * The worker is a registered child of the caller: revocation cancels that child, never this
+     * function and never the caller's own job, so the completion mapping below it always runs and
+     * an active caller gets exactly one answer instead of a silently dropped listener. Ordinary
+     * host cancellation still propagates as cancellation.
+     */
+    private suspend fun <T : Any> explicitRequest(token: ConsentToken, block: suspend () -> T): T? =
+        try {
+            grovsContext.consent.runOperation(token) {
+                withContext(grovsContext.serialDispatcher) {
+                    authenticationJob?.join()
+                    block()
+                }
+            }
+        } catch (e: ConsentRevokedException) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent (${e.reason}) - the request was rejected")
+            null
+        }
+
+    /**
+     * True while [token] is still current. Called on the main thread immediately before host code
+     * runs, so a result that went stale while queued for main dispatch is never published.
+     */
+    private fun isConsented(token: ConsentToken): Boolean = grovsContext.consent.isCurrent(token)
+
+    private fun collect(block: suspend (GrovsManager) -> Unit) {
+        val manager = grovsManager ?: return
+        grovsContext.consent.launchOperation(
+            manager.configuration,
+            context = grovsContext.serialDispatcher,
+        ) {
+            block(manager)
+        }
+    }
+
     private fun checkConfiguration(awaiting: Job? = null) {
         instance.apiKey?.let { apiKey ->
             grovsManager?.let { manager ->
@@ -1075,33 +1176,47 @@ public class Grovs: ActivityProvider {
 
     private fun handleIntent(intent: Intent?, delayEvents: Boolean, cacheIntent: Boolean = false) {
         val intent = intent ?: defaultIntent
-        grovsManager?.let { grovsManager ->
-            // Not the launcher's lifecycleScope: a splash screen finishing or a rotation must not
-            // cancel a lookup mid-flight, or the link is lost and the intent is already marked handled.
-            GlobalScope.launch(grovsContext.serialDispatcher) {
-                authenticationJob?.join()
-                val result = grovsManager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
-                result?.let { deeplinkDetails ->
-                    deeplinkDetails.link?.let { link ->
-                        if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
-                            DebugLogger.instance.log(LogLevel.INFO,"Ignoring double intent handling.")
-                            handleIntentConflict = false
-                        } else {
-                            withContext(Dispatchers.Main) {
+        val manager = grovsManager ?: run {
+            DebugLogger.instance.log(LogLevel.ERROR,"The SDK manager is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+            return
+        }
+        // Consent is taken here rather than inside the lookup, so a disabled SDK never reaches the
+        // point where the intent would be marked handled. The intent stays unconsumed and a later
+        // explicit onStart/onNewIntent can still resolve it - enabling on its own never replays it.
+        val token = grovsContext.consent.tryAcquire(manager.configuration) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - the intent is left unhandled")
+            return
+        }
+        // Not the launcher's lifecycleScope: a splash screen finishing or a rotation must not
+        // cancel a lookup mid-flight, or the link is lost and the intent is already marked handled.
+        grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
+            authenticationJob?.join()
+            val result = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+            result?.let { deeplinkDetails ->
+                deeplinkDetails.link?.let { link ->
+                    if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
+                        DebugLogger.instance.log(LogLevel.INFO,"Ignoring double intent handling.")
+                        handleIntentConflict = false
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            // Re-checked on the main thread, immediately before the host sees it: a
+                            // result that went stale while queued for dispatch is dropped, not
+                            // delivered. This is a spontaneous result, so there is nothing to report.
+                            if (grovsContext.consent.isCurrent(token)) {
                                 openedLinkDetails = deeplinkDetails
                                 deeplinkListener?.onDeeplinkReceived(deeplinkDetails)
+                            } else {
+                                DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not delivering the deeplink")
                             }
                         }
-                    } ?: run {
-                        DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                     }
+                } ?: run {
+                    DebugLogger.instance.log(LogLevel.INFO,"App NOT opened from deeplink.")
                 }
-                // A lookup superseded by a newer link returns null; it must not forget the link that
-                // was just delivered, or the 2-second duplicate-intent guard above stops working.
-                result?.let { lastLinkMatched = it.link }
             }
-        } ?: run {
-            DebugLogger.instance.log(LogLevel.ERROR,"The SDK manager is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
+            // A lookup superseded by a newer link returns null; it must not forget the link that
+            // was just delivered, or the 2-second duplicate-intent guard above stops working.
+            result?.let { lastLinkMatched = it.link }
         }
     }
 

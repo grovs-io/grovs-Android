@@ -696,6 +696,15 @@ class GrovsSingletonTest {
     ) {
         try {
             val instance = getGrovsInstance()
+            // Injecting a manager stands in for a completed configure(), which grants consent.
+            // resetGrovsSingleton deliberately leaves the SDK disabled, so grant it here; the few
+            // tests that want the disabled path revoke it again after injecting.
+            currentGrovsContext().settings.sdkEnabled = true
+            // A real manager captures the active consent configuration at construction, and the
+            // public API acquires consent for exactly that object. A relaxed mock would hand back a
+            // mock configuration that no controller knows, so every call would be rejected as
+            // belonging to a retired configuration; give it the real one.
+            every { mockManager.configuration } returns currentGrovsContext().consent.currentConfiguration
             (grovsField("authenticationJob").get(instance) as? Job)?.cancel()
             grovsField("grovsManager").set(instance, mockManager)
             grovsField("authenticationJob").set(instance, authenticationJob)
