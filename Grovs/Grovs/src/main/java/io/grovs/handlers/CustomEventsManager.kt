@@ -16,7 +16,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 
 /**
@@ -44,6 +46,10 @@ internal class CustomEventsManager(
     // coroutine suspends. So the periodic timer tick and a flush triggered from GrovsManager can
     // overlap; without this lock both would read the same stored events and POST the same batch twice.
     private val flushMutex = kotlinx.coroutines.sync.Mutex()
+
+    /// The configuration this manager belongs to; a manager replaced by a later configure() can
+    /// never acquire consent again, even for the same project key.
+    private val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
 
     companion object {
         /** Events sent per flush cycle. */
@@ -78,8 +84,10 @@ internal class CustomEventsManager(
     }
 
     override suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?) {
-        if (!grovsContext.settings.sdkEnabled) {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK disabled, dropping event: $name")
+        // Checked against this call's own operation, immediately before the record is built and
+        // stored: a call whose consent went away between admission and here collects nothing.
+        val token = grovsContext.consent.workToken(configuration) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted, dropping event: $name")
             return
         }
 
@@ -92,6 +100,10 @@ internal class CustomEventsManager(
             tags = CustomEventRules.mergeTags(eventTags = tags, globalTags = globalTags),
         )
 
+        if (!grovsContext.consent.isCurrent(token)) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn, dropping event: $name")
+            return
+        }
         customEventsStorage.addEvent(event)
     }
 
@@ -124,9 +136,12 @@ internal class CustomEventsManager(
     }
 
     override suspend fun flush() = flushMutex.withLock {
-        if (!grovsContext.settings.sdkEnabled) {
-            // Disable pauses delivery; nothing leaves the device until re-enabled. Events stay queued.
-            DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: SDK disabled")
+        val consent = grovsContext.consent
+        // Disable pauses delivery; nothing leaves the device until a new grant. Events stay queued,
+        // and this flush belongs to the token it started with: a later grant runs its own flush
+        // rather than resuming this one.
+        val token = consent.workToken(configuration) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: consent not granted")
             return@withLock
         }
         if (eventsHeld) {
@@ -147,10 +162,23 @@ internal class CustomEventsManager(
         if (pending.isEmpty()) return@withLock
 
         DebugLogger.instance.log(LogLevel.INFO, "Flushing ${pending.size} custom events")
+        if (!consent.isCurrent(token)) {
+            DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: consent withdrawn")
+            return@withLock
+        }
         when (val result = grovsService.addCustomEvents(pending)) {
             // Consumed. Items the backend rejected are reported in the response and can never be
-            // accepted, so they leave the queue with the rest.
-            is LSResult.Success -> customEventsStorage.removeEvents(pending)
+            // accepted, so they leave the queue with the rest. The removal is admitted as an
+            // acknowledgement: if revocation wins that race the batch stays queued for a retry,
+            // because a cancellation is not proof the backend consumed it.
+            is LSResult.Success -> {
+                val permit = consent.tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT)
+                if (permit == null) {
+                    DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement; keeping the batch")
+                    return@withLock
+                }
+                permit.use { withContext(NonCancellable) { customEventsStorage.removeEvents(pending) } }
+            }
             // Nothing was consumed. Keep the batch; the next tick retries.
             is LSResult.Error -> DebugLogger.instance.log(
                 LogLevel.INFO,

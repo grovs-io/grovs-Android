@@ -22,6 +22,8 @@ import io.grovs.utils.isValidUrl
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.time.Duration
@@ -51,6 +53,10 @@ class EventsManager(
     // both read the same not-yet-removed events, double-posting them. This mutex is the actual
     // serialization; it must be held across the whole flush, not just around individual awaits.
     private val flushMutex = Mutex()
+
+    /// The configuration this manager belongs to. A manager replaced by a later configure() is
+    /// retired as an owner, so it can never acquire consent again even for the same project key.
+    private val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
 
     companion object {
         const val BATCH_SIZE = 50
@@ -279,15 +285,19 @@ class EventsManager(
     /// Chunks of BATCH_SIZE. An accepted chunk leaves storage; the first failed chunk ends this
     /// flush and the next trigger retries it. Open time-spent nodes are not ready yet.
     private suspend fun sendSystemEventsToBackend() {
-        if (!canSend()) return
+        val consent = grovsContext.consent
+        val token = consent.workToken(configuration) ?: return
+        if (!canSend(token)) return
         val ready = eventsStorage.getEvents().filter { it.event != EventType.TIME_SPENT || it.engagementTime != null }
         if (ready.isEmpty()) return
         DebugLogger.instance.log(LogLevel.INFO, "Sending ${ready.size} system events to the backend")
 
         for (chunk in ready.chunked(BATCH_SIZE)) {
-            if (eventsHeld || !grovsContext.settings.sdkEnabled) return
+            // Re-checked per chunk against this flush's own token: a revocation between chunks stops
+            // the next send, and a grant that arrives after it does not resume this flush.
+            if (eventsHeld || !consent.isCurrent(token)) return
             when (val result = grovsService.addEvents(chunk)) {
-                is LSResult.Success -> eventsStorage.removeEvents(chunk)
+                is LSResult.Success -> if (!retire(consent, token) { eventsStorage.removeEvents(chunk) }) return
                 is LSResult.Error -> {
                     DebugLogger.instance.log(LogLevel.INFO, "System events batch failed, keeping for retry: ${result.exception.message}")
                     return
@@ -296,14 +306,33 @@ class EventsManager(
         }
     }
 
+    /**
+     * Retires the records an accepted response acknowledged, if the acknowledgement is admitted
+     * before revocation. Returns false when it is not: the records then stay queued for a later
+     * retry, because a cancellation is not proof the backend consumed them.
+     *
+     * An admitted removal runs to completion even if consent is withdrawn while it is writing, so
+     * storage never ends up having sent records it still believes are pending.
+     */
+    private suspend fun retire(consent: ConsentController, token: ConsentToken, removal: suspend () -> Unit): Boolean {
+        val permit = consent.tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement was accepted; keeping the records")
+            return false
+        }
+        permit.use { withContext(NonCancellable) { removal() } }
+        return true
+    }
+
     /// One request per payment event (the backend has no batch endpoint for them); same
     /// stop-on-first-failure rule.
     private suspend fun sendPaymentEventsToBackend() {
-        if (!canSend()) return
+        val consent = grovsContext.consent
+        val token = consent.workToken(configuration) ?: return
+        if (!canSend(token)) return
         for (event in eventsStorage.getPaymentEvents()) {
-            if (eventsHeld || !grovsContext.settings.sdkEnabled) return
+            if (eventsHeld || !consent.isCurrent(token)) return
             when (val result = grovsService.addPaymentEvent(event)) {
-                is LSResult.Success -> eventsStorage.removePaymentEvent(event)
+                is LSResult.Success -> if (!retire(consent, token) { eventsStorage.removePaymentEvent(event) }) return
                 is LSResult.Error -> {
                     DebugLogger.instance.log(LogLevel.INFO, "Payment event failed, keeping for retry: ${result.exception.message}")
                     return
@@ -313,17 +342,19 @@ class EventsManager(
     }
 
     /// Enabled, not held, and past the first-batch delay.
-    private fun canSend(): Boolean {
-        if (!grovsContext.settings.sdkEnabled) return false
-        checkEventsSendingAllowed()
+    private fun canSend(token: ConsentToken): Boolean {
+        if (!grovsContext.consent.isCurrent(token)) return false
+        checkEventsSendingAllowed(token)
         return allowedToSendToBackend
     }
 
-    private fun checkEventsSendingAllowed() {
+    private fun checkEventsSendingAllowed(token: ConsentToken) {
         if (firstRequestTime == null) {
             firstRequestTime = InstantCompat.now()
 
-            GlobalScope.launch(grovsContext.serialDispatcher) {
+            // A registered operation of this generation: a revocation cancels the pending leeway
+            // flush, and a later grant starts its own rather than inheriting this one.
+            grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
                 delay(FIRST_BATCH_EVENTS_SENDING_LEEWAY)
                 flush()
             }

@@ -115,6 +115,20 @@ private fun requireNoJob(context: CoroutineContext) {
     }
 }
 
+/**
+ * The token governing the work running here: the one inherited from the calling operation, or a
+ * fresh one for [configuration] when this is a new entry point. Null when consent does not admit
+ * the work.
+ *
+ * An inherited token that is no longer current yields null rather than a fresh token: a revoked
+ * operation must never acquire consent again on its own behalf part-way through.
+ */
+internal suspend fun ConsentController.workToken(configuration: ConsentConfiguration): ConsentToken? {
+    val inherited = currentConsentToken()
+    if (inherited != null) return inherited.takeIf { isCurrent(it) }
+    return tryAcquire(configuration)
+}
+
 /** Runs [block] under this admitted permit and closes it on every path. */
 internal inline fun <T> CommitPermit.use(block: (CommitPermit) -> T): T {
     try {
