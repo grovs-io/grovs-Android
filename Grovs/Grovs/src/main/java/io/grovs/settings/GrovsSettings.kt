@@ -10,6 +10,10 @@ class GrovsSettings {
             DebugLogger.instance.logLevel = debugLevel
         }
     var useTestEnvironment: Boolean = false
+
+    /// Consent gate. In memory only: every process starts from the value passed to configure().
+    /// While false nothing is authenticated, resolved, written or sent.
+    @Volatile
     var sdkEnabled: Boolean = true
     var baseURL: String? = null
 

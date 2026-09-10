@@ -171,6 +171,23 @@ class GrovsSingletonTest {
         )
     }
 
+    @Test
+    fun `configure with enabled false leaves the SDK disabled`() {
+        Grovs.configure(application, "key", useTestEnvironment = true, baseURL = null,
+            autoTrackScreenViews = true, clipboardDomains = null, enabled = false)
+
+        assertFalse(currentGrovsContext().settings.sdkEnabled)
+    }
+
+    @Test
+    fun `shorter configure overloads enable the SDK`() {
+        Grovs.setSDK(false)
+
+        Grovs.configure(application, "key", useTestEnvironment = true)
+
+        assertTrue(currentGrovsContext().settings.sdkEnabled)
+    }
+
     // ==================== Properties Tests ====================
 
     @Test

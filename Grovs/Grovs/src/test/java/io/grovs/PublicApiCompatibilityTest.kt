@@ -70,4 +70,20 @@ class PublicApiCompatibilityTest {
         assertNotNull(Grovs.Companion.javaClass.getDeclaredMethod("configure", *parameters))
         assertNotNull(Grovs::class.java.getDeclaredMethod("configure", *parameters))
     }
+
+    @Test
+    fun `seven parameter configure overload with enabled is present`() {
+        val parameters = arrayOf(
+            Application::class.java,
+            String::class.java,
+            booleanType,
+            String::class.java,
+            booleanType,
+            java.util.List::class.java,
+            booleanType,
+        )
+
+        assertNotNull(Grovs.Companion.javaClass.getDeclaredMethod("configure", *parameters))
+        assertNotNull(Grovs::class.java.getDeclaredMethod("configure", *parameters))
+    }
 }

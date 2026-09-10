@@ -159,6 +159,31 @@ public class Grovs: ActivityProvider {
             )
         }
 
+        /**
+         * Configures Grovs with an explicit consent state.
+         * - enabled: `false` constructs the SDK but authenticates, tracks and sends nothing until
+         *   `setSDK(true)` is called. Not persisted; pass the current consent on every launch.
+         */
+        fun configure(
+            application: Application,
+            apiKey: String,
+            useTestEnvironment: Boolean,
+            baseURL: String?,
+            autoTrackScreenViews: Boolean,
+            clipboardDomains: List<String>?,
+            enabled: Boolean,
+        ) {
+            instance.configure(
+                application = application,
+                apiKey = apiKey,
+                useTestEnvironment = useTestEnvironment,
+                baseURL = baseURL,
+                autoTrackScreenViews = autoTrackScreenViews,
+                clipboardDomains = clipboardDomains,
+                enabled = enabled,
+            )
+        }
+
         /// Disables the Grovs SDK.
         /// - Parameter enabled: The log level to set.
         /// Default is true.
@@ -591,12 +616,33 @@ public class Grovs: ActivityProvider {
         autoTrackScreenViews: Boolean,
         clipboardDomains: List<String>?,
     ) {
+        configure(
+            application = application,
+            apiKey = apiKey,
+            useTestEnvironment = useTestEnvironment,
+            baseURL = baseURL,
+            autoTrackScreenViews = autoTrackScreenViews,
+            clipboardDomains = clipboardDomains,
+            enabled = true,
+        )
+    }
+
+    fun configure(
+        application: Application,
+        apiKey: String,
+        useTestEnvironment: Boolean,
+        baseURL: String?,
+        autoTrackScreenViews: Boolean,
+        clipboardDomains: List<String>?,
+        enabled: Boolean,
+    ) {
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
         this.grovsContext.settings.baseURL = baseURL
         this.grovsContext.settings.autoTrackScreenViews = autoTrackScreenViews
         this.grovsContext.settings.clipboardDomains = ClipboardHandler.normalizeDomains(clipboardDomains)
+        this.grovsContext.settings.sdkEnabled = enabled
 
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
