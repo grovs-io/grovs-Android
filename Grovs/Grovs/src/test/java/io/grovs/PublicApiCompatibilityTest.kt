@@ -1,6 +1,10 @@
 package io.grovs
 
 import android.app.Application
+import io.grovs.handlers.GrovsContext
+import io.grovs.settings.GrovsSettings
+import kotlinx.coroutines.CoroutineDispatcher
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
 
@@ -85,5 +89,24 @@ class PublicApiCompatibilityTest {
 
         assertNotNull(Grovs.Companion.javaClass.getDeclaredMethod("configure", *parameters))
         assertNotNull(Grovs::class.java.getDeclaredMethod("configure", *parameters))
+    }
+
+    @Test
+    fun `settings and context keep their public constructors and consent accessors`() {
+        // sdkEnabled is now a view of the internal consent controller; its accessors must not change.
+        assertNotNull(GrovsSettings::class.java.getConstructor())
+        assertEquals(booleanType, GrovsSettings::class.java.getMethod("getSdkEnabled").returnType)
+        assertNotNull(GrovsSettings::class.java.getMethod("setSdkEnabled", booleanType))
+
+        assertNotNull(GrovsContext::class.java.getConstructor())
+        assertNotNull(GrovsContext::class.java.getConstructor(CoroutineDispatcher::class.java))
+        assertNotNull(
+            GrovsContext::class.java.getConstructor(
+                CoroutineDispatcher::class.java,
+                intType,
+                Class.forName("kotlin.jvm.internal.DefaultConstructorMarker"),
+            )
+        )
+        assertEquals(GrovsSettings::class.java, GrovsContext::class.java.getMethod("getSettings").returnType)
     }
 }

@@ -83,6 +83,8 @@ internal class GrovsManager(
         private const val KEY_LAST_REFERRER = "last_referrer"
     }
 
+    internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
+
     private val grovsService: IGrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
     private val appDetails: IAppDetailsHelper = appDetailsHelper ?: grovsContext.getAppDetails(context = context)
     private val eventsManager: IEventsManager = eventsManager ?: EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)

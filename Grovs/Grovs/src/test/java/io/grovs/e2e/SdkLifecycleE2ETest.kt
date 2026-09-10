@@ -6,6 +6,7 @@ import io.grovs.Grovs
 import io.grovs.model.LogLevel
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsException
+import io.grovs.settings.GrovsSettings
 
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -352,9 +353,9 @@ class SdkLifecycleE2ETest {
             val settings = settingsField.get(grovsContext)
             assertNotNull("Settings should exist", settings)
 
-            val sdkEnabledField = settings.javaClass.getDeclaredField("sdkEnabled")
-            sdkEnabledField.isAccessible = true
-            sdkEnabledField.set(settings, false)
+            // sdkEnabled has no backing field of its own any more (it is a view of the consent
+            // controller), so disable through the property rather than by writing a private field.
+            (settings as GrovsSettings).sdkEnabled = false
 
             delay(500)
             Shadows.shadowOf(Looper.getMainLooper()).idle()

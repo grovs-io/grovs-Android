@@ -643,7 +643,10 @@ public class Grovs: ActivityProvider {
         this.grovsContext.settings.baseURL = baseURL
         this.grovsContext.settings.autoTrackScreenViews = autoTrackScreenViews
         this.grovsContext.settings.clipboardDomains = ClipboardHandler.normalizeDomains(clipboardDomains)
-        this.grovsContext.settings.sdkEnabled = enabled
+        // Always a new consent configuration, even for the same key: everything owned by the previous
+        // one (its tokens, registered operations and lifetime scope) is retired, and the managers
+        // built below belong to the new one.
+        this.grovsContext.consent.retireConfiguration(enabled = enabled)
 
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
@@ -671,8 +674,11 @@ public class Grovs: ActivityProvider {
     }
 
     fun setSDK(enabled: Boolean) {
-        if (grovsContext.settings.sdkEnabled == enabled) return
-        grovsContext.settings.sdkEnabled = enabled
+        val consent = grovsContext.consent
+        // One atomic transition: a repeated value changes nothing and schedules nothing. Revocation
+        // invalidates every admitted operation synchronously and cancels them off this thread.
+        val transition = if (enabled) consent.enable() else consent.revoke()
+        if (!transition.changed) return
         DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
 
         if (!enabled) {

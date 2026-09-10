@@ -29,6 +29,9 @@ class NotificationsManager(
     // (NotificationsMainFragment, AutoDisplayedNotificationFragment) require the concrete type.
     grovsService: GrovsService? = null,
 ) {
+    @get:JvmSynthetic
+    internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
+
     private val grovsService: GrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {

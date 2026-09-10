@@ -15,6 +15,9 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     val serialDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
 ) {
     val settings = GrovsSettings()
+
+    @get:JvmSynthetic
+    internal val consent: ConsentController get() = settings.consent
     var grovsId: String? = null
 
     // Written by the host app on whatever thread it likes and read from the SDK's own coroutines,
