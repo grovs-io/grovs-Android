@@ -21,7 +21,14 @@ interface IEventsManager {
      * Saves the resign timestamp and marks the time spent node as ending.
      */
     fun onAppBackgrounded()
-    
+
+    /**
+     * Sends every stored event that is ready to go: system events (excluding open time-spent
+     * nodes) in batches, then payment events one by one. Stops at the first failure; the next
+     * trigger retries. Never blocks the calling thread.
+     */
+    suspend fun flush()
+
     /**
      * Logs app launch events including install/reactivation and open events.
      */

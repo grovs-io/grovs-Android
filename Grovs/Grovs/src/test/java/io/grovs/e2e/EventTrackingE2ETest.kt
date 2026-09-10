@@ -17,6 +17,7 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -1690,26 +1691,33 @@ class EventTrackingE2ETest {
             // Assert — the first TIME_SPENT event (created before deferred attribution
             // resolved) should have null/no link, because addLinkToEvents does not patch
             // TIME_SPENT events.
+            //
+            // System events now flush in a single batch per request, so one captured body can
+            // hold several event types (and several TIME_SPENT entries) together; pull the
+            // individual TIME_SPENT event objects out of the "events" array instead of treating
+            // a whole captured body as one event.
             val timeSpentEvents = synchronized(capturedEventBodies) {
-                capturedEventBodies.filter { it.contains("\"event\":\"time_spent\"") }
+                capturedEventBodies.flatMap { body ->
+                    val events = JSONObject(body).getJSONArray("events")
+                    (0 until events.length()).map { events.getJSONObject(it) }
+                }.filter { it.optString("event") == "time_spent" }
             }
             assertTrue("At least one TIME_SPENT event should be sent", timeSpentEvents.isNotEmpty())
 
             val firstTimeSpent = timeSpentEvents.first()
-            val firstHasNullLink = firstTimeSpent.contains("\"link\":null")
-            val firstHasNoLink = !firstTimeSpent.contains("\"link\":")
             assertTrue(
-                "First TIME_SPENT (created before link resolution) should have null link, got: ${firstTimeSpent.take(400)}",
-                firstHasNullLink || firstHasNoLink
+                "First TIME_SPENT (created before link resolution) should have null link, got: $firstTimeSpent",
+                !firstTimeSpent.has("link") || firstTimeSpent.isNull("link")
             )
 
             // If there's a second TIME_SPENT (the one created after link resolution),
             // it should carry the resolved link
             if (timeSpentEvents.size >= 2) {
                 val secondTimeSpent = timeSpentEvents[1]
-                assertTrue(
-                    "Second TIME_SPENT (created after link resolution) should have the resolved link, got: ${secondTimeSpent.take(400)}",
-                    secondTimeSpent.contains("\"link\":\"https://test.grovs.io/not-for-timespent\"")
+                assertEquals(
+                    "Second TIME_SPENT (created after link resolution) should have the resolved link, got: $secondTimeSpent",
+                    "https://test.grovs.io/not-for-timespent",
+                    secondTimeSpent.optString("link", null)
                 )
             }
 

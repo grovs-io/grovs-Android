@@ -95,6 +95,18 @@ class LinkAttributionTest {
             assertEquals(expected, customStorage.getEvents().last().link)
             assertEquals(expected, events.linkForFutureActions)
         }
+
+        /// Fires the attribution deadline. Releasing the hold now suspends through EventsStorage's
+        /// real IO dispatcher (EventsManager.flush is a genuine suspend chain, not a runBlocking
+        /// call), so the continuation lands back on deadlineClock asynchronously and a single
+        /// runCurrent() can miss it; keep draining in real time for a bit to pick it up.
+        fun releaseDeadline(afterMs: Long) {
+            deadlineClock.advanceTimeBy(afterMs)
+            repeat(50) {
+                deadlineClock.runCurrent()
+                Thread.sleep(5)
+            }
+        }
     }
 
     @Test
@@ -234,8 +246,7 @@ class LinkAttributionTest {
             rig.events.logAppLaunchEvents()
             val request = async { rig.manager.handleIntent(Intent(), true) }
             started.await()
-            rig.deadlineClock.advanceTimeBy(25_001)
-            rig.deadlineClock.runCurrent()
+            rig.releaseDeadline(25_001)
             assertFalse(rig.events.eventsHeld)
             assertEquals(listOf(EventType.INSTALL to null), rig.sent.filter { it.first == EventType.INSTALL })
             gate.complete(Unit)
@@ -393,8 +404,7 @@ class LinkAttributionTest {
         try {
             val old = async { rig.manager.handleIntent(Intent(), true) }
             fingerprintStarted.await()
-            rig.deadlineClock.advanceTimeBy(25_001)
-            rig.deadlineClock.runCurrent()
+            rig.releaseDeadline(25_001)
             assertFalse(rig.events.eventsHeld)
 
             val direct = async { rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false) }

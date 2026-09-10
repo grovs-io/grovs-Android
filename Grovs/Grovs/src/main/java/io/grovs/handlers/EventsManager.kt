@@ -22,7 +22,6 @@ import io.grovs.utils.isValidUrl
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.time.Duration
 import java.time.Instant
 
@@ -44,14 +43,13 @@ class EventsManager(
     internal var eventsDelaySeconds = 14
 
     companion object {
+        const val BATCH_SIZE = 50
         private const val FIRST_BATCH_EVENTS_SENDING_LEEWAY: Long = 15000
         private const val NUMBER_OF_DAYS_FOR_REACTIVATION: Int = 7
     }
 
     override suspend fun onAppForegrounded() {
-        sendNormalEventsToBackend()
-        sendPaymentEventsToBackend()
-        sendTimeSpentEventsToBackend()
+        flush()
         eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
     }
 
@@ -80,7 +78,7 @@ class EventsManager(
         }
 
         eventsStorage.addEvent(newEvent)
-        sendNormalEventsToBackend()
+        flush()
     }
 
     /// Logs an in app payment event and sends it to the backend.
@@ -141,8 +139,7 @@ class EventsManager(
     override suspend fun releaseLinkResolution(delayEvents: Boolean) {
         setEventsHeld(false)
         allowedToSendToBackend = !delayEvents
-        sendNormalEventsToBackend()
-        sendPaymentEventsToBackend()
+        flush()
     }
 
     /// Holds or releases the events hold gate. While held, no normal or payment event
@@ -164,7 +161,7 @@ class EventsManager(
         }
 
         eventsStorage.addPaymentEvent(newEvent)
-        sendPaymentEventsToBackend()
+        flush()
     }
 
     /// Adds initial events such as install or reactivation events.
@@ -254,98 +251,61 @@ class EventsManager(
         eventsStorage.addOrReplaceEvents(newEvents)
     }
 
-    /// Sends normal events (non-time-spent, non-payment) to the backend.
-    ///
-    /// TODO(improve): this and the two send loops below run inside runBlocking on the SDK serial
-    /// dispatcher and sleep 5s per failed event, so a failing backend holds up every later
-    /// track()/screen view/deep-link resolution. See FailingBackendQueueE2ETest (currently @Ignore'd).
-    private fun sendNormalEventsToBackend() = runBlocking {
-        if (!grovsContext.settings.sdkEnabled) return@runBlocking
-        checkEventsSendingAllowed()
-        if (!allowedToSendToBackend) {
-            return@runBlocking
-        }
-
-        val events = eventsStorage.getEvents()
-        DebugLogger.instance.log(LogLevel.INFO, "Sending regular logs to the backend: $events")
-
-        for (event in events) {
-            if (event.event != EventType.TIME_SPENT) {
-                if (eventsHeld) return@runBlocking
-                val result = grovsService.addEvents(listOf(event))
-                when (result) {
-                    is LSResult.Success -> {
-                        eventsStorage.removeEvent(event)
-                    }
-
-                    is LSResult.Error -> {
-                        DebugLogger.instance.log(LogLevel.INFO, "Failed to send normal: $event error: $result")
-                        delay(5000)
-                    }
-                }
-            }
-        }
+    override suspend fun flush() {
+        sendSystemEventsToBackend()
+        sendPaymentEventsToBackend()
     }
 
-    /// Sends time-spent events to the backend.
-    private fun sendTimeSpentEventsToBackend() = runBlocking {
-        if (!grovsContext.settings.sdkEnabled) return@runBlocking
-        val events = eventsStorage.getEvents()
-        DebugLogger.instance.log(LogLevel.INFO, "Sending time-spent logs to the backend")
+    /// Chunks of BATCH_SIZE. An accepted chunk leaves storage; the first failed chunk ends this
+    /// flush and the next trigger retries it. Open time-spent nodes are not ready yet.
+    private suspend fun sendSystemEventsToBackend() {
+        if (!canSend()) return
+        val ready = eventsStorage.getEvents().filter { it.event != EventType.TIME_SPENT || it.engagementTime != null }
+        if (ready.isEmpty()) return
+        DebugLogger.instance.log(LogLevel.INFO, "Sending ${ready.size} system events to the backend")
 
-        for (event in events) {
-            if ((event.event == EventType.TIME_SPENT) && (event.engagementTime != null)) {
-                val result = grovsService.addEvents(listOf(event))
-                when (result) {
-                    is LSResult.Success -> {
-                        DebugLogger.instance.log(LogLevel.INFO, "Sent time-spent: $event")
-                        eventsStorage.removeEvent(event)
-                    }
-
-                    is LSResult.Error -> {
-                        DebugLogger.instance.log(LogLevel.INFO, "Failed to send time-spent: $event error: $result")
-                        delay(5000)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Sends payment events to the backend.
-    private fun sendPaymentEventsToBackend() = runBlocking {
-        if (!grovsContext.settings.sdkEnabled) return@runBlocking
-        checkEventsSendingAllowed()
-        if (!allowedToSendToBackend) {
-            return@runBlocking
-        }
-
-        val events = eventsStorage.getPaymentEvents()
-        DebugLogger.instance.log(LogLevel.INFO, "Sending payment logs to the backend: $events")
-
-        for (event in events) {
-            if (eventsHeld) return@runBlocking
-            val result = grovsService.addPaymentEvent(event)
-            when (result) {
-                is LSResult.Success -> {
-                    eventsStorage.removePaymentEvent(event)
-                }
-
+        for (chunk in ready.chunked(BATCH_SIZE)) {
+            if (eventsHeld || !grovsContext.settings.sdkEnabled) return
+            when (val result = grovsService.addEvents(chunk)) {
+                is LSResult.Success -> eventsStorage.removeEvents(chunk)
                 is LSResult.Error -> {
-                    DebugLogger.instance.log(LogLevel.INFO, "Failed to send payment events: $event error: $result")
-                    delay(5000)
+                    DebugLogger.instance.log(LogLevel.INFO, "System events batch failed, keeping for retry: ${result.exception.message}")
+                    return
                 }
             }
         }
+    }
+
+    /// One request per payment event (the backend has no batch endpoint for them); same
+    /// stop-on-first-failure rule.
+    private suspend fun sendPaymentEventsToBackend() {
+        if (!canSend()) return
+        for (event in eventsStorage.getPaymentEvents()) {
+            if (eventsHeld || !grovsContext.settings.sdkEnabled) return
+            when (val result = grovsService.addPaymentEvent(event)) {
+                is LSResult.Success -> eventsStorage.removePaymentEvent(event)
+                is LSResult.Error -> {
+                    DebugLogger.instance.log(LogLevel.INFO, "Payment event failed, keeping for retry: ${result.exception.message}")
+                    return
+                }
+            }
+        }
+    }
+
+    /// Enabled, not held, and past the first-batch delay.
+    private fun canSend(): Boolean {
+        if (!grovsContext.settings.sdkEnabled) return false
+        checkEventsSendingAllowed()
+        return allowedToSendToBackend
     }
 
     private fun checkEventsSendingAllowed() {
         if (firstRequestTime == null) {
             firstRequestTime = InstantCompat.now()
 
-            GlobalScope.launch {
+            GlobalScope.launch(grovsContext.serialDispatcher) {
                 delay(FIRST_BATCH_EVENTS_SENDING_LEEWAY)
-                sendNormalEventsToBackend()
-                sendPaymentEventsToBackend()
+                flush()
             }
         }
 

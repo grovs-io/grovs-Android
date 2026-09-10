@@ -9,6 +9,7 @@ import io.grovs.TestAssertions.assertNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
 import io.grovs.TestAssertions.assertEventStored
 // PURCHASE_EVENT_DISABLED: import io.grovs.TestAssertions.assertPaymentEventStored
+import io.grovs.model.BatchEventError
 import io.grovs.model.BatchEventsResponse
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
@@ -125,7 +126,7 @@ class EventsManagerTest {
         val testEvent = Event(EventType.APP_OPEN, InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(testEvent)
         coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
-        coEvery { mockEventsStorage.removeEvent(any()) } returns Unit
+        coEvery { mockEventsStorage.removeEvents(any()) } returns Unit
 
         eventsManager.onAppForegrounded()
 
@@ -400,7 +401,7 @@ class EventsManagerTest {
 
         eventsManager.log(event)
 
-        coVerify { mockEventsStorage.removeEvent(any()) }
+        coVerify { mockEventsStorage.removeEvents(match { event in it }) }
     }
 
     // ==================== session_id on payment events ====================
@@ -478,5 +479,94 @@ class EventsManagerTest {
             "linkForFutureActions",
             "after releaseLinkResolution()"
         )
+    }
+
+    // ==================== flush() ====================
+
+    private fun storedEvents(count: Int, type: EventType = EventType.APP_OPEN): List<Event> =
+        List(count) { Event(event = type, createdAt = InstantCompat.ofEpochMilli(1_000L + it)) }
+
+    private fun accepted(n: Int) = LSResult.Success(BatchEventsResponse(accepted = n, rejected = 0))
+
+    @Test
+    fun `flush sends ready events in chunks of BATCH_SIZE and removes each accepted chunk`() = runTest {
+        val events = storedEvents(EventsManager.BATCH_SIZE + 3)
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockGrovsService.addEvents(any()) } answers { accepted(firstArg<List<Event>>().size) }
+        eventsManager.allowedToSendToBackend = true
+
+        eventsManager.flush()
+
+        coVerifyOrder {
+            mockGrovsService.addEvents(events.take(EventsManager.BATCH_SIZE))
+            mockEventsStorage.removeEvents(events.take(EventsManager.BATCH_SIZE))
+            mockGrovsService.addEvents(events.drop(EventsManager.BATCH_SIZE))
+            mockEventsStorage.removeEvents(events.drop(EventsManager.BATCH_SIZE))
+        }
+    }
+
+    @Test
+    fun `flush stops at the first failed chunk and keeps it stored`() = runTest {
+        val events = storedEvents(EventsManager.BATCH_SIZE + 1)
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Error(java.io.IOException("down"))
+        eventsManager.allowedToSendToBackend = true
+
+        val started = System.nanoTime()
+        eventsManager.flush()
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+
+        coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
+        coVerify(exactly = 0) { mockEventsStorage.removeEvents(any()) }
+        assertTrue("A failed chunk must not sleep on the serial dispatcher (took ${elapsedMs}ms)", elapsedMs < 1_000)
+    }
+
+    @Test
+    fun `a chunk with rejected items is still removed`() = runTest {
+        val events = storedEvents(2)
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(
+            BatchEventsResponse(accepted = 1, rejected = 1, rawErrors = listOf(BatchEventError(1, "unknown event type")))
+        )
+        eventsManager.allowedToSendToBackend = true
+
+        eventsManager.flush()
+
+        coVerify(exactly = 1) { mockEventsStorage.removeEvents(events) }
+    }
+
+    @Test
+    fun `open time-spent nodes are not sent, closed ones are`() = runTest {
+        val open = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.ofEpochMilli(1_000L))
+        val closed = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.ofEpochMilli(2_000L), engagementTime = 30)
+        coEvery { mockEventsStorage.getEvents() } returns listOf(open, closed)
+        coEvery { mockGrovsService.addEvents(any()) } answers { accepted(firstArg<List<Event>>().size) }
+        eventsManager.allowedToSendToBackend = true
+
+        eventsManager.flush()
+
+        coVerify(exactly = 1) { mockGrovsService.addEvents(listOf(closed)) }
+    }
+
+    @Test
+    fun `flush sends nothing while events are held`() = runTest {
+        coEvery { mockEventsStorage.getEvents() } returns storedEvents(1)
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.setEventsHeld(true)
+
+        eventsManager.flush()
+
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
+    }
+
+    @Test
+    fun `flush sends nothing while the SDK is disabled`() = runTest {
+        coEvery { mockEventsStorage.getEvents() } returns storedEvents(1)
+        eventsManager.allowedToSendToBackend = true
+        grovsContext.settings.sdkEnabled = false
+
+        eventsManager.flush()
+
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
     }
 }
