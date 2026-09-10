@@ -5,13 +5,15 @@ import io.grovs.settings.GrovsSettings
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.WebViewUtils
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import java.util.UUID
 
-class GrovsContext {
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val serialDispatcher = Dispatchers.IO.limitedParallelism(1)
+class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
+    /// Runs all SDK work in order. Tests inject a controllable dispatcher here.
+    val serialDispatcher: CoroutineDispatcher = Dispatchers.IO.limitedParallelism(1),
+) {
     val settings = GrovsSettings()
     var grovsId: String? = null
 

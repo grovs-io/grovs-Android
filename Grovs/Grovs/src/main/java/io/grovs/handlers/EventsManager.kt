@@ -255,6 +255,10 @@ class EventsManager(
     }
 
     /// Sends normal events (non-time-spent, non-payment) to the backend.
+    ///
+    /// TODO(improve): this and the two send loops below run inside runBlocking on the SDK serial
+    /// dispatcher and sleep 5s per failed event, so a failing backend holds up every later
+    /// track()/screen view/deep-link resolution. See FailingBackendQueueE2ETest (currently @Ignore'd).
     private fun sendNormalEventsToBackend() = runBlocking {
         if (!grovsContext.settings.sdkEnabled) return@runBlocking
         checkEventsSendingAllowed()

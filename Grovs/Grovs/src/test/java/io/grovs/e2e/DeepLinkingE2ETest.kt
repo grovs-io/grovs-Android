@@ -3,6 +3,7 @@ package io.grovs.e2e
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.Looper
 import io.grovs.Grovs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -22,6 +23,7 @@ import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 /**
@@ -359,8 +361,11 @@ class DeepLinkingE2ETest {
 
     @Test
     fun `test hot start - duplicate intent within 2 seconds ignored`() {
-        // Arrange - use URL-based dispatcher for deterministic response routing
-        E2ETestUtils.setUrlDispatcher(mockWebServer, mapOf(
+        // Arrange - the activity's own onStart lookup carries no URL and must resolve nothing, as it
+        // does for an installed app. If it resolved the same link, it would race the explicit
+        // lookups below for the SDK's single duplicate-intent guard and the outcome would depend on
+        // which resolution finished first.
+        E2ETestUtils.setUrlDispatcher(mockWebServer, linkedMapOf(
             "authenticate" to MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
@@ -369,17 +374,21 @@ class DeepLinkingE2ETest {
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
                 .setBody("""{"last_seen":null}"""),
+            // Must precede "data_for_device": that key is a prefix of this one.
+            "data_for_device_and_url" to MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody("""{"link":"https://test.grovs.io/duplicate","data":{"ref":"dup"}}"""),
             "data_for_device" to MockResponse()
                 .setResponseCode(200)
                 .setHeader("Content-Type", "application/json")
-                .setBody("""{"link":"https://test.grovs.io/duplicate","data":{"ref":"dup"}}""")
+                .setBody("""{"link":null,"data":null}""")
         ))
 
         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start().resume()
-
 
         var listenerCallCount = 0
         var receivedDeeplink: io.grovs.model.DeeplinkDetails? = null
@@ -388,40 +397,39 @@ class DeepLinkingE2ETest {
             receivedDeeplink = details
         }
 
-        // Act - send same deeplink intent twice quickly
-        val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("testapp://open?link=duplicate-test")
-        }
+        // Act - the same deep link delivered twice in quick succession. Distinct Intent instances,
+        // so the SDK resolves the second one instead of short-circuiting on object identity; the
+        // duplicate guard is what must suppress it.
+        val deeplinkUri = Uri.parse("testapp://open?link=duplicate-test")
+        val linkPath = "/api/v1/sdk/data_for_device_and_url"
 
-        activityController.newIntent(deeplinkIntent)
-
-
-        // Wait for the first callback to arrive
+        activityController.newIntent(Intent(Intent.ACTION_VIEW, deeplinkUri))
         E2ETestUtils.waitForCondition(description = "first deeplink callback") {
             receivedDeeplink != null
         }
+        assertNotNull("First intent must have been resolved against the backend",
+            E2ETestUtils.awaitRequestFor(mockWebServer, linkPath))
 
-        // Send the same intent again within 2 seconds
-        activityController.newIntent(deeplinkIntent)
+        // Robolectric's clock is paused, so this is still "within 2 seconds" of onStart.
+        activityController.newIntent(Intent(Intent.ACTION_VIEW, deeplinkUri))
+        assertNotNull("Second intent must have been resolved against the backend, not dropped early",
+            E2ETestUtils.awaitRequestFor(mockWebServer, linkPath))
 
-
-        // Give time for a potential second callback
-        Thread.sleep(500)
-
+        // The rest of the second resolution is in-process; give it a bounded window and watch
+        // for a second delivery rather than sleeping a fixed time.
+        val deadline = System.currentTimeMillis() + 1_000
+        while (listenerCallCount < 2 && System.currentTimeMillis() < deadline) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            Thread.sleep(20)
+        }
 
         // Assert
         E2ETestUtils.assertAuthenticationCompleted()
-        assertNotNull("Deeplink listener should receive link", receivedDeeplink?.link)
         assertEquals("https://test.grovs.io/duplicate", receivedDeeplink?.link)
-        assertTrue(
-            "Duplicate intent should be ignored (listener called at most once), got $listenerCallCount",
-            listenerCallCount <= 1
-        )
+        assertEquals("Duplicate intent should be ignored (listener called exactly once)", 1, listenerCallCount)
 
         activityController.pause().stop().destroy()
     }
-
-    // ==================== Edge Case Tests ====================
 
     @Test
     fun `test malformed deeplink URL handled gracefully without crash`() {
