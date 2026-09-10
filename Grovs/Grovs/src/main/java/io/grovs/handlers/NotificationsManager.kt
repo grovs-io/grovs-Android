@@ -23,6 +23,7 @@ class NotificationsManager(val context: Context, val grovsContext: GrovsContext,
     private val grovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {
+        if (!grovsContext.settings.sdkEnabled) return
         val activity = activityProvider.requireActivity() as? FragmentActivity ?: return
         // Called from the SDK's serial dispatcher. lifecycleScope registers its lifecycle observer
         // on first access, and LifecycleRegistry requires that on the main thread.

@@ -146,6 +146,19 @@ class ConsentGateE2ETest {
     }
 
     @Test
+    fun `auto screen tracking and lifecycle events are off while disabled`() {
+        configure(enabled = false)
+        val controller = org.robolectric.Robolectric.buildActivity(TestActivity::class.java)
+        controller.create().start().resume().pause().stop()
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        assertNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals(emptyList<String>(), storedEventTypes())
+        assertTrue(runBlocking { io.grovs.storage.CustomEventsStorage(application).getEvents() }.isEmpty())
+        controller.destroy()
+    }
+
+    @Test
     fun `re-configuring while retrying stops the replaced manager's chained job from sending anything`() {
         // Every authenticate attempt disconnects, so both the original and the replacement manager
         // sit in AuthenticationState.RETRYING for as long as the test lets them. See the comment in

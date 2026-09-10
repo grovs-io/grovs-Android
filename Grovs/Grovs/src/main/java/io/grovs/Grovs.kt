@@ -484,7 +484,7 @@ public class Grovs: ActivityProvider {
      */
     private fun scheduleScreenResolution(activity: Activity) {
         if (grovsManager == null) return
-        if (!grovsContext.settings.autoTrackScreenViews) return
+        if (!grovsContext.settings.autoTrackScreenViews || !grovsContext.settings.sdkEnabled) return
 
         val job = GlobalScope.launch(Dispatchers.Main) {
             val lifecycleOwner = activity as? LifecycleOwner

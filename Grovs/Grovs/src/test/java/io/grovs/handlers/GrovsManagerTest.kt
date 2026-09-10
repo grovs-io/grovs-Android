@@ -26,6 +26,7 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
+import io.grovs.model.events.PaymentEventType
 import io.grovs.model.AuthenticationResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.service.IGrovsService
@@ -55,6 +56,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -225,6 +227,17 @@ class GrovsManagerTest {
         verify { mockEventsManager.onAppBackgrounded() }
     }
 
+    @Test
+    fun `foreground and background do nothing while disabled`() = runTest {
+        grovsContext.settings.sdkEnabled = false
+
+        grovsManager.onAppForegrounded()
+        grovsManager.onAppBackgrounded()
+
+        coVerify(exactly = 0) { mockEventsManager.onAppForegrounded() }
+        verify(exactly = 0) { mockEventsManager.onAppBackgrounded() }
+    }
+
     private fun managerWithCustomEvents(customEventsManager: ICustomEventsManager) = GrovsManager(
         context = context,
         application = application,
@@ -384,6 +397,21 @@ class GrovsManagerTest {
             listOf(mapOf("A" to "Alpha"), mapOf("B" to "Beta"), mapOf("B" to "Beta")),
             aliasesSent
         )
+    }
+
+    @Test
+    fun `screen aliases set while disabled sync on enable`() = runTest {
+        grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
+        coEvery { mockGrovsService.syncScreenAliases(any()) } returns LSResult.Success(true)
+        grovsContext.settings.sdkEnabled = false
+
+        grovsManager.setScreenAliases(mapOf("MainActivity" to "Home"))
+        coVerify(exactly = 0) { mockGrovsService.syncScreenAliases(any()) }
+
+        grovsContext.settings.sdkEnabled = true
+        grovsManager.onEnabled()
+
+        coVerify(exactly = 1) { mockGrovsService.syncScreenAliases(mapOf("MainActivity" to "Home")) }
     }
 
     // ==================== Attribute Update Ordering Tests ====================
@@ -704,6 +732,29 @@ class GrovsManagerTest {
         }
     }
 
+    @Test
+    fun `attribute changes while disabled are held and sent on enable`() = runTest {
+        grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+        grovsContext.settings.sdkEnabled = false
+
+        grovsManager.identifier = "user-1"
+        coVerify(exactly = 0) { mockGrovsService.updateAttributes(any(), any(), any()) }
+
+        grovsContext.settings.sdkEnabled = true
+        grovsManager.onEnabled()
+        attributesJob(grovsManager)?.join()
+
+        coVerify(exactly = 1) { mockGrovsService.updateAttributes("user-1", any(), any()) }
+    }
+
+    /** The attributes update runs on its own scope; join it so the verify below is deterministic. */
+    private fun attributesJob(manager: GrovsManager): Job? =
+        GrovsManager::class.java.getDeclaredField("attributesUpdateJob").run {
+            isAccessible = true
+            get(manager) as? Job
+        }
+
     // ==================== Generate Link Tests ====================
 
     @Test
@@ -992,6 +1043,17 @@ class GrovsManagerTest {
     }
 
     // ==================== Payment Events Tests ====================
+
+    @Test
+    fun `purchases are dropped while disabled`() = runTest {
+        grovsContext.settings.sdkEnabled = false
+
+        grovsManager.logInAppPurchase("""{"productId":"p","purchaseToken":"t"}""")
+        grovsManager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "p")
+
+        coVerify(exactly = 0) { mockEventsManager.logInAppPurchase(any()) }
+        coVerify(exactly = 0) { mockEventsManager.logCustomPurchase(any(), any(), any(), any(), any()) }
+    }
 
     // PURCHASE_EVENT_DISABLED: @Test
     // PURCHASE_EVENT_DISABLED: fun `GrovsManager logInAppPurchase delegates to eventsManager`() = runTest {

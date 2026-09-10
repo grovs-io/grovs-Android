@@ -196,11 +196,13 @@ internal class GrovsManager(
         }
 
     suspend fun onAppForegrounded() {
+        if (!grovsContext.settings.sdkEnabled) return
         eventsManager.onAppForegrounded()
         syncScreenAliasesIfNeeded()
     }
 
     fun onAppBackgrounded() {
+        if (!grovsContext.settings.sdkEnabled) return
         eventsManager.onAppBackgrounded()
     }
 
@@ -536,6 +538,10 @@ internal class GrovsManager(
     }
 
     suspend fun logInAppPurchase(originalJson: String) {
+        if (!grovsContext.settings.sdkEnabled) {
+            DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Payment events cannot be sent.")
+            return
+        }
         eventsManager.logInAppPurchase(originalJson = originalJson)
     }
 
@@ -573,7 +579,7 @@ internal class GrovsManager(
      * backend already holds - so it is sent rather than skipped.
      */
     private suspend fun syncScreenAliasesIfNeeded() {
-        if (authenticationState != AuthenticationState.AUTHENTICATED) return
+        if (authenticationState != AuthenticationState.AUTHENTICATED || !grovsContext.settings.sdkEnabled) return
         val pending = pendingScreenAliases ?: return
 
         val generation = aliasSyncGeneration
@@ -614,6 +620,10 @@ internal class GrovsManager(
     }
 
     suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
+        if (!grovsContext.settings.sdkEnabled) {
+            DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Payment events cannot be sent.")
+            return
+        }
         eventsManager.logCustomPurchase(type = type,
             priceInCents = priceInCents,
             currency = currency,
@@ -680,7 +690,7 @@ internal class GrovsManager(
      */
     @Synchronized
     private fun updateAttributesIfNeeded() {
-        if (authenticationState != AuthenticationState.AUTHENTICATED) {
+        if (authenticationState != AuthenticationState.AUTHENTICATED || !grovsContext.settings.sdkEnabled) {
             shouldUpdateAttributes = true
             return
         }
