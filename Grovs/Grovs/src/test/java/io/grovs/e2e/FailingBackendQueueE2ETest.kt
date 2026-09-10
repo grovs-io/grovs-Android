@@ -43,9 +43,9 @@ class FailingBackendQueueE2ETest {
         E2ETestUtils.setupMockGlInfo()
         E2ETestUtils.setupMockUserAgent("Grovs SDK threading tests")
         server = E2ETestUtils.createMockWebServer()
-        // System and custom events now share the events/batch endpoint, so they can no longer be
-        // distinguished by path alone; this fixture (and the @Ignore'd test it feeds) predates
-        // batching and is due a rework when that TODO is picked up.
+        // The events/batch endpoint answers 503 for all events (both system and custom).
+        // The test holds: awaiting the system-event batch before track() is called ensures
+        // the backend failure is in flight before custom events are written to storage.
         E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
             "authenticate" to json(200, """{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
             "device_for_vendor_id" to json(200, """{"last_seen":null}"""),
