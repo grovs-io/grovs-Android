@@ -62,10 +62,7 @@ class PublicApiMainThreadTest {
 
     private fun installStalledDispatcher() {
         stalled = StalledDispatcher()
-        Grovs::class.java.getDeclaredField("grovsContext").apply {
-            isAccessible = true
-            set(E2ETestUtils.getGrovsInstance(), GrovsContext(serialDispatcher = stalled))
-        }
+        E2ETestUtils.installGrovsContext(GrovsContext(serialDispatcher = stalled))
     }
 
     private fun assertReturnsPromptly(name: String, budgetMs: Long = BUDGET_MS, call: () -> Unit) {

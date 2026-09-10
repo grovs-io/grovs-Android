@@ -47,10 +47,7 @@ class EventDeliveryE2ETest {
             it.settings.baseURL = server.url("/").toString()
         }
         // Bind the real public enable/disable API to the context used by this delivery fixture.
-        Grovs::class.java.getDeclaredField("grovsContext").apply {
-            isAccessible = true
-            set(E2ETestUtils.getGrovsInstance(), context)
-        }
+        E2ETestUtils.installGrovsContext(context)
         storage = CustomEventsStorage(app)
         manager = CustomEventsManager(app, context, GrovsService(app, "test-key", context), storage, startFlushTimer = false)
     }

@@ -108,10 +108,7 @@ class ConsentGateE2ETest {
     fun `granting consent does not replay the launch link but an explicit onStart resolves it`() {
         val scheduler = TestCoroutineScheduler()
         val context = GrovsContext(StandardTestDispatcher(scheduler))
-        Grovs::class.java.getDeclaredField("grovsContext").apply {
-            isAccessible = true
-            set(E2ETestUtils.getGrovsInstance(), context)
-        }
+        E2ETestUtils.installGrovsContext(context)
 
         val launchLink = "https://demo.sqd.link/consent-launch?campaign=summer"
         val requests = CopyOnWriteArrayList<Pair<String, String>>()
@@ -150,7 +147,12 @@ class ConsentGateE2ETest {
             // disabled, so a queued launch cannot accidentally execute only after we enable.
             controller.create().start().resume()
             pumpSdk()
-            assertTrue(requireNotNull(E2ETestUtils.getAuthenticationJob()).isCompleted)
+            // A disabled configure admits no authentication operation at all, so there is no job
+            // to complete - and nothing queued that a later grant could revive into a replay.
+            assertNull(
+                "a disabled configure must queue no authentication work",
+                E2ETestUtils.getAuthenticationJob(),
+            )
             assertEquals(GrovsManager.AuthenticationState.UNAUTHENTICATED, manager().authenticationState)
             assertTrue("Disabled startup must make no requests: $requests", requests.isEmpty())
             assertTrue(received.isEmpty())

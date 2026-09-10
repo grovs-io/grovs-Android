@@ -15,11 +15,13 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
 import io.grovs.handlers.ClipboardHandler
+import io.grovs.handlers.ConsentTransition
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
 import io.grovs.handlers.VisibleFragmentResolver
+import io.grovs.handlers.launchOperation
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
@@ -676,23 +678,27 @@ public class Grovs: ActivityProvider {
     fun setSDK(enabled: Boolean) {
         val consent = grovsContext.consent
         // One atomic transition: a repeated value changes nothing and schedules nothing. Revocation
-        // invalidates every admitted operation synchronously and cancels them off this thread.
+        // invalidates every admitted operation synchronously and cancels them off this thread, so
+        // this returns promptly however slow an operation's cancellation turns out to be.
         val transition = if (enabled) consent.enable() else consent.revoke()
         if (!transition.changed) return
         DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
 
-        if (!enabled) {
-            // Stops an authentication that is running or waiting to retry. Nothing else needs
-            // stopping: every sender and writer checks the flag before touching disk or network.
-            authenticationJob?.cancel()
-            return
-        }
+        // Revocation needs nothing more here: every admitted operation, the authentication job
+        // included, is registered with the controller and cancelled by the transition itself.
+        if (!enabled) return
 
+        // Resume work waits for the previous generation's cleanup - including any launch commit
+        // admitted just before the revocation - so it cannot duplicate what that commit is finishing.
+        val priorWork = (transition as ConsentTransition.Enabled).priorWork
         val manager = grovsManager ?: return
         if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
-            GlobalScope.launch(grovsContext.serialDispatcher) { manager.onEnabled() }
+            consent.launchOperation(manager.configuration, context = grovsContext.serialDispatcher) {
+                priorWork.join()
+                manager.onEnabled()
+            }
         } else {
-            checkConfiguration()
+            checkConfiguration(awaiting = priorWork)
         }
     }
 
@@ -1021,17 +1027,29 @@ public class Grovs: ActivityProvider {
 
     }
 
-    private fun checkConfiguration() {
+    /**
+     * Starts (or restarts) authentication as a consent operation owned by the current configuration.
+     *
+     * Returns without launching anything while consent is not granted, so a disabled configure
+     * queues no work that a later grant could revive - that grant starts a fresh operation instead.
+     * [awaiting] is the previous consent generation's cleanup: the new authentication waits for it
+     * asynchronously so it can never race an admitted launch commit into a second launch record.
+     */
+    private fun checkConfiguration(awaiting: Job? = null) {
         instance.apiKey?.let { apiKey ->
             grovsManager?.let { manager ->
                 val previousAuthenticationJob = authenticationJob
-                authenticationJob = GlobalScope.launch(grovsContext.serialDispatcher) {
+                authenticationJob = grovsContext.consent.launchOperation(
+                    manager.configuration,
+                    context = grovsContext.serialDispatcher,
+                ) {
+                    awaiting?.join()
                     previousAuthenticationJob?.join()
                     // The joined job may itself have just authenticated this same manager (for
                     // example a configure(enabled = false) job that raced setSDK(true) flipping the
                     // flag before it ran). Re-authenticating here would record a second launch.
                     if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
-                        return@launch
+                        return@launchOperation
                     }
                     val response = try {
                         manager.authenticate()

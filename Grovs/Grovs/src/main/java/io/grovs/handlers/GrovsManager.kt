@@ -324,13 +324,24 @@ internal class GrovsManager(
             result.details
         }
 
-    suspend fun authenticate(): Boolean {
-        // Consent gate. Authentication sends the device details and records the launch, so a
-        // disabled SDK does neither. setSDK(true) authenticates from there.
-        if (!grovsContext.settings.sdkEnabled) {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK disabled - not authenticating")
-            return false
-        }
+    /**
+     * Authenticates the device under a consent operation. Returns false without sending anything
+     * when consent is not granted, and false when consent is withdrawn before the response is
+     * committed - the caller's contract is unchanged, so a revoked attempt simply did not
+     * authenticate. Re-enabling authenticates again under a new token; this one never revives.
+     */
+    suspend fun authenticate(): Boolean = try {
+        grovsContext.consent.runOperation(configuration) { authenticateUnderConsent() }
+    } catch (e: ConsentRevokedException) {
+        DebugLogger.instance.log(LogLevel.INFO, "SDK consent (${e.reason}) - not authenticating")
+        false
+    }
+
+    private suspend fun authenticateUnderConsent(): Boolean {
+        val consent = grovsContext.consent
+        // Present because runOperation established it; every check below is against this one token,
+        // never against a token acquired later, so a disable-enable cycle cannot revive this call.
+        val token = currentConsentToken() ?: return false
 
         if (!context.hasURISchemesConfigured()) {
             DebugLogger.instance.log(LogLevel.INFO, "URI schemes are not configured. Deep linking won't work!")
@@ -356,8 +367,8 @@ internal class GrovsManager(
 
         // Re-checked here: consent can be withdrawn while the device lookup was in flight, and this
         // is the last point before the authenticate request (and the launch it would record) goes out.
-        if (!grovsContext.settings.sdkEnabled) {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK disabled - not authenticating")
+        if (!consent.isCurrent(token)) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn during the device lookup - not authenticating")
             return false
         }
 
@@ -369,29 +380,36 @@ internal class GrovsManager(
         }.collect { result ->
             when (result) {
                 is GVRetryResult.Success -> {
-                    // Consent withdrawn while the request was out: do not come up authenticated,
-                    // do not record the launch. Re-enabling authenticates again.
-                    if (!grovsContext.settings.sdkEnabled) {
-                        DebugLogger.instance.log(LogLevel.INFO, "SDK disabled during authentication - discarding the response")
+                    // The response is only accepted if the commit is admitted while the token is
+                    // still current. Losing that race means: do not come up authenticated, do not
+                    // record the launch. Re-enabling authenticates again under a new token.
+                    val permit = consent.tryAdmitCommit(token, CommitKind.AUTHENTICATION)
+                    if (permit == null) {
+                        DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn during authentication - discarding the response")
                         authenticationState = AuthenticationState.UNAUTHENTICATED
                         return@collect
                     }
 
-                    authenticationState = AuthenticationState.AUTHENTICATED
-                    grovsContext.grovsId = result.data.grovsId
-
-                    // Update context attributes if needed
-                    if (shouldUpdateAttributes) {
-                        updateAttributesIfNeeded()
-                    } else {
-                        grovsContext.identifier = result.data.sdkIdentifier
-                        grovsContext.attributes = result.data.sdkAttributes
+                    // Admitted before any revocation, so this local bookkeeping runs to completion:
+                    // the launch record, the opens counters and the AUTHENTICATED state become
+                    // visible together. A revocation racing this waits for the permit to close, so
+                    // the next grant resumes after it rather than recording a second launch.
+                    permit.use {
+                        withContext(NonCancellable) {
+                            grovsContext.grovsId = result.data.grovsId
+                            if (!shouldUpdateAttributes) {
+                                grovsContext.identifier = result.data.sdkIdentifier
+                                grovsContext.attributes = result.data.sdkAttributes
+                            }
+                            eventsManager.logAppLaunchEvents()
+                            authenticationState = AuthenticationState.AUTHENTICATED
+                        }
                     }
 
-                    // Non-cancellable: a setSDK(false) racing this suspension point must not cancel
-                    // the job mid-write and leave the SDK AUTHENTICATED with no launch ever recorded.
-                    // Storage-only, no flush, so running it to completion here is safe.
-                    withContext(NonCancellable) { eventsManager.logAppLaunchEvents() }
+                    // Network work, so outside the commit: cancellable and gated like any other.
+                    if (shouldUpdateAttributes) {
+                        updateAttributesIfNeeded()
+                    }
 
                     // Aliases set before the SDK was ready are held; send them now.
                     syncScreenAliasesIfNeeded()

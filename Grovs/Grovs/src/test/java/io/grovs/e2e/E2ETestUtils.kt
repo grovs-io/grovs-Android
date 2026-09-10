@@ -26,6 +26,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.robolectric.Robolectric
+import kotlinx.coroutines.test.TestDispatcher
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import java.util.concurrent.CountDownLatch
@@ -429,6 +430,18 @@ object E2ETestUtils {
             val instance = instanceField.get(null)
                 ?: throw IllegalStateException("Grovs instance is null")
 
+            // Retire the consent configuration FIRST and wait (bounded) for its cleanup: every
+            // operation it admitted is cancelled and finished before anything below closes the
+            // manager, cancels jobs or nulls fields, so a still-valid operation can never observe
+            // a half-reset singleton, and nothing admitted in this test survives into the next.
+            try {
+                (grovsField("grovsContext") as? GrovsContext)?.let { replaced ->
+                    retireConsentConfiguration(replaced)?.let { errors.add(it) }
+                }
+            } catch (e: Exception) {
+                errors.add("Failed to retire the consent configuration: ${e.message}")
+            }
+
             // Stop the previous manager's custom-events flush timer and authentication.
             try {
                 (grovsField("grovsManager") as? GrovsManager)?.close()
@@ -501,14 +514,10 @@ object E2ETestUtils {
             }
 
             // Reset grovsContext to a fresh instance so settings/session state don't leak. The replaced
-            // context's consent configuration is retired first, and its cleanup awaited (bounded), so
-            // operations admitted in this test cannot survive into the next one with a valid token.
+            // context's consent configuration was already retired, and its cleanup awaited, at the top.
             try {
                 val contextField = grovsClass.getDeclaredField("grovsContext")
                 contextField.isAccessible = true
-                (contextField.get(instance) as? GrovsContext)?.let { replaced ->
-                    retireConsentConfiguration(replaced)?.let { errors.add(it) }
-                }
                 contextField.set(instance, GrovsContext())
             } catch (e: Exception) {
                 errors.add("Failed to reset grovsContext: ${e.message}")
@@ -571,11 +580,40 @@ object E2ETestUtils {
     fun flushCustomEvents() {
         val manager = getGrovsManager() as? GrovsManager ?: return
         val grovsContext = grovsField("grovsContext") as? GrovsContext ?: return
+        awaitEventsReleased()
         runBlocking {
             getAuthenticationJob()?.join()
             withContext(grovsContext.serialDispatcher) {
                 manager.flushCustomEvents()
             }
+        }
+    }
+
+    /**
+     * Waits until queued custom events are no longer held for a pending link attribution.
+     *
+     * A flush while the hold is armed sends nothing at all, so a test that flushed too early would
+     * see no request and fail for a reason that has nothing to do with what it asserts. Waiting on
+     * the actual condition keeps that independent of how many dispatches the SDK happens to take to
+     * finish its lookup.
+     */
+    fun awaitEventsReleased(timeoutMs: Long = 5_000) {
+        val manager = getGrovsManager() as? GrovsManager ?: return
+        val held = try {
+            val customEvents = GrovsManager::class.java.getDeclaredField("customEventsManager")
+                .apply { isAccessible = true }.get(manager)
+            customEvents.javaClass.getDeclaredField("eventsHeld").apply { isAccessible = true }
+                .let { field -> { field.getBoolean(customEvents) } }
+        } catch (e: Exception) {
+            return // A test double without the field: nothing to wait for.
+        }
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (held()) {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (System.currentTimeMillis() > deadline) {
+                throw AssertionError("Custom events were still held for link attribution after ${timeoutMs}ms")
+            }
+            Thread.sleep(10)
         }
     }
 
@@ -684,11 +722,22 @@ object E2ETestUtils {
         val retirement = context.consent.retireConfiguration(enabled = false)
         val done = CountDownLatch(1)
         retirement.cleanup.invokeOnCompletion { done.countDown() }
-        return if (done.await(timeoutMs, TimeUnit.MILLISECONDS)) {
-            null
-        } else {
-            "Consent cleanup of ${retirement.retired} did not finish within ${timeoutMs}ms"
+        // The retired configuration's operations run on the SDK's serial dispatcher, which in these
+        // tests is a virtual-time TestDispatcher: their cancellation only completes when someone
+        // advances it. Waiting on this thread without pumping would deadlock against the very work
+        // we are waiting for, so drive both clocks while we wait.
+        val scheduler = (context.serialDispatcher as? TestDispatcher)?.scheduler
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (!done.await(10, TimeUnit.MILLISECONDS)) {
+            // runCurrent, not advanceUntilIdle: a cancelled retry loop would otherwise be
+            // fast-forwarded through unbounded virtual time and never let this loop return.
+            scheduler?.runCurrent()
+            if (Looper.myLooper() != null) Shadows.shadowOf(Looper.getMainLooper()).idle()
+            if (System.nanoTime() > deadline) {
+                return "Consent cleanup of ${retirement.retired} did not finish within ${timeoutMs}ms"
+            }
         }
+        return null
     }
 
     /**

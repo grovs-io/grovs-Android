@@ -982,6 +982,10 @@ class ConsentControllerTest {
 
         E2ETestUtils.resetGrovsSingleton()
 
+        // Checked at once, with no wait of our own: the reset must itself have waited for the
+        // retirement cleanup before returning.
+        assertTrue("the owned operation finished before the reset returned", operation!!.isCompleted)
+        assertTrue("the configuration lifetime finished before the reset returned", configuration.lifetime.isCompleted)
         assertRevokedBy(
             RevocationReason.CONFIGURATION_RETIRED,
             operation!!.awaitCompletionCause("the operation owned by the reset configuration"),
