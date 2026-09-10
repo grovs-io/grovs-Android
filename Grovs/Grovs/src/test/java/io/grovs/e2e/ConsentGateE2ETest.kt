@@ -145,8 +145,12 @@ class ConsentGateE2ETest {
         assertEquals(1, storedEventTypes().count { it == "APP_OPEN" })
     }
 
+    // End-to-end: nothing leaves the device and nothing lands in storage while disabled, through a
+    // full activity lifecycle. Coverage for each individual gate this exercises (lifecycle
+    // bookkeeping, notification auto-display, auto screen tracking) lives in GrovsManagerTest,
+    // NotificationsManagerTest and GrovsSingletonTest respectively.
     @Test
-    fun `auto screen tracking and lifecycle events are off while disabled`() {
+    fun `a disabled SDK sends and stores nothing through a full activity lifecycle`() {
         configure(enabled = false)
         val controller = org.robolectric.Robolectric.buildActivity(TestActivity::class.java)
         controller.create().start().resume().pause().stop()

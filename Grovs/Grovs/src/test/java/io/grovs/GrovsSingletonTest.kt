@@ -518,6 +518,46 @@ class GrovsSingletonTest {
         }
     }
 
+    @Test
+    fun `automatic screen tracking does nothing while disabled`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        injectMockGrovsManagerDirectly(mockManager)
+        currentGrovsContext().settings.sdkEnabled = false
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+
+        try {
+            E2ETestUtils.dispatchActivityResumed(controller.get())
+            testDispatcher.scheduler.advanceUntilIdle()
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+
+            // Without this gate, ScreenTracker.trackScreen() would still update its
+            // lastDedupKey/lastScreenAt while disabled, poisoning the dedup window so the first
+            // legitimate screen_view after re-enable is silently suppressed.
+            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any()) }
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `automatic screen tracking runs when enabled`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        injectMockGrovsManagerDirectly(mockManager)
+        currentGrovsContext().settings.sdkEnabled = true
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+
+        try {
+            E2ETestUtils.dispatchActivityResumed(controller.get())
+            testDispatcher.scheduler.advanceUntilIdle()
+
+            // Positive control: proves the harness can observe the call at all, so the exactly-0
+            // assertion above is meaningful rather than vacuous.
+            coVerify(timeout = 1_500, exactly = 1) { mockManager.autoTrackScreen("TestActivity", any()) }
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
     // Regression test: an orphaned posted job from a rapid pause->resume must not fire a
     // second autoTrackScreen. Uses a mocked GrovsManager rather than the real ScreenTracker,
     // whose own dedup window would otherwise mask the bug.

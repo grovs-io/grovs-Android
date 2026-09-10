@@ -19,8 +19,17 @@ interface ActivityProvider {
     fun requireNotificationsListener(): GrovsNotificationsListener?
 }
 
-class NotificationsManager(val context: Context, val grovsContext: GrovsContext, apiKey: String, val activityProvider: ActivityProvider) {
-    private val grovsService = GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
+class NotificationsManager(
+    val context: Context,
+    val grovsContext: GrovsContext,
+    apiKey: String,
+    val activityProvider: ActivityProvider,
+    // Optional custom service implementation for testing (defaults to a real service). Kept as the
+    // concrete GrovsService type, not IGrovsService, because the fragments this class constructs
+    // (NotificationsMainFragment, AutoDisplayedNotificationFragment) require the concrete type.
+    grovsService: GrovsService? = null,
+) {
+    private val grovsService: GrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {
         if (!grovsContext.settings.sdkEnabled) return
