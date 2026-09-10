@@ -22,6 +22,8 @@ import io.grovs.utils.isValidUrl
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Duration
 import java.time.Instant
 
@@ -41,6 +43,14 @@ class EventsManager(
     internal var eventsHeld = false
     internal var firstRequestTime: InstantCompat? = null
     internal var eventsDelaySeconds = 14
+
+    // grovsContext.serialDispatcher is Dispatchers.IO.limitedParallelism(1), which only serializes
+    // work between suspension points: it releases its slot every time a coroutine on it suspends
+    // (eventsStorage.getEvents(), grovsService.addEvents(), ...). Two flush triggers (foreground,
+    // link release, log(), the leeway timer, the attribution deadline) can therefore interleave and
+    // both read the same not-yet-removed events, double-posting them. This mutex is the actual
+    // serialization; it must be held across the whole flush, not just around individual awaits.
+    private val flushMutex = Mutex()
 
     companion object {
         const val BATCH_SIZE = 50
@@ -127,11 +137,21 @@ class EventsManager(
         linkForFutureActions = link
         // Keep the gate closed while storage is updated. A background flush must not take INSTALL
         // between releasing the hold and applying the resolved link.
+        //
+        // Also hold flushMutex across the rewrite: without it, a flush already in flight for the
+        // unlinked copy can finish (network round trip, then removeEvents by type+createdAt) after
+        // this rewrite swaps in the linked copy, deleting the linked copy under an unlinked key the
+        // backend never received. Taking the lock here forces the rewrite to happen either fully
+        // before or fully after any in-flight flush's removeEvents call.
         try {
-            addLinkToEvents(link)
-            addLinkToPaymentEvents(link)
-            eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
+            flushMutex.withLock {
+                addLinkToEvents(link)
+                addLinkToPaymentEvents(link)
+                eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
+            }
         } finally {
+            // Outside the lock: releaseLinkResolution() calls flush(), which takes flushMutex again,
+            // and Mutex is not reentrant.
             releaseLinkResolution(delayEvents)
         }
     }
@@ -251,7 +271,7 @@ class EventsManager(
         eventsStorage.addOrReplaceEvents(newEvents)
     }
 
-    override suspend fun flush() {
+    override suspend fun flush() = flushMutex.withLock {
         sendSystemEventsToBackend()
         sendPaymentEventsToBackend()
     }

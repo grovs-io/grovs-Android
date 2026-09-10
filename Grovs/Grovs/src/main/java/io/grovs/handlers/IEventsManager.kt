@@ -24,8 +24,10 @@ interface IEventsManager {
 
     /**
      * Sends every stored event that is ready to go: system events (excluding open time-spent
-     * nodes) in batches, then payment events one by one. Stops at the first failure; the next
-     * trigger retries. Never blocks the calling thread.
+     * nodes) in batches, then payment events one by one. Each queue stops at its own first
+     * failure and is retried by the next trigger; a failed system batch still lets payments run.
+     * Never blocks the calling thread. Concurrent calls are serialized: only one flush is ever
+     * actually sending at a time.
      */
     suspend fun flush()
 

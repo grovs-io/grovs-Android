@@ -97,12 +97,28 @@ class LinkAttributionTest {
         }
 
         /// Fires the attribution deadline. Releasing the hold now suspends through EventsStorage's
-        /// real IO dispatcher (EventsManager.flush is a genuine suspend chain, not a runBlocking
-        /// call), so the continuation lands back on deadlineClock asynchronously and a single
-        /// runCurrent() can miss it; keep draining in real time for a bit to pick it up.
-        fun releaseDeadline(afterMs: Long) {
+        /// real IO dispatcher and EventsManager.flushMutex (EventsManager.flush is a genuine suspend
+        /// chain, not a runBlocking call), so the continuation lands back on deadlineClock
+        /// asynchronously and a single runCurrent() can miss it. Drain in real time until [until]
+        /// reports the release actually happened, rather than assuming a fixed budget is enough;
+        /// fail loudly if it never does.
+        ///
+        /// [until] only has to observe *some* effect of the release (an event landing in rig.sent,
+        /// say) — the coroutine that produced it is still mid-flight behind it (removeEvents(),
+        /// sendPaymentEventsToBackend(), then releasing flushMutex and finally
+        /// GrovsManager.resolutionMutex), so stopping the instant [until] turns true would leave
+        /// those locks held with nothing left to pump deadlineClock and finish releasing them —
+        /// exactly the kind of hang this helper exists to avoid. Keep draining a bit longer after
+        /// [until] is satisfied to let that tail run too.
+        fun releaseDeadline(afterMs: Long, until: () -> Boolean) {
             deadlineClock.advanceTimeBy(afterMs)
-            repeat(50) {
+            val deadlineAt = System.currentTimeMillis() + 5_000
+            while (!until() && System.currentTimeMillis() < deadlineAt) {
+                deadlineClock.runCurrent()
+                Thread.sleep(5)
+            }
+            assertTrue("releaseDeadline(${afterMs}ms) did not observe its completion condition within 5s", until())
+            repeat(40) {
                 deadlineClock.runCurrent()
                 Thread.sleep(5)
             }
@@ -246,7 +262,7 @@ class LinkAttributionTest {
             rig.events.logAppLaunchEvents()
             val request = async { rig.manager.handleIntent(Intent(), true) }
             started.await()
-            rig.releaseDeadline(25_001)
+            rig.releaseDeadline(25_001) { rig.sent.any { it.first == EventType.INSTALL } }
             assertFalse(rig.events.eventsHeld)
             assertEquals(listOf(EventType.INSTALL to null), rig.sent.filter { it.first == EventType.INSTALL })
             gate.complete(Unit)
@@ -402,9 +418,13 @@ class LinkAttributionTest {
             LSResult.Success(DeeplinkDetails(directUrl, null, null))
         }
         try {
+            // logAppLaunchEvents() gives the deadline's flush() an INSTALL to send, so
+            // releaseDeadline has a real, observable signal that the release actually completed
+            // (not just that eventsHeld flipped synchronously) before the next lookup starts.
+            rig.events.logAppLaunchEvents()
             val old = async { rig.manager.handleIntent(Intent(), true) }
             fingerprintStarted.await()
-            rig.releaseDeadline(25_001)
+            rig.releaseDeadline(25_001) { rig.sent.any { it.first == EventType.INSTALL } }
             assertFalse(rig.events.eventsHeld)
 
             val direct = async { rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false) }

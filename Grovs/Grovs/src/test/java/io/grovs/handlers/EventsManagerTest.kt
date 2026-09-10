@@ -20,10 +20,13 @@ import io.grovs.model.LogLevel
 import io.grovs.service.IGrovsService
 import io.grovs.storage.IEventsStorage
 import io.grovs.storage.ILocalCache
+import io.grovs.model.events.PaymentEvent
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.mockk.*
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.*
@@ -488,12 +491,55 @@ class EventsManagerTest {
 
     private fun accepted(n: Int) = LSResult.Success(BatchEventsResponse(accepted = n, rejected = 0))
 
+    /**
+     * Stateful stand-in for EventsStorage: relaxed mockk mocks don't retain state across calls, but
+     * the overlapping-flush tests need removal to be real so a second flush can observe it.
+     */
+    private class InMemoryEventsStorage : IEventsStorage {
+        val storedEvents = mutableListOf<Event>()
+
+        override suspend fun addOrReplaceEvents(events: List<Event>) {
+            events.forEach { event ->
+                val index = storedEvents.indexOf(event)
+                if (index >= 0) storedEvents[index] = event else storedEvents.add(event)
+            }
+        }
+
+        override suspend fun addEvent(event: Event) {
+            storedEvents.add(event)
+        }
+
+        override suspend fun addPaymentEvent(event: PaymentEvent) {}
+
+        override suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean, link: String?, sessionId: String?) {}
+
+        override suspend fun removeEvent(event: Event) {
+            storedEvents.remove(event)
+        }
+
+        override suspend fun removeEvents(events: List<Event>) {
+            val doomed = events.toSet()
+            storedEvents.removeAll { it in doomed }
+        }
+
+        override suspend fun removePaymentEvent(event: PaymentEvent) {}
+
+        override suspend fun replacePaymentEvents(events: List<PaymentEvent>) {}
+
+        override suspend fun getEvents(): List<Event> = storedEvents.toList()
+
+        override suspend fun getPaymentEvents(): List<PaymentEvent> = emptyList()
+
+        override suspend fun hasEmptyTimeSpentEvent(): Boolean = false
+    }
+
     @Test
     fun `flush sends ready events in chunks of BATCH_SIZE and removes each accepted chunk`() = runTest {
         val events = storedEvents(EventsManager.BATCH_SIZE + 3)
         coEvery { mockEventsStorage.getEvents() } returns events
         coEvery { mockGrovsService.addEvents(any()) } answers { accepted(firstArg<List<Event>>().size) }
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
 
         eventsManager.flush()
 
@@ -511,6 +557,7 @@ class EventsManagerTest {
         coEvery { mockEventsStorage.getEvents() } returns events
         coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Error(java.io.IOException("down"))
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
 
         val started = System.nanoTime()
         eventsManager.flush()
@@ -519,6 +566,10 @@ class EventsManagerTest {
         coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
         coVerify(exactly = 0) { mockEventsStorage.removeEvents(any()) }
         assertTrue("A failed chunk must not sleep on the serial dispatcher (took ${elapsedMs}ms)", elapsedMs < 1_000)
+        // The wall-clock check above cannot catch a delay(): inside runTest a delay advances virtual
+        // time instead of blocking, so a reintroduced delay(5000) would still report ~0ms elapsed.
+        // Assert no virtual time was consumed either.
+        assertEquals(0L, testScheduler.currentTime)
     }
 
     @Test
@@ -529,6 +580,7 @@ class EventsManagerTest {
             BatchEventsResponse(accepted = 1, rejected = 1, rawErrors = listOf(BatchEventError(1, "unknown event type")))
         )
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
 
         eventsManager.flush()
 
@@ -542,6 +594,7 @@ class EventsManagerTest {
         coEvery { mockEventsStorage.getEvents() } returns listOf(open, closed)
         coEvery { mockGrovsService.addEvents(any()) } answers { accepted(firstArg<List<Event>>().size) }
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
 
         eventsManager.flush()
 
@@ -552,6 +605,7 @@ class EventsManagerTest {
     fun `flush sends nothing while events are held`() = runTest {
         coEvery { mockEventsStorage.getEvents() } returns storedEvents(1)
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
         eventsManager.setEventsHeld(true)
 
         eventsManager.flush()
@@ -563,10 +617,135 @@ class EventsManagerTest {
     fun `flush sends nothing while the SDK is disabled`() = runTest {
         coEvery { mockEventsStorage.getEvents() } returns storedEvents(1)
         eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
         grovsContext.settings.sdkEnabled = false
 
         eventsManager.flush()
 
         coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
+    }
+
+    @Test
+    fun `a hold arriving mid-flush stops further chunks`() = runTest {
+        val events = storedEvents(EventsManager.BATCH_SIZE + 1)
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockGrovsService.addEvents(any()) } answers {
+            eventsManager.setEventsHeld(true)
+            accepted(firstArg<List<Event>>().size)
+        }
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
+    }
+
+    @Test
+    fun `the SDK being disabled mid-flush stops further chunks`() = runTest {
+        val events = storedEvents(EventsManager.BATCH_SIZE + 1)
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockGrovsService.addEvents(any()) } answers {
+            grovsContext.settings.sdkEnabled = false
+            accepted(firstArg<List<Event>>().size)
+        }
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
+    }
+
+    // ==================== flush() serialization ====================
+
+    /** Builds a real (non-mocked storage) EventsManager sharing this fixture's service mock. */
+    private fun realStorageManager(storage: IEventsStorage): EventsManager =
+        EventsManager(
+            context = context,
+            grovsContext = grovsContext,
+            apiKey = testApiKey,
+            grovsService = mockGrovsService,
+            eventsStorage = storage,
+            localCache = mockLocalCache
+        ).also {
+            it.allowedToSendToBackend = true
+            it.firstRequestTime = InstantCompat.now()
+        }
+
+    @Test
+    fun `overlapping flushes cannot double-post the same events`() = runTest {
+        val storage = InMemoryEventsStorage()
+        val e1 = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.ofEpochMilli(1_000L))
+        val e2 = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.ofEpochMilli(2_000L))
+        storage.storedEvents.addAll(listOf(e1, e2))
+        val manager = realStorageManager(storage)
+
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val postedBatches = mutableListOf<List<Event>>()
+        coEvery { mockGrovsService.addEvents(any()) } coAnswers {
+            val batch = firstArg<List<Event>>()
+            postedBatches.add(batch)
+            started.complete(Unit)
+            gate.await()
+            accepted(batch.size)
+        }
+
+        // The first flush reaches addEvents and, with it, holds flushMutex for the rest of its run.
+        val first = async { manager.flush() }
+        started.await()
+        // A second, fully overlapping trigger (foreground, log(), the leeway timer, ...) queues
+        // behind flushMutex instead of running concurrently against the same not-yet-removed events.
+        val second = async { manager.flush() }
+        gate.complete(Unit)
+        first.await()
+        second.await()
+
+        // Serialization means the second flush only ever runs after the first's removeEvents has
+        // already emptied storage, so it finds nothing left to post — each event was posted exactly
+        // once, by the first flush.
+        assertEquals("only the first flush should have posted anything", 1, postedBatches.size)
+        assertEquals(setOf(e1, e2), postedBatches.single().toSet())
+        assertTrue("storage should be empty once both flushes settle", storage.storedEvents.isEmpty())
+    }
+
+    @Test
+    fun `completeLinkResolution starting during an in-flight flush does not lose the link`() = runTest {
+        val storage = InMemoryEventsStorage()
+        val install = Event(event = EventType.INSTALL, createdAt = InstantCompat.ofEpochMilli(1_000L), sessionId = grovsContext.sessionId)
+        storage.storedEvents.add(install)
+        val manager = realStorageManager(storage)
+
+        val started = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val postedBatches = mutableListOf<List<Event>>()
+        coEvery { mockGrovsService.addEvents(any()) } coAnswers {
+            val batch = firstArg<List<Event>>()
+            postedBatches.add(batch)
+            started.complete(Unit)
+            gate.await()
+            accepted(batch.size)
+        }
+
+        // The flush is already in flight (holding flushMutex, mid network call) before resolution
+        // commits the link.
+        val flushJob = async { manager.flush() }
+        started.await()
+        val commit = async { manager.completeLinkResolution("https://test.link/resolved", delayEvents = false) }
+        gate.complete(Unit)
+        flushJob.await()
+        commit.await()
+
+        // Lock ordering this test observes: flushMutex is fair FIFO and the flush acquired it first,
+        // so completeLinkResolution's storage rewrite cannot start until the whole in-flight flush —
+        // network round trip and removeEvents(chunk) — has finished. By the time the rewrite runs,
+        // the INSTALL event is already gone from storage (successfully sent), so there is nothing
+        // left to relink: the event goes out unlinked (attribution resolved after it had already
+        // left the device, same as if completeLinkResolution had simply been called a moment later),
+        // and no stale or orphaned copy is left behind for a later flush to double-post.
+        assertEquals(1, postedBatches.size)
+        assertNull("the in-flight flush had already read the event before the link resolved", postedBatches.single().single().link)
+        assertTrue("no orphaned copy should be left in storage", storage.storedEvents.isEmpty())
     }
 }
