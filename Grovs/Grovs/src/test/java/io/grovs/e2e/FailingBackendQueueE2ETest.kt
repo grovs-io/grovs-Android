@@ -14,7 +14,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -68,14 +67,6 @@ class FailingBackendQueueE2ETest {
         .setHeader("Content-Type", "application/json")
         .setBody(body)
 
-    @Ignore(
-        "TODO(improve): known stall. EventsManager.sendNormalEventsToBackend runs inside runBlocking on the " +
-            "SDK serial dispatcher and sleeps 5s per failed event, so every later track()/screen view/deep-link " +
-            "resolution waits behind the back-off (~10s here, up to 40s per event on a dead network). " +
-            "Fix: stop the flush at the first transport failure (skip 4xx) and drop the sleep; longer term, move " +
-            "system-event sending to its own flush job so the serial dispatcher never waits on the network. " +
-            "Re-enable this test with the fix; it passes with a 12s timeout today, proving delay not loss."
-    )
     @Test
     fun `custom events are still persisted promptly while system event sends are failing`() {
         val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
