@@ -96,8 +96,8 @@ class S09NestedFragmentsE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
-            .map { JSONObject(it.second).getJSONObject("properties").getString("screen_name") }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
+            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name") }
     }
 
     /** Builds the host activity to STARTED (not yet resumed), returns controller + container. */

@@ -104,9 +104,9 @@ class S02NavComposeE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
             .map { (_, body) ->
-                JSONObject(body).getJSONObject("properties").getString("screen_name")
+                JSONObject(body).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name")
             }
     }
 

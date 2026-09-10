@@ -1,5 +1,6 @@
 package io.grovs.handlers
 
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.events.PaymentEvent
@@ -105,7 +106,7 @@ class SessionTest {
         assertEquals(sessionA, queuedEvent.sessionId)
 
         // First send attempt fails (e.g. no network) - the event stays queued.
-        coEvery { grovsService.addEvent(any()) } returns LSResult.Error(IOException("no network"))
+        coEvery { grovsService.addEvents(any()) } returns LSResult.Error(IOException("no network"))
         eventsManager.onAppForegrounded()
         assertEquals("event must still be queued after a failed send", 1,
             storage.storedEvents.count { it.event == EventType.APP_OPEN })
@@ -119,10 +120,10 @@ class SessionTest {
 
         // Network is back; the flush loop resends the still-queued event.
         val sentEvents = mutableListOf<Event>()
-        coEvery { grovsService.addEvent(any()) } answers {
-            val sent = firstArg<Event>()
-            sentEvents.add(sent)
-            LSResult.Success(true)
+        coEvery { grovsService.addEvents(any()) } answers {
+            val sent = firstArg<List<Event>>()
+            sentEvents.addAll(sent)
+            LSResult.Success(BatchEventsResponse(accepted = sent.size, rejected = 0))
         }
         eventsManager.onAppForegrounded()
 

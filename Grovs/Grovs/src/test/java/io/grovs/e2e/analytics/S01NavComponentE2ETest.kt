@@ -100,9 +100,9 @@ class S01NavComponentE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
             .map { (_, body) ->
-                val json = JSONObject(body)
+                val json = JSONObject(body).getJSONArray("events").getJSONObject(0)
                 json.getJSONObject("properties").getString(SCREEN_NAME)
             }
     }

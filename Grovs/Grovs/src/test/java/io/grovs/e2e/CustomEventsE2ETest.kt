@@ -60,10 +60,10 @@ class CustomEventsE2ETest {
         Grovs.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"))
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("checkout_completed", body.getString("event_name"))
         assertEquals("abc", body.getJSONObject("properties").getString("sku"))
         assertEquals("shop", body.getJSONArray("tags").getString(0))
@@ -92,10 +92,10 @@ class CustomEventsE2ETest {
         Grovs.track("checkout_completed", null, tags = listOf("shop"))
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         val tags = body.getJSONArray("tags")
         val tagValues = (0 until tags.length()).map { tags.getString(it) }
         assertTrue("Expected global tags to be merged, got $tagValues", tagValues.containsAll(listOf("shop", "android", "prod")))
@@ -114,6 +114,6 @@ class CustomEventsE2ETest {
         Grovs.track("app_open", null, null)
         E2ETestUtils.flushCustomEvents()
 
-        assertEquals(null, E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/event/custom"))
+        assertEquals(null, E2ETestUtils.awaitRequestFor(mockWebServer, path = "/api/v1/sdk/events/batch"))
     }
 }

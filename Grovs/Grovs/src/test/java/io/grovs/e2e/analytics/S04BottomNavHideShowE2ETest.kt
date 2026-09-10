@@ -101,9 +101,9 @@ class S04BottomNavHideShowE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
             .mapNotNull { (_, body) ->
-                val json = JSONObject(body)
+                val json = JSONObject(body).getJSONArray("events").getJSONObject(0)
                 if (json.optString("event_name") == "screen_view") {
                     json.getJSONObject("properties").optString("screen_name")
                 } else null

@@ -146,7 +146,7 @@ internal class CustomEventsManager(
 
         val done = mutableListOf<CustomEvent>()
         for (event in pending) {
-            when (val result = grovsService.addCustomEvent(event)) {
+            when (val result = grovsService.addCustomEvents(listOf(event))) {
                 is LSResult.Success -> done.add(event)
                 is LSResult.Error -> {
                     val exception = result.exception

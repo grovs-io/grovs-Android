@@ -9,6 +9,7 @@ import io.grovs.TestAssertions.assertNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
 import io.grovs.TestAssertions.assertEventStored
 // PURCHASE_EVENT_DISABLED: import io.grovs.TestAssertions.assertPaymentEventStored
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
@@ -123,13 +124,13 @@ class EventsManagerTest {
 
         val testEvent = Event(EventType.APP_OPEN, InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(testEvent)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
         coEvery { mockEventsStorage.removeEvent(any()) } returns Unit
 
         eventsManager.onAppForegrounded()
 
         coVerify { mockEventsStorage.getEvents() }
-        coVerify(timeout = 1000) { mockGrovsService.addEvent(testEvent) }
+        coVerify(timeout = 1000) { mockGrovsService.addEvents(match { l -> l.any { it == testEvent } }) }
     }
 
     @Test
@@ -243,11 +244,11 @@ class EventsManagerTest {
 
         val event = Event(EventType.VIEW, InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(event)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
 
         eventsManager.log(event)
 
-        coVerify { mockGrovsService.addEvent(any()) }
+        coVerify { mockGrovsService.addEvents(any()) }
     }
 
     // ==================== Purchase Tests ====================
@@ -324,7 +325,7 @@ class EventsManagerTest {
             "after setLinkForFutureEvents('https://test.link')"
         )
         coVerify(exactly = 0) { mockEventsStorage.addOrReplaceEvents(any()) }
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
     }
 
     @Test
@@ -365,7 +366,7 @@ class EventsManagerTest {
             io.grovs.model.events.PaymentEvent(eventType = io.grovs.model.events.PaymentEventType.BUY, appId = "app",
                 priceCents = 100, currency = "USD", date = InstantCompat.now(), productId = "sku", store = false)
         )
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
         coEvery { mockGrovsService.addPaymentEvent(any()) } returns LSResult.Success(true)
         grovsContext.settings.sdkEnabled = false
 
@@ -373,7 +374,7 @@ class EventsManagerTest {
         eventsManager.log(Event(EventType.VIEW, InstantCompat.now()))
         eventsManager.releaseLinkResolution(delayEvents = false)
 
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
         coVerify(exactly = 0) { mockGrovsService.addPaymentEvent(any()) }
         assertTrue("Sending stays allowed so re-enabling delivers the retained events", eventsManager.allowedToSendToBackend)
     }
@@ -385,7 +386,7 @@ class EventsManagerTest {
         val event = Event(EventType.VIEW, InstantCompat.now())
         eventsManager.log(event)
 
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
     }
 
     @Test
@@ -395,7 +396,7 @@ class EventsManagerTest {
 
         val event = Event(EventType.VIEW, InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(event)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
 
         eventsManager.log(event)
 
@@ -432,12 +433,12 @@ class EventsManagerTest {
     fun `held events never flush even when delayEvents is false`() = runTest {
         val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
 
         eventsManager.setEventsHeld(true)
         eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
 
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
         assertAllowedToSendToBackend(eventsManager, expected = false, context = "while events are held")
     }
 
@@ -445,32 +446,32 @@ class EventsManagerTest {
     fun `held events never flush even after the delay window has passed`() = runTest {
         val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
         eventsManager.eventsDelaySeconds = 0
         eventsManager.firstRequestTime = InstantCompat.ofEpochMilli(0)
 
         eventsManager.setEventsHeld(true)
         eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
 
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
     }
 
     @Test
     fun `releasing the hold flushes without changing the link`() = runTest {
         val stored = Event(event = EventType.INSTALL, createdAt = InstantCompat.now())
         coEvery { mockEventsStorage.getEvents() } returns listOf(stored)
-        coEvery { mockGrovsService.addEvent(any()) } returns LSResult.Success(true)
+        coEvery { mockGrovsService.addEvents(any()) } returns LSResult.Success(BatchEventsResponse(accepted = 1, rejected = 0))
 
         eventsManager.beginLinkResolution()
         eventsManager.setLinkForFutureEvents("https://test.link/direct")
         eventsManager.log(Event(event = EventType.VIEW, createdAt = InstantCompat.now()))
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }
 
         eventsManager.setEventsHeld(false)
-        coVerify(exactly = 0) { mockGrovsService.addEvent(any()) }   // clearing alone does not flush
+        coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }   // clearing alone does not flush
 
         eventsManager.releaseLinkResolution(delayEvents = false)
-        coVerify(exactly = 1) { mockGrovsService.addEvent(any()) }
+        coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
         assertEqualsWithContext(
             "https://test.link/direct",
             eventsManager.linkForFutureActions,

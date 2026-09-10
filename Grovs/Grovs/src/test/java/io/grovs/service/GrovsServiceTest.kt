@@ -15,14 +15,10 @@ import io.grovs.model.AuthenticationResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
-import io.grovs.model.Event
-import io.grovs.model.EventType
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
-import io.grovs.model.exceptions.GrovsErrorCode
-import io.grovs.model.exceptions.GrovsException
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
 // PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.notifications.NotificationsResponse
@@ -290,44 +286,6 @@ class GrovsServiceTest {
         )
     }
 
-    // ==================== addEvent Tests ====================
-
-    @Test
-    fun `GrovsService addEvent returns LSResult Success with true on successful API response`() = runTest {
-        mockGrovsApi.addEventResponse = Response.success(Unit)
-
-        val event = Event(
-            event = EventType.VIEW,
-            createdAt = InstantCompat.now(),
-            link = "https://example.grovs.io/link"
-        )
-
-        val result = grovsService.addEvent(event)
-
-        val data = assertResultSuccess(
-            result,
-            context = "after addEvent() with successful mock response"
-        )
-        assertTrueWithContext(
-            data,
-            "result data",
-            "after addEvent() returns success"
-        )
-    }
-
-    @Test
-    fun `GrovsService addEvent returns LSResult Error on 500 API response`() = runTest {
-        mockGrovsApi.addEventResponse = MockGrovsApi.createErrorResponseTyped(500, "Server error")
-
-        val event = Event(EventType.VIEW, InstantCompat.now())
-        val result = grovsService.addEvent(event)
-
-        assertResultError(
-            result,
-            context = "after addEvent() with 500 error response"
-        )
-    }
-
     // ==================== addPaymentEvent Tests ====================
 
     // PURCHASE_EVENT_DISABLED: @Test
@@ -579,40 +537,11 @@ class TestableGrovsService(
         }
     }
 
-    override suspend fun addEvent(event: io.grovs.model.Event): LSResult<Boolean> {
-        return try {
-            val response = testApi.addEvent(event)
-            if (response.isSuccessful) {
-                return LSResult.Success(true)
-            }
-            LSResult.Error(java.io.IOException("Failed to add event"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
+    override suspend fun addEvents(events: List<io.grovs.model.Event>): LSResult<io.grovs.model.BatchEventsResponse> =
+        LSResult.Success(io.grovs.model.BatchEventsResponse(accepted = events.size, rejected = 0))
 
-    override suspend fun addCustomEvent(event: CustomEvent): LSResult<Boolean> {
-        return try {
-            val response = testApi.addCustomEvent(event)
-            if (response.isSuccessful) {
-                LSResult.Success(true)
-            } else {
-                val code = response.code()
-                if (code in 400..499 && code != 429) {
-                    LSResult.Error(
-                        GrovsException(
-                            "Server rejected the event ($code).",
-                            GrovsErrorCode.EVENT_DISPATCH_ERROR
-                        )
-                    )
-                } else {
-                    LSResult.Error(java.io.IOException("Failed to log the custom event ($code)."))
-                }
-            }
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
+    override suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<io.grovs.model.BatchEventsResponse> =
+        LSResult.Success(io.grovs.model.BatchEventsResponse(accepted = events.size, rejected = 0))
 
     override suspend fun addPaymentEvent(event: io.grovs.model.events.PaymentEvent): LSResult<Boolean> {
         return try {

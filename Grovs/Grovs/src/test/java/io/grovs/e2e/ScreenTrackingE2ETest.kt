@@ -89,10 +89,10 @@ class ScreenTrackingE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("screen_view", body.getString("event_name"))
         assertEquals("TestActivity", body.getJSONObject("properties").getString("screen_name"))
     }
@@ -106,7 +106,7 @@ class ScreenTrackingE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
 
-        assertNull(E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom"))
+        assertNull(E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch"))
     }
 
     @Test
@@ -117,10 +117,10 @@ class ScreenTrackingE2ETest {
         Grovs.trackScreenView("Checkout", mapOf("step" to 2.0))
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("screen_view", body.getString("event_name"))
         assertEquals("Checkout", body.getJSONObject("properties").getString("screen_name"))
     }
@@ -135,8 +135,8 @@ class ScreenTrackingE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
-        val body = JSONObject(request!!.body.readUtf8())
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("Home", body.getJSONObject("properties").getString("screen_name"))
     }
 
@@ -151,15 +151,15 @@ class ScreenTrackingE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("screen_view", body.getString("event_name"))
         assertEquals("TestFragment", body.getJSONObject("properties").getString("screen_name"))
 
         // No second screen_view (e.g. for the host Activity, "FragmentHostTestActivity") should follow.
-        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom", timeoutMs = 500)
+        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch", timeoutMs = 500)
         assertNull(secondRequest)
     }
 
@@ -174,14 +174,14 @@ class ScreenTrackingE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("screen_view", body.getString("event_name"))
         assertEquals("TestActivity", body.getJSONObject("properties").getString("screen_name"))
 
-        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom", timeoutMs = 500)
+        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch", timeoutMs = 500)
         assertNull(secondRequest)
     }
 
@@ -207,15 +207,15 @@ class ScreenTrackingE2ETest {
 
         E2ETestUtils.flushCustomEvents()
 
-        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom")
+        val request = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch")
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals("screen_view", body.getString("event_name"))
         assertEquals("TestFragment", body.getJSONObject("properties").getString("screen_name"))
 
         // No second screen_view (e.g. for the host Activity, "FragmentHostTestActivity") should follow.
-        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/event/custom", timeoutMs = 500)
+        val secondRequest = E2ETestUtils.awaitRequestFor(mockWebServer, "/api/v1/sdk/events/batch", timeoutMs = 500)
         assertNull(secondRequest)
     }
 
@@ -231,11 +231,11 @@ class ScreenTrackingE2ETest {
 
         val request = E2ETestUtils.awaitRequestFor(
             mockWebServer,
-            "/api/v1/sdk/event/custom",
+            "/api/v1/sdk/events/batch",
         )
         assertNotNull(request)
 
-        val body = JSONObject(request!!.body.readUtf8())
+        val body = JSONObject(request!!.body.readUtf8()).getJSONArray("events").getJSONObject(0)
         assertEquals(
             "VisibleLeafFragment",
             body.getJSONObject("properties").getString("screen_name"),
@@ -243,7 +243,7 @@ class ScreenTrackingE2ETest {
         assertNull(
             E2ETestUtils.awaitRequestFor(
                 mockWebServer,
-                "/api/v1/sdk/event/custom",
+                "/api/v1/sdk/events/batch",
                 timeoutMs = 500,
             )
         )

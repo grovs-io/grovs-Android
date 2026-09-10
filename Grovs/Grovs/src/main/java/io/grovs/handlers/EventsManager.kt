@@ -272,7 +272,7 @@ class EventsManager(
         for (event in events) {
             if (event.event != EventType.TIME_SPENT) {
                 if (eventsHeld) return@runBlocking
-                val result = grovsService.addEvent(event)
+                val result = grovsService.addEvents(listOf(event))
                 when (result) {
                     is LSResult.Success -> {
                         eventsStorage.removeEvent(event)
@@ -295,7 +295,7 @@ class EventsManager(
 
         for (event in events) {
             if ((event.event == EventType.TIME_SPENT) && (event.engagementTime != null)) {
-                val result = grovsService.addEvent(event)
+                val result = grovsService.addEvents(listOf(event))
                 when (result) {
                     is LSResult.Success -> {
                         DebugLogger.instance.log(LogLevel.INFO, "Sent time-spent: $event")

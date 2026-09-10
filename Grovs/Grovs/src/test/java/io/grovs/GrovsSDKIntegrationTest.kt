@@ -5,6 +5,8 @@ import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
 import io.grovs.TestAssertions.assertFalseWithContext
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.BatchEventsRequest
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
@@ -225,10 +227,10 @@ class GrovsSDKIntegrationTest {
 
     @Test
     fun `MockGrovsApi addEvent returns success and records event call`() = runTest {
-        mockApi.addEventResponse = Response.success(Unit)
+        mockApi.addEventsBatchResponse = Response.success(BatchEventsResponse(accepted = 1, rejected = 0))
 
         val event = createTestEvent()
-        val result = mockApi.addEvent(event)
+        val result = mockApi.addEventsBatch(BatchEventsRequest(listOf(event)))
 
         assertTrueWithContext(
             result.isSuccessful,
@@ -332,8 +334,8 @@ class GrovsSDKIntegrationTest {
         )
 
         // Step 3: Track event
-        mockApi.addEventResponse = Response.success(Unit)
-        val eventResult = mockApi.addEvent(createTestEvent())
+        mockApi.addEventsBatchResponse = Response.success(BatchEventsResponse(accepted = 1, rejected = 0))
+        val eventResult = mockApi.addEventsBatch(BatchEventsRequest(listOf(createTestEvent())))
         assertTrueWithContext(
             eventResult.isSuccessful,
             "addEvent response.isSuccessful",

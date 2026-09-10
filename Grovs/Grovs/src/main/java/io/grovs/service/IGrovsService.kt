@@ -2,6 +2,7 @@ package io.grovs.service
 
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
@@ -80,23 +81,21 @@ interface IGrovsService {
     ): LSResult<Boolean>
     
     /**
-     * Add an event.
+     * Send up to [GrovsService.MAX_BATCH_SIZE] system events in one request.
+     *
+     * Success means the backend consumed the batch; items it rejected are listed in the response
+     * and will never be accepted, so the caller removes the whole batch from storage.
+     * Error means nothing was consumed; the caller keeps the batch and stops this flush.
      */
-    suspend fun addEvent(event: Event): LSResult<Boolean>
+    suspend fun addEvents(events: List<Event>): LSResult<BatchEventsResponse>
 
     /**
      * Add a payment event.
      */
     suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean>
 
-    /**
-     * Add a custom (consumer-tracked) event.
-     *
-     * Returns LSResult.Error carrying a GrovsException with EVENT_DISPATCH_ERROR when the server
-     * rejects the event outright (4xx) — the caller must DROP such events rather than retry.
-     * Any other error means the event should be kept and retried.
-     */
-    suspend fun addCustomEvent(event: CustomEvent): LSResult<Boolean>
+    /** Same contract as [addEvents], for custom events. */
+    suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<BatchEventsResponse>
 
     /**
      * Get notifications.

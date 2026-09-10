@@ -6,6 +6,7 @@ import android.net.Uri
 import io.grovs.FakeClipboard
 import io.grovs.FakeLocalCache
 import io.grovs.TestFixtures
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
 import io.grovs.model.EventType
@@ -69,18 +70,19 @@ class LinkAttributionTest {
             coEvery { service.payloadFor(any()) } returns LSResult.Success(empty)
             coEvery { service.payloadWithLinkFor(any()) } returns LSResult.Success(DeeplinkDetails(directUrl, null, null))
             coEvery { service.clipboardStatus() } returns LSResult.Success(true)
-            coEvery { service.addEvent(any()) } answers {
-                val event = firstArg<Event>()
-                sent.add(event.event to event.link)
-                LSResult.Success(true)
+            coEvery { service.addEvents(any()) } answers {
+                val events = firstArg<List<Event>>()
+                events.forEach { sent.add(it.event to it.link) }
+                LSResult.Success(BatchEventsResponse(accepted = events.size, rejected = 0))
             }
             coEvery { service.addPaymentEvent(any()) } answers {
                 sentPurchases.add(firstArg<PaymentEvent>().link)
                 LSResult.Success(true)
             }
-            coEvery { service.addCustomEvent(any()) } answers {
-                sentCustom.add(firstArg<io.grovs.model.CustomEvent>().link)
-                LSResult.Success(true)
+            coEvery { service.addCustomEvents(any()) } answers {
+                val events = firstArg<List<io.grovs.model.CustomEvent>>()
+                events.forEach { sentCustom.add(it.link) }
+                LSResult.Success(BatchEventsResponse(accepted = events.size, rejected = 0))
             }
             manager = GrovsManager(app, app, context, "test", service, events, helper, custom,
                 clipboardHandler = ClipboardHandler(service, cache, clipboard, emptyList()))
@@ -472,9 +474,9 @@ class LinkAttributionTest {
         val started = CompletableDeferred<Unit>()
         val reply = CompletableDeferred<Unit>()
         val offline = LSResult.Error(java.io.IOException("offline"))
-        coEvery { rig.service.addEvent(any()) } returns offline
+        coEvery { rig.service.addEvents(any()) } returns offline
         coEvery { rig.service.addPaymentEvent(any()) } returns offline
-        coEvery { rig.service.addCustomEvent(any()) } returns offline
+        coEvery { rig.service.addCustomEvents(any()) } returns offline
         try {
             rig.events.logAppLaunchEvents()
             rig.manager.track("old_checkout", null, null)
@@ -511,20 +513,22 @@ class LinkAttributionTest {
                 assertTrue("Unexpected session $session", session == sessionA || session == sessionB)
                 sent.add("$kind|${if (session == sessionA) "A" else "B"}|$link")
             }
-            coEvery { rig.service.addEvent(any()) } answers {
-                val event = firstArg<Event>()
-                if (event.event == EventType.APP_OPEN) record("lifecycle", event.sessionId, event.link)
-                LSResult.Success(true)
+            coEvery { rig.service.addEvents(any()) } answers {
+                val events = firstArg<List<Event>>()
+                events.forEach { event ->
+                    if (event.event == EventType.APP_OPEN) record("lifecycle", event.sessionId, event.link)
+                }
+                LSResult.Success(BatchEventsResponse(accepted = events.size, rejected = 0))
             }
             coEvery { rig.service.addPaymentEvent(any()) } answers {
                 val event = firstArg<PaymentEvent>()
                 record("purchase", event.sessionId, event.link)
                 LSResult.Success(true)
             }
-            coEvery { rig.service.addCustomEvent(any()) } answers {
-                val event = firstArg<io.grovs.model.CustomEvent>()
-                record("custom", event.sessionId, event.link)
-                LSResult.Success(true)
+            coEvery { rig.service.addCustomEvents(any()) } answers {
+                val events = firstArg<List<io.grovs.model.CustomEvent>>()
+                events.forEach { event -> record("custom", event.sessionId, event.link) }
+                LSResult.Success(BatchEventsResponse(accepted = events.size, rejected = 0))
             }
             reply.complete(Unit)
             lookup.await()

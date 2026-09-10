@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit
  * Verifies the Grovs automatic screen-view tracker against hand-rolled fragment navigation.
  * See S07Fixtures.kt for the host Activity and fragments.
  *
- * A screen_view is one POST to /api/v1/sdk/event/custom carrying properties.screen_name.
+ * A screen_view is one POST to /api/v1/sdk/events/batch carrying properties.screen_name.
  *
  * Each distinct navigation is followed by settleAutomaticScreenResolution() to run its resolution
  * job — a real looper turn would do the same. Tests that probe coalescing withhold that settle.
@@ -105,8 +105,8 @@ class S07ManualFragmentsE2ETest {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
-            .map { JSONObject(it.second).getJSONObject("properties").getString("screen_name") }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
+            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name") }
     }
 
     /** Build the host resumed (root Home installed) and run Home's resolution job. */

@@ -156,10 +156,10 @@ class S05ViewPager2E2ETest {
         E2ETestUtils.flushCustomEvents()
         val requests = E2ETestUtils.collectAllRequests(mockWebServer)
         return requests
-            .filter { it.first == "/api/v1/sdk/event/custom" }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
             .mapNotNull { (_, body) ->
                 runCatching {
-                    val json = JSONObject(body)
+                    val json = JSONObject(body).getJSONArray("events").getJSONObject(0)
                     if (json.getString("event_name") != "screen_view") return@runCatching null
                     json.getJSONObject("properties").getString("screen_name")
                 }.getOrNull()

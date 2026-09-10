@@ -4,8 +4,9 @@ import io.grovs.api.GrovsApi
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.BatchEventsRequest
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.ClipboardStatusResponse
-import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
@@ -16,7 +17,6 @@ import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
-import io.grovs.model.Event
 import io.grovs.model.LinkDetailsRequest
 import io.grovs.utils.InstantCompat
 import okhttp3.MediaType.Companion.toMediaType
@@ -45,8 +45,7 @@ class MockGrovsApi : GrovsApi {
     var getDeviceResponse: Response<GetDeviceResponse>? = null
     var notificationsResponse: Response<NotificationsResponse>? = null
     var numberOfUnreadNotificationsResponse: Response<NumberOfUnreadNotificationsResponse>? = null
-    var addEventResponse: Response<Unit>? = null
-    var addCustomEventResponse: Response<Unit>? = null
+    var addEventsBatchResponse: Response<BatchEventsResponse>? = null
     var addPaymentEventResponse: Response<Unit>? = null
     var updateAttributesResponse: Response<Unit>? = null
     var markNotificationAsReadResponse: Response<Unit>? = null
@@ -56,8 +55,7 @@ class MockGrovsApi : GrovsApi {
     // Track method calls for verification
     var authenticateCalls = mutableListOf<AppDetails>()
     var generateLinkCalls = mutableListOf<GenerateLinkRequest>()
-    var addEventCalls = mutableListOf<Event>()
-    var lastCustomEvent: CustomEvent? = null
+    var addEventsBatchCalls = mutableListOf<BatchEventsRequest>()
     var addPaymentEventCalls = mutableListOf<PaymentEvent>()
     var updateAttributesCalls = mutableListOf<UpdateAttributesRequest>()
     var linkDetailsCalls = mutableListOf<LinkDetailsRequest>()
@@ -100,14 +98,10 @@ class MockGrovsApi : GrovsApi {
         return linkDetailsResponse ?: createSuccessLinkDetailsResponse()
     }
 
-    override suspend fun addEvent(request: Event): Response<Unit> {
-        addEventCalls.add(request)
-        return addEventResponse ?: Response.success(Unit)
-    }
-
-    override suspend fun addCustomEvent(request: CustomEvent): Response<Unit> {
-        lastCustomEvent = request
-        return addCustomEventResponse ?: Response.success(Unit)
+    override suspend fun addEventsBatch(request: BatchEventsRequest): Response<BatchEventsResponse> {
+        addEventsBatchCalls.add(request)
+        return addEventsBatchResponse
+            ?: Response.success(BatchEventsResponse(accepted = request.events.size, rejected = 0))
     }
 
     override suspend fun addPaymentEvent(request: PaymentEvent): Response<Unit> {
@@ -159,8 +153,7 @@ class MockGrovsApi : GrovsApi {
         getDeviceResponse = null
         notificationsResponse = null
         numberOfUnreadNotificationsResponse = null
-        addEventResponse = null
-        addCustomEventResponse = null
+        addEventsBatchResponse = null
         addPaymentEventResponse = null
         updateAttributesResponse = null
         markNotificationAsReadResponse = null
@@ -169,8 +162,7 @@ class MockGrovsApi : GrovsApi {
 
         authenticateCalls.clear()
         generateLinkCalls.clear()
-        addEventCalls.clear()
-        lastCustomEvent = null
+        addEventsBatchCalls.clear()
         addPaymentEventCalls.clear()
         updateAttributesCalls.clear()
         linkDetailsCalls.clear()
@@ -182,7 +174,7 @@ class MockGrovsApi : GrovsApi {
 
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()
     fun verifyGenerateLinkCalled(): Boolean = generateLinkCalls.isNotEmpty()
-    fun verifyAddEventCalled(): Boolean = addEventCalls.isNotEmpty()
+    fun verifyAddEventCalled(): Boolean = addEventsBatchCalls.isNotEmpty()
     fun verifyAddPaymentEventCalled(): Boolean = addPaymentEventCalls.isNotEmpty()
 
     // =====================================================================

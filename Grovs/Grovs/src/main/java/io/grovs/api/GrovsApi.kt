@@ -4,10 +4,10 @@ import android.os.Parcelable
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.BatchEventsRequest
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.ClipboardStatusResponse
-import io.grovs.model.CustomEvent
 import io.grovs.model.DeeplinkDetails
-import io.grovs.model.Event
 import io.grovs.model.GenerateLinkRequest
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
@@ -46,11 +46,8 @@ interface GrovsApi {
     @POST("link_details")
     suspend fun linkDetails(@Body request: LinkDetailsRequest): Response<ResponseBody>
 
-    @POST("event")
-    suspend fun addEvent(@Body request: Event): Response<Unit>
-
-    @POST("event/custom")
-    suspend fun addCustomEvent(@Body request: CustomEvent): Response<Unit>
+    @POST("events/batch")
+    suspend fun addEventsBatch(@Body request: BatchEventsRequest): Response<BatchEventsResponse>
 
     @POST("add_payment_event")
     suspend fun addPaymentEvent(@Body request: PaymentEvent): Response<Unit>

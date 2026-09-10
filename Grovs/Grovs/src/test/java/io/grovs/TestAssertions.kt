@@ -212,7 +212,7 @@ object TestAssertions {
         context: String
     ) {
         try {
-            coVerify { mockService.addEvent(match { it.event == eventType }) }
+            coVerify { mockService.addEvents(match { l -> l.any { it.event == eventType } }) }
         } catch (e: AssertionError) {
             throw AssertionError(
                 "Expected $eventType event to be sent to backend $context, but it was not. Original: ${e.message}"
@@ -262,7 +262,7 @@ object TestAssertions {
         context: String
     ) {
         try {
-            coVerify(exactly = 0) { mockService.addEvent(any()) }
+            coVerify(exactly = 0) { mockService.addEvents(any()) }
         } catch (e: AssertionError) {
             throw AssertionError(
                 "Expected no events to be sent to backend $context, but some were sent. Original: ${e.message}"

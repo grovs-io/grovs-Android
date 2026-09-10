@@ -106,8 +106,8 @@ class S06MultiActivityE2ETest {
     /** Drains MockWebServer and returns the ordered screen_name values from screen_view POSTs. */
     private fun drainScreenNames(): List<String> {
         return E2ETestUtils.collectAllRequests(mockWebServer)
-            .filter { it.first == "/api/v1/sdk/event/custom" }
-            .map { JSONObject(it.second).getJSONObject("properties").getString("screen_name") }
+            .filter { it.first == "/api/v1/sdk/events/batch" }
+            .map { JSONObject(it.second).getJSONArray("events").getJSONObject(0).getJSONObject("properties").getString("screen_name") }
     }
 
     // ---- SDK lifecycle-observer reflection (for transitions the controller won't drive) ----

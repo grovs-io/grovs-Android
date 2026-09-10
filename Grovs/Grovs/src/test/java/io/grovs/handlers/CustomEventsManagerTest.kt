@@ -2,6 +2,7 @@ package io.grovs.handlers
 
 import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
@@ -67,7 +68,9 @@ class CustomEventsManagerTest {
             stored.addAll(updated)
             Unit
         }
-        coEvery { service.addCustomEvent(any()) } returns LSResult.Success(true)
+        coEvery { service.addCustomEvents(any()) } answers {
+            LSResult.Success(BatchEventsResponse(accepted = firstArg<List<CustomEvent>>().size, rejected = 0))
+        }
 
         manager = CustomEventsManager(
             context = context,
@@ -99,7 +102,7 @@ class CustomEventsManagerTest {
         timedManager.track("before_close", null, null)
         advanceTimeBy(100L)
         runCurrent()
-        coVerify(exactly = 1) { service.addCustomEvent(any()) }
+        coVerify(exactly = 1) { service.addCustomEvents(any()) }
 
         timedManager.track("after_close", null, null)
         timedManager.close()
@@ -107,7 +110,7 @@ class CustomEventsManagerTest {
         advanceTimeBy(100L)
         runCurrent()
 
-        coVerify(exactly = 1) { service.addCustomEvent(any()) }
+        coVerify(exactly = 1) { service.addCustomEvents(any()) }
     }
 
     @Test
@@ -149,13 +152,13 @@ class CustomEventsManagerTest {
 
         manager.flush()
 
-        coVerify(exactly = 2) { service.addCustomEvent(any()) }
+        coVerify(exactly = 2) { service.addCustomEvents(any()) }
         assertEquals(0, stored.size)
     }
 
     @Test
     fun `flush drops events the server terminally rejects`() = runTest {
-        coEvery { service.addCustomEvent(any()) } returns LSResult.Error(
+        coEvery { service.addCustomEvents(any()) } returns LSResult.Error(
             GrovsException("rejected", GrovsErrorCode.EVENT_DISPATCH_ERROR)
         )
 
@@ -168,7 +171,7 @@ class CustomEventsManagerTest {
 
     @Test
     fun `flush keeps events on a transient error`() = runTest {
-        coEvery { service.addCustomEvent(any()) } returns LSResult.Error(
+        coEvery { service.addCustomEvents(any()) } returns LSResult.Error(
             java.io.IOException("network down")
         )
 
@@ -191,7 +194,7 @@ class CustomEventsManagerTest {
         manager.flush()
 
         assertEquals(1, stored.size)
-        coVerify(exactly = 0) { service.addCustomEvent(any()) }
+        coVerify(exactly = 0) { service.addCustomEvents(any()) }
     }
 
     @Test
@@ -200,19 +203,19 @@ class CustomEventsManagerTest {
 
         manager.flush()
 
-        coVerify(exactly = CustomEventsManager.BATCH_SIZE) { service.addCustomEvent(any()) }
+        coVerify(exactly = CustomEventsManager.BATCH_SIZE) { service.addCustomEvents(any()) }
         assertEquals(10, stored.size)
     }
 
     @Test
     fun `flush survives an exception and continues functioning`() = runTest {
         var callCount = 0
-        coEvery { service.addCustomEvent(any()) } answers {
+        coEvery { service.addCustomEvents(any()) } answers {
             callCount++
             if (callCount == 1) {
                 throw RuntimeException("Service error on first call")
             } else {
-                LSResult.Success(true)
+                LSResult.Success(BatchEventsResponse(accepted = firstArg<List<CustomEvent>>().size, rejected = 0))
             }
         }
 
@@ -233,7 +236,7 @@ class CustomEventsManagerTest {
         manager.flush()
 
         assertEquals(0, stored.size)
-        coVerify(exactly = 2) { service.addCustomEvent(any()) }
+        coVerify(exactly = 2) { service.addCustomEvents(any()) }
     }
 
     /** A manager whose backfill coroutine runs on the test scheduler rather than a real dispatcher. */

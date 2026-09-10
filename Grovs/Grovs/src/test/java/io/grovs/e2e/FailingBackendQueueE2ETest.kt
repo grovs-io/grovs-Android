@@ -44,13 +44,14 @@ class FailingBackendQueueE2ETest {
         E2ETestUtils.setupMockGlInfo()
         E2ETestUtils.setupMockUserAgent("Grovs SDK threading tests")
         server = E2ETestUtils.createMockWebServer()
-        // Order matters: "event/custom" must match before the catch-all "event" entry.
+        // System and custom events now share the events/batch endpoint, so they can no longer be
+        // distinguished by path alone; this fixture (and the @Ignore'd test it feeds) predates
+        // batching and is due a rework when that TODO is picked up.
         E2ETestUtils.setUrlDispatcher(server, linkedMapOf(
             "authenticate" to json(200, """{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
             "device_for_vendor_id" to json(200, """{"last_seen":null}"""),
             "data_for_device" to json(200, """{"link":"https://test.grovs.io/campaign","data":null}"""),
-            "event/custom" to json(200, "{}"),
-            "event" to json(503, """{"error":"events backend unavailable"}"""),
+            "events/batch" to json(503, """{"error":"events backend unavailable"}"""),
         ))
         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = server.url("/").toString())
         E2ETestUtils.assertAuthenticationCompleted()
@@ -85,7 +86,7 @@ class FailingBackendQueueE2ETest {
         controller.newIntent(link)
         assertNotNull(
             "The SDK must have attempted to send a system event before this test means anything",
-            E2ETestUtils.awaitRequestFor(server, "/api/v1/sdk/event", timeoutMs = 5_000)
+            E2ETestUtils.awaitRequestFor(server, "/api/v1/sdk/events/batch", timeoutMs = 5_000)
         )
 
         assertSame(Looper.getMainLooper(), Looper.myLooper())

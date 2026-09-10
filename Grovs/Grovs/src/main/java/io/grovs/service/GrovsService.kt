@@ -13,6 +13,8 @@ import io.grovs.model.ScreenAliasesRequest
 import io.grovs.BuildConfig
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
+import io.grovs.model.BatchEventsRequest
+import io.grovs.model.BatchEventsResponse
 import io.grovs.model.CustomEvent
 import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.DebugLogger
@@ -27,8 +29,6 @@ import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.events.PaymentEvent
-import io.grovs.model.exceptions.GrovsErrorCode
-import io.grovs.model.exceptions.GrovsException
 import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.notifications.NotificationsRequest
 import io.grovs.model.notifications.NotificationsResponse
@@ -128,6 +128,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         val EAGER_RETRY_COUNT: Long = 15
         val EAGER_RETRY_FALLBACK_TIME: Long = 5000
         val RETRY_FALLBACK_TIME: Long = 10000
+
+        /** Backend limit for POST events/batch (events_controller.rb MAX_BATCH_SIZE). */
+        const val MAX_BATCH_SIZE = 50
     }
 
     init {
@@ -317,74 +320,36 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    /// Adds an event.
-    ///
-    /// - Parameters:
-    ///   - event: The event to add.
-    ///   return: A closure indicating the success or failure of the operation.
-    override suspend fun addEvent(event: Event): LSResult<Boolean> {
-        try {
-            DebugLogger.instance.log(LogLevel.INFO, "Add event - $event")
-            val response = grovsApi.addEvent(event)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Add event - Successful - $event")
+    override suspend fun addEvents(events: List<Event>): LSResult<BatchEventsResponse> =
+        postBatch(events, label = "Add events")
 
-                    return LSResult.Success(true)
-                }
-            }
+    override suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<BatchEventsResponse> =
+        postBatch(events, label = "Add custom events")
 
-            val error = gson.fromJson(response.errorBody()!!.string(), ErrorMessage::class.java)
-
-            DebugLogger.instance.log(LogLevel.INFO, "Add event - Failed - $event ${error.error}")
-
-            return LSResult.Error(java.io.IOException("Failed to log the event. ${error.error}"))
-        } catch (e: Exception) {
-            return LSResult.Error(e)
+    /// One POST events/batch. Never retries; the flush cycles own retrying.
+    private suspend fun postBatch(events: List<Any>, label: String): LSResult<BatchEventsResponse> {
+        if (events.isEmpty()) return LSResult.Success(BatchEventsResponse(accepted = 0, rejected = 0))
+        if (events.size > MAX_BATCH_SIZE) {
+            return LSResult.Error(IllegalArgumentException("$label - batch of ${events.size} exceeds $MAX_BATCH_SIZE"))
         }
-    }
-
-    /// Adds a custom event. One attempt per call — the periodic flush cycle is the retry
-    /// mechanism, so this must not sleep on GrovsContext.serialDispatcher, which every other
-    /// queued SDK operation also needs.
-    ///
-    /// A 4xx (other than 429) is terminal: the server understood the request and rejected it, so
-    /// the caller must drop the event. Any other failure (5xx, 429, network) returns a plain
-    /// error and the caller keeps the event for the next flush cycle.
-    override suspend fun addCustomEvent(event: CustomEvent): LSResult<Boolean> {
-        try {
-            DebugLogger.instance.log(LogLevel.INFO, "Add custom event - $event")
-            val response = grovsApi.addCustomEvent(event)
-            if (response.isSuccessful) {
-                DebugLogger.instance.log(LogLevel.INFO, "Add custom event - Successful - $event")
-                return LSResult.Success(true)
+        return try {
+            DebugLogger.instance.log(LogLevel.INFO, "$label batch - ${events.size} events")
+            val response = grovsApi.addEventsBatch(BatchEventsRequest(events))
+            if (!response.isSuccessful) {
+                val body = response.errorBody()?.string()
+                DebugLogger.instance.log(LogLevel.INFO, "$label batch - Failed (${response.code()}) $body")
+                return LSResult.Error(java.io.IOException("$label batch failed (${response.code()}). $body"))
             }
-
-            val httpCode = response.code()
-            val body = response.errorBody()?.string()
-            if (httpCode in 400..499 && httpCode != 429) {
-                DebugLogger.instance.log(
-                    LogLevel.ERROR,
-                    "Add custom event - Rejected by server ($httpCode), dropping event - $event $body"
-                )
-                return LSResult.Error(
-                    GrovsException(
-                        "Server rejected the event ($httpCode). $body",
-                        GrovsErrorCode.EVENT_DISPATCH_ERROR
-                    )
-                )
+            // The backend always answers with counts; an empty 2xx body still means "consumed".
+            val parsed = response.body() ?: BatchEventsResponse(accepted = events.size, rejected = 0)
+            if (parsed.rejected > 0) {
+                DebugLogger.instance.log(LogLevel.ERROR, "$label batch - ${parsed.rejected} events rejected: ${parsed.errors}")
             }
-
-            DebugLogger.instance.log(
-                LogLevel.INFO,
-                "Add custom event - Failed ($httpCode), keeping for next flush - $event $body"
-            )
-            return LSResult.Error(
-                java.io.IOException("Failed to log the custom event ($httpCode). $body")
-            )
+            DebugLogger.instance.log(LogLevel.INFO, "$label batch - Successful, accepted ${parsed.accepted}")
+            LSResult.Success(parsed)
         } catch (e: Exception) {
-            return LSResult.Error(e)
+            DebugLogger.instance.log(LogLevel.INFO, "$label batch - Failed: ${e.message}")
+            LSResult.Error(e)
         }
     }
 

@@ -72,9 +72,9 @@ class EventDeliveryE2ETest {
         manager.flush()
         val first = server.takeRequest(2, TimeUnit.SECONDS)
         assertNotNull("The server must actually receive the first POST", first)
-        assertEquals("/api/v1/sdk/event/custom", first!!.path)
+        assertEquals("/api/v1/sdk/events/batch", first!!.path)
         val firstBody = first.body.readUtf8()
-        assertEquals(original.eventId, JSONObject(firstBody).getString("event_id"))
+        assertEquals(original.eventId, JSONObject(firstBody).getJSONArray("events").getJSONObject(0).getString("event_id"))
         assertEquals("Without acknowledgement the event must remain queued", original.eventId, storage.getEvents().single().eventId)
 
         server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
@@ -94,7 +94,7 @@ class EventDeliveryE2ETest {
         manager.track("checkout_completed", null, null)
         manager.flush()
         val first = server.takeRequest(2, TimeUnit.SECONDS)!!
-        val originalId = JSONObject(first.body.readUtf8()).getString("event_id")
+        val originalId = JSONObject(first.body.readUtf8()).getJSONArray("events").getJSONObject(0).getString("event_id")
         assertEquals(1, storage.getEvents().size)
 
         Grovs.setSDK(false)
@@ -108,7 +108,7 @@ class EventDeliveryE2ETest {
         manager.flush()
         val retry = server.takeRequest(2, TimeUnit.SECONDS)
         assertNotNull("Re-enabling must permit delivery of the retained event", retry)
-        assertEquals(originalId, JSONObject(retry!!.body.readUtf8()).getString("event_id"))
+        assertEquals(originalId, JSONObject(retry!!.body.readUtf8()).getJSONArray("events").getJSONObject(0).getString("event_id"))
         assertTrue(storage.getEvents().isEmpty())
     }
 
