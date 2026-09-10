@@ -54,6 +54,11 @@ class SessionTest {
             storedEvents.remove(event)
         }
 
+        override suspend fun removeEvents(events: List<Event>) {
+            val doomed = events.toSet()
+            storedEvents.removeAll { it in doomed }
+        }
+
         override suspend fun removePaymentEvent(event: PaymentEvent) {}
 
         override suspend fun replacePaymentEvents(events: List<PaymentEvent>) {}

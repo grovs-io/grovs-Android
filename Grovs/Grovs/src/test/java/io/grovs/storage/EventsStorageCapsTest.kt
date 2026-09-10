@@ -70,4 +70,27 @@ class EventsStorageCapsTest {
         assertEquals(1, stored.size)
         assertTrue(stored.first().createdAt.isAfter(InstantCompat.now().minusMillis(eightDaysMs)))
     }
+
+    @Test
+    fun `removeEvents drops exactly the given events in one write`() = runTest {
+        val base = InstantCompat.now()
+        val keep = Event(event = EventType.APP_OPEN, createdAt = base)
+        val goneA = Event(event = EventType.INSTALL, createdAt = base.plusMillis(1))
+        val goneB = Event(event = EventType.REACTIVATION, createdAt = base.plusMillis(2))
+        storage.addEvent(keep); storage.addEvent(goneA); storage.addEvent(goneB)
+
+        storage.removeEvents(listOf(goneA, goneB))
+
+        assertEquals(listOf(keep), storage.getEvents())
+    }
+
+    @Test
+    fun `removeEvents with an empty list changes nothing`() = runTest {
+        val keep = Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now())
+        storage.addEvent(keep)
+
+        storage.removeEvents(emptyList())
+
+        assertEquals(listOf(keep), storage.getEvents())
+    }
 }

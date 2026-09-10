@@ -42,6 +42,9 @@ interface IEventsStorage {
      */
     suspend fun removeEvent(event: Event)
 
+    /** Removes every listed event (matched by type + createdAt, see Event.equals) in one write. */
+    suspend fun removeEvents(events: List<Event>)
+
     /**
      * Removes a payment event from the storage.
      * @param event The payment event to remove.

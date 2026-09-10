@@ -171,6 +171,13 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
+    override suspend fun removeEvents(events: List<Event>) = withContext(storageSerialDispatcher) {
+        if (events.isEmpty()) return@withContext
+        val doomed = events.toSet()
+        val remaining = getEvents().filterNot { it in doomed }
+        preferences.edit().putString(STORED_EVENTS, gson.toJson(remaining)).apply()
+    }
+
     /// Removes a payment event from the storage.
     ///
     /// - Parameter event: The event to remove.
