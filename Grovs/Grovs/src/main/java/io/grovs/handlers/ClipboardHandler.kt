@@ -162,6 +162,11 @@ internal class ClipboardHandler(
                 return resolve()
             }
 
+            // Reading is one side effect; sending what it found is another, and the barrier can have
+            // closed between them. Without this check a revoked flow would still post the clipboard
+            // contents, and a match response would then clear the user's clipboard.
+            if (!isCurrent()) return ClipboardFlowOutcome.Superseded
+
             return sendMatch(appDetails, clipboardString, isCurrent)
         } finally {
             running = false

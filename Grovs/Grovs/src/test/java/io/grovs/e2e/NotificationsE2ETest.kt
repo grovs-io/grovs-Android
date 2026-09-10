@@ -56,6 +56,9 @@ class NotificationsE2ETest {
 
     // ==================== Notifications Tests ====================
 
+    private fun json(body: String) = okhttp3.mockwebserver.MockResponse().setResponseCode(200)
+        .setHeader("Content-Type", "application/json").setBody(body)
+
     @Test
     fun `Set automatic notifications listener does not crash`() {
         runBlocking {
@@ -118,13 +121,16 @@ class NotificationsE2ETest {
     @Test
     fun `Get number of unread notifications returns count`() {
         runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 5)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 5)
+            // Arrange. Routed by path rather than enqueued in order: any extra request the SDK
+            // makes (an events batch, say) would otherwise consume the queued unread-count response
+            // and this test would read someone else's body as the count.
+            E2ETestUtils.setUrlDispatcher(mockWebServer, linkedMapOf(
+                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":5}"""),
+                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+                "device_for_vendor_id" to json("""{"last_seen":null}"""),
+                "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
+                "data_for_device" to json("""{"link":null,"data":null}"""),
+            ))
 
             // Act
             configureAndWaitForAuth()
@@ -213,13 +219,16 @@ class NotificationsE2ETest {
     @Test
     fun `numberOfUnreadMessages returns value after authentication`() {
         runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 5)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 5)
+            // Arrange. Routed by path rather than enqueued in order: any extra request the SDK
+            // makes (an events batch, say) would otherwise consume the queued unread-count response
+            // and this test would read someone else's body as the count.
+            E2ETestUtils.setUrlDispatcher(mockWebServer, linkedMapOf(
+                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":5}"""),
+                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+                "device_for_vendor_id" to json("""{"last_seen":null}"""),
+                "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
+                "data_for_device" to json("""{"link":null,"data":null}"""),
+            ))
 
             // Act
             configureAndWaitForAuth()

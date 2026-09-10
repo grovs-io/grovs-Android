@@ -283,7 +283,13 @@ internal class GrovsManager(
                 } else if (clipboardHandler.isPending) {
                     // Only an empty resolve on a fresh install runs the clipboard flow. A run already
                     // parked by another lookup keeps the hold; this call must not touch it.
-                    when (val outcome = clipboardHandler.runFlow(request) { isCurrent(lookup) }) {
+                    // The barrier the flow re-checks at every suspension point covers consent as
+                    // well as staleness, so a revocation between the status call, the focus wait,
+                    // the description, the read and the match stops it before the next of those -
+                    // and no later grant lets this run continue.
+                    val token = grovsContext.consent.workToken(configuration)
+                    val stillAllowed = { isCurrent(lookup) && token != null && grovsContext.consent.isCurrent(token) }
+                    when (val outcome = clipboardHandler.runFlow(request, stillAllowed)) {
                         // INSTALL carries the clipboard string verbatim; the host gets the resolved details.
                         is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
                         else -> null
@@ -310,6 +316,14 @@ internal class GrovsManager(
     private suspend fun commit(lookup: Lookup, result: ResolvedDeeplink, eventLink: String, delayEvents: Boolean): DeeplinkDetails? =
         resolutionMutex.withLock {
             if (!isCurrent(lookup)) return@withLock null
+            // A result resolved under consent that has since gone away is not applied: it would set
+            // future attribution, backfill stored events and mark the clipboard flow resolved, all
+            // of which are exactly the effects the revocation was meant to stop.
+            val token = grovsContext.consent.workToken(configuration)
+            if (token == null) {
+                DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not committing the resolved link")
+                return@withLock null
+            }
             committedLinks++
             // A resolved link from any path makes the clipboard flow moot.
             clipboardHandler.markResolved()
