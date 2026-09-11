@@ -250,11 +250,18 @@ class ConsentRetryE2ETest {
         failIntoRetryWait(attributes, "Set attributes - Failed") { Grovs.pushToken = "push-1" }
         assertEquals("push-1", JSONObject(backend.seen.first { it.path == attributes }.body).getString("push_token"))
 
-        revokeDuringWait(attributes)
+        val attempts = revokeDuringWait(attributes)
         grantAgainAfterRecovery(attributes, "{}")
-        // T2 behaviour: the interrupted update is not resent by the old loop, and enabling an
-        // authenticated SDK resumes nothing for it. (Plan step 4 makes the latest snapshot resend once.)
-        assertEquals("the old update never resumes", 0, backend.count(attributes, "re-enabled"))
+        // A new grant sends the latest desired state in a new operation. Wait for that request
+        // before changing phases, so its response cannot be mistaken for the explicit push-2 call.
+        pumpUntil("the desired state to be resent under the new grant") {
+            backend.count(attributes, "re-enabled") >= 1
+        }
+        assertEquals(1, backend.count(attributes, "re-enabled"))
+        assertEquals("push-1", JSONObject(backend.seen.single {
+            it.path == attributes && it.phase == "re-enabled"
+        }.body).getString("push_token"))
+        backend.assertQuiet(attributes, attempts + 1)
 
         backend.phase = "explicit"
         Grovs.pushToken = "push-2"
@@ -262,7 +269,10 @@ class ConsentRetryE2ETest {
         driver.advanceTimeBy(intervals)
         pump()
         assertEquals(1, backend.count(attributes, "explicit"))
-        assertEquals("push-2", JSONObject(backend.seen.last { it.path == attributes }.body).getString("push_token"))
+        assertEquals("push-2", JSONObject(backend.seen.single {
+            it.path == attributes && it.phase == "explicit"
+        }.body).getString("push_token"))
+        backend.assertQuiet(attributes, attempts + 2)
     }
 
     @Test
