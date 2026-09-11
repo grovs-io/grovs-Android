@@ -4,6 +4,9 @@ import android.app.Activity
 import android.os.Looper
 import androidx.fragment.app.FragmentActivity
 import io.grovs.GrovsNotificationsListener
+import io.grovs.service.useConsentController
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import io.grovs.service.GrovsService
 import io.mockk.coVerify
 import io.mockk.every
@@ -38,6 +41,9 @@ class NotificationsManagerTest {
         Dispatchers.setMain(UnconfinedTestDispatcher())
         try {
             val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup().get()
+            val service = mockk<GrovsService>(relaxed = true)
+            io.mockk.coEvery { service.notificationsToDisplayAutomatically() } returns
+                io.grovs.utils.LSResult.Success(io.grovs.model.notifications.NotificationsResponse(emptyList()))
             val manager = NotificationsManager(
                 context = RuntimeEnvironment.getApplication(),
                 grovsContext = GrovsContext(),
@@ -46,6 +52,7 @@ class NotificationsManagerTest {
                     override fun requireActivity(): Activity = activity
                     override fun requireNotificationsListener(): GrovsNotificationsListener? = null
                 },
+                grovsService = service,
             )
 
             // Uncaught coroutine exceptions reach the current thread's handler.
@@ -56,6 +63,7 @@ class NotificationsManagerTest {
             worker.join()
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
+            coVerify(exactly = 1) { service.notificationsToDisplayAutomatically() }
             assertNull(failure.get()?.let { it.toString() + "\n" + it.stackTrace.take(5).joinToString("\n") }, failure.get())
         } finally {
             Dispatchers.resetMain()
@@ -93,4 +101,70 @@ class NotificationsManagerTest {
             Dispatchers.resetMain()
         }
     }
+    @Test
+    fun `automatic notification queued on main keeps its original consent token`() {
+        val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup()
+        val context = GrovsContext()
+        val service = mockk<GrovsService>(relaxed = true)
+        io.mockk.coEvery { service.notificationsToDisplayAutomatically() } returns
+            io.grovs.utils.LSResult.Success(io.grovs.model.notifications.NotificationsResponse(emptyList()))
+        val provider = mockk<ActivityProvider>(relaxed = true)
+        every { provider.requireActivity() } returns activity.get()
+        val manager = NotificationsManager(activity.get(), context, "key", provider, service)
+        try {
+            val worker = Thread { manager.displayAutomaticNotificationsIfNeeded() }
+            worker.start()
+            worker.join(1_000)
+            org.junit.Assert.assertFalse(worker.isAlive)
+            context.settings.sdkEnabled = false
+            context.settings.sdkEnabled = true
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            coVerify(exactly = 0) { service.notificationsToDisplayAutomatically() }
+            manager.displayAutomaticNotificationsIfNeeded()
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            coVerify(exactly = 1) { service.notificationsToDisplayAutomatically() }
+            activity.saveInstanceState(android.os.Bundle())
+            org.junit.Assert.assertFalse(manager.displayNotificationsViewController(null))
+        } finally {
+            context.consent.retireConfiguration(false)
+            activity.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `late automatic notification response cannot show a dialog after re-enable`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        val activity = Robolectric.buildActivity(FragmentActivity::class.java).setup()
+        val cleanup = io.grovs.service.GatedExecutor()
+        val context = GrovsContext().also { it.useConsentController(ConsentController(cleanupExecutor = cleanup)) }
+        val service = mockk<GrovsService>(relaxed = true)
+        val provider = mockk<ActivityProvider>(relaxed = true)
+        every { provider.requireActivity() } returns activity.get()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val notification = io.grovs.model.notifications.Notification(7, "Message", io.grovs.utils.InstantCompat.now(), null, true, null, false)
+        io.mockk.coEvery { service.notificationsToDisplayAutomatically() } coAnswers {
+            gate.await()
+            io.grovs.utils.LSResult.Success(io.grovs.model.notifications.NotificationsResponse(listOf(notification)))
+        }
+        val manager = NotificationsManager(activity.get(), context, "key", provider, service)
+        try {
+            manager.displayAutomaticNotificationsIfNeeded()
+            runCurrent()
+            coVerify(exactly = 1) { service.notificationsToDisplayAutomatically() }
+            context.settings.sdkEnabled = false
+            context.settings.sdkEnabled = true
+            gate.complete(Unit)
+            runCurrent()
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            org.junit.Assert.assertTrue(activity.get().supportFragmentManager.fragments.isEmpty())
+        } finally {
+            gate.complete(Unit)
+            cleanup.open()
+            context.consent.retireConfiguration(false)
+            activity.pause().stop().destroy()
+            runCurrent()
+            Dispatchers.resetMain()
+        }
+    }
+
 }

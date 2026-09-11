@@ -11,7 +11,6 @@ import io.grovs.model.notifications.Notification
 import io.grovs.service.GrovsService
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 interface ActivityProvider {
@@ -35,55 +34,30 @@ class NotificationsManager(
     private val grovsService: GrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {
-        if (!grovsContext.settings.sdkEnabled) return
+        val consent = grovsContext.consent
+        val token = consent.tryAcquire(configuration) ?: return
         val activity = activityProvider.requireActivity() as? FragmentActivity ?: return
-        // Called from the SDK's serial dispatcher. lifecycleScope registers its lifecycle observer
-        // on first access, and LifecycleRegistry requires that on the main thread.
         activity.runOnUiThread {
-            activity.lifecycleScope.launch {
+            if (!consent.isCurrent(token) || activity.isDestroyed) return@runOnUiThread
+            consent.launchOperation(token, scope = activity.lifecycleScope) {
                 val result = grovsService.notificationsToDisplayAutomatically()
                 if (result is LSResult.Success) {
                     withContext(Dispatchers.Main.immediate) {
                         for (notification in result.data.notifications ?: emptyList()) {
-                            displayAutomaticNotificationFor(
-                                notification = notification,
-                                activity = activity,
-                            )
+                            if (!consent.isCurrent(token) || activity.isDestroyed || activity.supportFragmentManager.isStateSaved) break
+                            displayAutomaticNotificationFor(notification, activity)
                         }
                     }
                 }
             }
         }
-
-//        val activity = activityProvider.requireActivity() as? FragmentActivity
-//        activity?.lifecycleScope?.launch {
-//            val notification = Notification(
-//                123,
-//                "Test not",
-//                Instant.now(),
-//                "Test sub",
-//                autoDisplay = true,
-//                "https:google.ro",
-//                read = false
-//            )
-//            displayAutomaticNotificationFor(notification)
-//
-//            val notification2 = Notification(
-//                1234,
-//                "Test not",
-//                Instant.now(),
-//                "Test sub",
-//                autoDisplay = true,
-//                "https:google.ro",
-//                read = false
-//            )
-//            displayAutomaticNotificationFor(notification2)
-//        }
     }
 
     fun displayNotificationsViewController(onDismissed: (()->Unit)?): Boolean {
+        if (grovsContext.consent.tryAcquire(configuration) == null) return false
         val activity = activityProvider.requireActivity() as? FragmentActivity
         activity?.let { activity ->
+            if (activity.isDestroyed || activity.supportFragmentManager.isStateSaved) return false
             val count = activity.supportFragmentManager.fragments.filterIsInstance<NotificationsMainFragment>().count { it.isVisible }
             if (count != 0) {
                 return true
@@ -100,16 +74,15 @@ class NotificationsManager(
         }
     }
 
-    suspend fun numberOfUnreadNotifications(): Int? {
-        val result = grovsService.numberOfUnreadNotifications()
-        when (result) {
-            is LSResult.Success -> {
-                return result.data.numberOfUnreadNotifications
-            }
-            is LSResult.Error -> {
-                return null
+    suspend fun numberOfUnreadNotifications(): Int? = try {
+        grovsContext.consent.runOperation(configuration) {
+            when (val result = grovsService.numberOfUnreadNotifications()) {
+                is LSResult.Success -> result.data.numberOfUnreadNotifications
+                is LSResult.Error -> null
             }
         }
+    } catch (_: ConsentRevokedException) {
+        null
     }
 
     private fun displayAutomaticNotificationFor(

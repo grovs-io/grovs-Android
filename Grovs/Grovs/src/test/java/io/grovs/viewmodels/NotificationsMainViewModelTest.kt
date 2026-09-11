@@ -4,9 +4,12 @@ import android.app.Application
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.model.notifications.Notification
 import io.grovs.model.notifications.NotificationsResponse
+import io.grovs.service.useConsentController
 import io.grovs.service.GrovsService
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
+import io.mockk.every
+import io.grovs.handlers.GrovsContext
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -43,12 +46,16 @@ class NotificationsMainViewModelTest {
     private lateinit var application: Application
     private lateinit var service: GrovsService
     private lateinit var viewModel: NotificationsMainViewModel
+    private lateinit var consentContext: GrovsContext
 
     @Before
     fun setUp() {
         Dispatchers.setMain(mainDispatcher)
         application = RuntimeEnvironment.getApplication()
         service = mockk(relaxed = true)
+        consentContext = GrovsContext()
+        every { service.grovsContext } returns consentContext
+        every { service.configuration } answers { consentContext.consent.currentConfiguration }
         viewModel = NotificationsMainViewModel(application)
         viewModel.grovsService = service
     }
@@ -138,4 +145,91 @@ class NotificationsMainViewModelTest {
 
         coVerify(exactly = 1) { service.notifications(1) }
     }
+    @Test
+    fun `revocation before dispatch releases loading and a new grant can reload page one`() = runTest(mainDispatcher) {
+        coEvery { service.notifications(1) } returns page(1)
+        viewModel.loadMoreNotifications()
+        consentContext.settings.sdkEnabled = false
+        runCurrent()
+        assertFalse(viewModel.isLoading.value)
+        assertTrue(viewModel.notifications.value.isEmpty())
+        coVerify(exactly = 0) { service.notifications(any()) }
+        consentContext.settings.sdkEnabled = true
+        viewModel.loadMoreNotifications()
+        advanceUntilIdle()
+        assertEquals(listOf(1), viewModel.notifications.value.map { it.id })
+        coVerify(exactly = 1) { service.notifications(1) }
+    }
+
+    @Test
+    fun `late page after disable-enable cannot advance items or pagination`() = runTest(mainDispatcher) {
+        val cleanup = io.grovs.service.GatedExecutor()
+        consentContext.useConsentController(io.grovs.handlers.ConsentController(cleanupExecutor = cleanup))
+        val gate = CompletableDeferred<Unit>()
+        coEvery { service.notifications(1) } coAnswers { gate.await(); page(1) }
+        try {
+            viewModel.loadMoreNotifications()
+            runCurrent()
+            assertTrue(viewModel.isLoading.value)
+            consentContext.settings.sdkEnabled = false
+            consentContext.settings.sdkEnabled = true
+            gate.complete(Unit)
+            runCurrent()
+            assertFalse(viewModel.isLoading.value)
+            assertTrue(viewModel.notifications.value.isEmpty())
+            coEvery { service.notifications(1) } returns page(2)
+            viewModel.loadMoreNotifications()
+            runCurrent()
+            assertEquals(listOf(2), viewModel.notifications.value.map { it.id })
+            coVerify(exactly = 2) { service.notifications(1) }
+            coVerify(exactly = 0) { service.notifications(2) }
+        } finally { gate.complete(Unit); cleanup.open(); runCurrent() }
+    }
+
+    @Test
+    fun `both notification view models reject queued mark-read after revocation`() = runTest(mainDispatcher) {
+        val auto = AutoDisplayedNotificationViewModel(application).also { it.grovsService = service }
+        coEvery { service.notifications(1) } returns page(1)
+        coEvery { service.markNotificationAsRead(1) } returns LSResult.Success(true)
+        viewModel.loadMoreNotifications()
+        runCurrent()
+        val item = viewModel.notifications.value.single()
+        viewModel.markAsRead(item)
+        auto.markAsRead(item)
+        consentContext.settings.sdkEnabled = false
+        runCurrent()
+        assertFalse(item.read)
+        coVerify(exactly = 0) { service.markNotificationAsRead(any()) }
+        consentContext.settings.sdkEnabled = true
+        viewModel.markAsRead(item)
+        runCurrent()
+        assertTrue(item.read)
+        coVerify(exactly = 1) { service.markNotificationAsRead(1) }
+    }
+
+    @Test
+    fun `late mark-read response cannot change read state under a new grant`() = runTest(mainDispatcher) {
+        val cleanup = io.grovs.service.GatedExecutor()
+        consentContext.useConsentController(io.grovs.handlers.ConsentController(cleanupExecutor = cleanup))
+        val gate = CompletableDeferred<Unit>()
+        coEvery { service.notifications(1) } returns page(1)
+        coEvery { service.markNotificationAsRead(1) } coAnswers { gate.await(); LSResult.Success(true) }
+        try {
+            viewModel.loadMoreNotifications()
+            runCurrent()
+            val item = viewModel.notifications.value.single()
+            viewModel.markAsRead(item)
+            runCurrent()
+            consentContext.settings.sdkEnabled = false
+            consentContext.settings.sdkEnabled = true
+            gate.complete(Unit)
+            runCurrent()
+            assertFalse(item.read)
+            coEvery { service.markNotificationAsRead(1) } returns LSResult.Success(true)
+            viewModel.markAsRead(item)
+            runCurrent()
+            assertTrue(item.read)
+        } finally { gate.complete(Unit); cleanup.open(); runCurrent() }
+    }
+
 }

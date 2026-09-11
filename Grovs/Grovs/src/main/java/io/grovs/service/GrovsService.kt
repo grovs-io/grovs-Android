@@ -105,6 +105,8 @@ public class TrackingParams(
  */
 class GrovsService(val context: Context, val apiKey: String, val grovsContext: GrovsContext) : IGrovsService {
     private val requestExecutor = ConsentRequestExecutor(grovsContext.consent)
+    @get:JvmSynthetic
+    internal val configuration get() = requestExecutor.configuration
     private val grovsApi: GrovsApi
     private val appDetails: AppDetailsHelper by lazy { grovsContext.getAppDetails(context = context) }
     private val userAgent: String by lazy { grovsContext.getUserAgent(context = context) }
