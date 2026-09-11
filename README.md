@@ -184,7 +184,7 @@ Install attribution has a single 25-second waiting budget covering install-refer
 
 Custom events and screen views retain a resolved campaign within their current analytics session, including brief trips to the background. Returning to the foreground after more than 30 minutes starts a new session; its events do not inherit the previous campaign. Already queued events keep their original session and attribution.
 
-On that first launch Android 12+ shows its system "pasted from your clipboard" toast once. The check is skipped entirely for projects with no clipboard-enabled link clicks in the last 48h and for devices whose clipboard holds no web URL, so an organic installer on a project with active clipboard links may see the toast once. Content on any host other than your Grovs link hosts is never read or sent.
+On that first launch Android 12+ shows its system "pasted from your clipboard" toast once. The check is skipped entirely for projects with no clipboard-enabled link clicks in the last 48h and for devices whose clipboard holds no web URL, so an organic installer on a project with active clipboard links may see the toast once. Only URLs on accepted Grovs link hosts are sent for matching. Host validation happens after reading the text, so checking another URL can still cause a clipboard read notification.
 
 If your project serves links from a custom domain, list it so the SDK recognizes your links on the clipboard:
 
@@ -278,7 +278,11 @@ Grovs.configure(
 Grovs.setSDK(true)
 ```
 
-While disabled the SDK performs no network requests, resolves no links, does not read the clipboard, and records no events; install and open are recorded when the SDK is enabled. The flag is not persisted: pass the current consent state on every launch. `setSDK(false)` at runtime stops collection immediately; events already queued stay on the device and are sent when the SDK is enabled again.
+Configuring with `enabled = false` starts no requests, reads no clipboard or device identifiers, and records no events. Install and open are recorded after the SDK is enabled and authenticates. The flag is not persisted: pass the current consent state on every launch.
+
+`setSDK(false)` immediately rejects new collection and invalidates outstanding SDK operations, including their retries and late results. Requests already transmitted may still reach the server. Local writes already admitted can finish safely; this includes acknowledged-event removal, launch bookkeeping, and closing the enabled portion of an engagement interval. Time spent disabled is excluded from engagement. Queued events retain their identity and resume delivery after enable, subject to the existing retention limits. Attribute and alias setters retain their latest desired values while disabled and synchronize when permitted.
+
+Enabling does **not** replay a launch deep link or a cancelled link/notification request. Forward a later `Grovs.onStart(activity)` or `Grovs.onNewIntent(intent, activity)` explicitly to resolve a link. Revoked link-generation/details requests complete with the existing method-specific error; unread-count requests return `null`. Listener completions use the main thread, while caller/lifecycle cancellation still suppresses delivery. Manual message display returns `false` while disabled; existing message UI can remain visible, but its requests and stale updates are blocked.
 
 Pass the current consent state through `configure`'s `enabled` parameter on every launch, and call `setSDK` only after `configure` — the shorter `configure` overloads reset the flag to `true`, so a `setSDK(false)` made before `configure` would be overwritten by the next launch's `configure` call.
 
