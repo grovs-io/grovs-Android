@@ -14,6 +14,7 @@ import io.grovs.storage.EventsStorage
 import io.grovs.storage.IEventsStorage
 import io.grovs.storage.ILocalCache
 import io.grovs.storage.LocalCache
+import io.grovs.storage.PaymentQueue
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
@@ -53,6 +54,7 @@ class EventsManager(
     // both read the same not-yet-removed events, double-posting them. This mutex is the actual
     // serialization; it must be held across the whole flush, not just around individual awaits.
     private val flushMutex = Mutex()
+    private val paymentQueue = PaymentQueue(eventsStorage)
 
     /// The configuration this manager belongs to. A manager replaced by a later configure() is
     /// retired as an owner, so it can never acquire consent again even for the same project key.
@@ -186,7 +188,7 @@ class EventsManager(
             newEvent.link = linkForFutureActions
         }
 
-        eventsStorage.addPaymentEvent(newEvent)
+        paymentQueue.add(newEvent)
         flush()
     }
 
@@ -255,11 +257,7 @@ class EventsManager(
     /// Purchases logged while this session's link was still unresolved earned it too. Earlier
     /// sessions belong to whatever resolved back then, and an attributed purchase is never rewritten.
     private suspend fun addLinkToPaymentEvents(link: String) {
-        val sessionId = grovsContext.sessionId
-        val events = eventsStorage.getPaymentEvents()
-        if (events.none { it.link == null && it.sessionId == sessionId }) return
-        events.forEach { if (it.link == null && it.sessionId == sessionId) it.link = link }
-        eventsStorage.replacePaymentEvents(events)
+        paymentQueue.attribute(grovsContext.sessionId, link)
     }
 
     /// Changes stored events based on a closure and performs a completion handler.
@@ -329,10 +327,10 @@ class EventsManager(
         val consent = grovsContext.consent
         val token = consent.workToken(configuration) ?: return
         if (!canSend(token)) return
-        for (event in eventsStorage.getPaymentEvents()) {
+        for (event in paymentQueue.snapshot()) {
             if (eventsHeld || !consent.isCurrent(token)) return
             when (val result = grovsService.addPaymentEvent(event)) {
-                is LSResult.Success -> if (!retire(consent, token) { eventsStorage.removePaymentEvent(event) }) return
+                is LSResult.Success -> if (!retire(consent, token) { paymentQueue.remove(event) }) return
                 is LSResult.Error -> {
                     DebugLogger.instance.log(LogLevel.INFO, "Payment event failed, keeping for retry: ${result.exception.message}")
                     return

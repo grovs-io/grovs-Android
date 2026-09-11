@@ -17,13 +17,15 @@ import kotlinx.coroutines.withContext
 
 class EventsStorage(context: Context) : IEventsStorage {
     private val preferences = context.getSharedPreferences(GROVS_STORAGE, Context.MODE_PRIVATE)
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
     private val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
         LSJsonInstantCompatTypeAdapterFactory()
     ).create()
 
     companion object {
+        // Instances share the preference file, so they must also share its mutation dispatcher.
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
+
         const val GROVS_STORAGE = "GrovsStorage"
         private const val STORED_EVENTS = "stored_events"
         private const val STORED_PAYMENT_EVENTS = "stored_payment_events"
@@ -98,22 +100,8 @@ class EventsStorage(context: Context) : IEventsStorage {
     }
 
     override suspend fun addPaymentEvent(event: PaymentEvent) = withContext(storageSerialDispatcher) {
-        var currentEvents = getPaymentEvents().toMutableList()
-        currentEvents.add(event)
-
-        val type = object : TypeToken<List<PaymentEvent>>() {}.type
-        val editor = preferences.edit()
-        val jsonString = gson.toJson(currentEvents)
-        editor.putString(STORED_PAYMENT_EVENTS, jsonString)
-        editor.apply()
-
+        writePaymentEvents(readPaymentEvents() + event)
         DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Add event: ${event}")
-
-        try {
-            gson.fromJson(jsonString, type)
-        } catch (e: Exception) {
-            DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Failed. ${e.stackTrace}")
-        }
     }
 
     override suspend fun markTimeSpentNode(startingNode: Boolean, endingNode: Boolean, link: String?, sessionId: String?) = withContext(storageSerialDispatcher) {
@@ -182,24 +170,22 @@ class EventsStorage(context: Context) : IEventsStorage {
     ///
     /// - Parameter event: The event to remove.
     override suspend fun removePaymentEvent(event: PaymentEvent) = withContext(storageSerialDispatcher) {
-        val currentEvents = getPaymentEvents().toMutableList()
+        val currentEvents = readPaymentEvents().toMutableList()
         currentEvents.remove(event)
-
-        val type = object : TypeToken<List<PaymentEvent>>() {}.type
-        val editor = preferences.edit()
-        val jsonString = gson.toJson(currentEvents)
-        editor.putString(STORED_PAYMENT_EVENTS, jsonString)
-        editor.apply()
-
-        try {
-            gson.fromJson(jsonString, type)
-        } catch (e: Exception) {
-            DebugLogger.instance.log(LogLevel.INFO, "Caching payment events - Failed. ${e.stackTrace}")
-        }
+        writePaymentEvents(currentEvents)
     }
 
     override suspend fun replacePaymentEvents(events: List<PaymentEvent>) = withContext(storageSerialDispatcher) {
-        preferences.edit().putString(STORED_PAYMENT_EVENTS, gson.toJson(events)).apply()
+        writePaymentEvents(events)
+    }
+
+    /** No suspension between reading and writing: concurrent inserts/removals cannot be overwritten. */
+    internal suspend fun updatePaymentEvents(transform: (PaymentEvent) -> Unit) = withContext(storageSerialDispatcher) {
+        val events = readPaymentEvents()
+        if (events.isNotEmpty()) {
+            events.forEach(transform)
+            writePaymentEvents(events)
+        }
     }
 
     /// Retrieves all events from the storage, dropping any that are too old to be useful.
@@ -220,10 +206,19 @@ class EventsStorage(context: Context) : IEventsStorage {
 
     /// Retrieves all payment events from the storage.
     override suspend fun getPaymentEvents(): List<PaymentEvent> = withContext(storageSerialDispatcher) {
+        readPaymentEvents()
+    }
+
+    // Only call these from the storage dispatcher. They deliberately contain no suspension points.
+    private fun writePaymentEvents(events: List<PaymentEvent>) {
+        preferences.edit().putString(STORED_PAYMENT_EVENTS, gson.toJson(events)).apply()
+    }
+
+    private fun readPaymentEvents(): List<PaymentEvent> {
         val jsonString = preferences.getString(STORED_PAYMENT_EVENTS, null)
         val type = object : TypeToken<List<PaymentEvent>>() {}.type
 
-        try {
+        return try {
             gson.fromJson<List<PaymentEvent>>(jsonString, type) ?: emptyList()
         } catch (e: Exception) {
             emptyList()
