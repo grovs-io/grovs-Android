@@ -222,6 +222,26 @@ class CustomEventsManagerTest {
     }
 
     @Test
+    fun `an event the backend refuses on its own is dropped and the rest of its batch delivered`() = runTest {
+        val events = List(4) {
+            CustomEvent(eventName = "e$it", createdAt = InstantCompat.ofEpochMilli(1_000L + it), sessionId = "s")
+        }
+        val removed = mutableListOf<CustomEvent>()
+        coEvery { storage.getEvents() } returns events
+        coEvery { storage.removeEvents(any()) } answers { removed += firstArg<List<CustomEvent>>(); Unit }
+        coEvery { service.addCustomEvents(any()) } answers {
+            val part = firstArg<List<CustomEvent>>()
+            if (events[2] in part) LSResult.Error(io.grovs.service.HttpStatusException(400, "refused"))
+            else LSResult.Success(BatchEventsResponse(accepted = part.size, rejected = 0))
+        }
+
+        manager.flush()
+
+        assertEquals(events.toSet(), removed.toSet())
+        assertEquals(events[2], removed.last())
+    }
+
+    @Test
     fun `a failed batch is kept for the next tick`() = runTest {
         val events = listOf(CustomEvent(eventName = "a", createdAt = InstantCompat.now(), sessionId = "s"))
         coEvery { storage.getEvents() } returns events

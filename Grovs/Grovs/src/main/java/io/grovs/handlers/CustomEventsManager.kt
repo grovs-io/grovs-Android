@@ -9,14 +9,12 @@ import io.grovs.service.IGrovsService
 import io.grovs.storage.CustomEventsStorage
 import io.grovs.storage.ICustomEventsStorage
 import io.grovs.utils.InstantCompat
-import io.grovs.utils.LSResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -186,24 +184,23 @@ internal class CustomEventsManager(
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: consent withdrawn")
             return
         }
-        when (val result = grovsService.addCustomEvents(pending)) {
-            // Consumed. Items the backend rejected are reported in the response and can never be
-            // accepted, so they leave the queue with the rest. The removal is admitted as an
-            // acknowledgement: if revocation wins that race the batch stays queued for a retry,
-            // because a cancellation is not proof the backend consumed it.
-            is LSResult.Success -> {
-                val permit = consent.tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT)
-                if (permit == null) {
-                    DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement; keeping the batch")
-                    return
+        // An accepted batch is consumed: items the backend rejects inside it can never be accepted,
+        // so they leave the queue with the rest. The removal is admitted as an acknowledgement: if
+        // revocation wins that race the batch stays queued, because a cancellation is not proof the
+        // backend consumed it. Any other failure keeps the batch for the next tick.
+        deliverInHalves(
+            label = "Custom events",
+            events = pending,
+            describe = { it.eventName },
+            send = { grovsService.addCustomEvents(it) },
+            retire = { part ->
+                consent.acknowledge(token) { customEventsStorage.removeEvents(part) }.also { admitted ->
+                    if (!admitted) {
+                        DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement; keeping the batch")
+                    }
                 }
-                permit.use { withContext(NonCancellable) { customEventsStorage.removeEvents(pending) } }
-            }
-            // Nothing was consumed. Keep the batch; the next tick retries.
-            is LSResult.Error -> DebugLogger.instance.log(
-                LogLevel.INFO,
-                "Custom events batch failed, keeping for retry: ${result.exception.message}"
-            )
-        }
+            },
+            canContinue = { consent.isCurrent(token) },
+        )
     }
 }

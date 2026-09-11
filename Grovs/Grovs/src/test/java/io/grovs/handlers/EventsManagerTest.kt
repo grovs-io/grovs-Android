@@ -579,6 +579,79 @@ class EventsManagerTest {
     }
 
     @Test
+    fun `an event the backend refuses on its own is dropped and the rest of its chunk delivered`() = runTest {
+        val events = storedEvents(4)
+        val refused = events[2]
+        val removed = mutableListOf<Event>()
+        coEvery { mockEventsStorage.getEvents() } returns events
+        coEvery { mockEventsStorage.removeEvents(any()) } answers { removed += firstArg<List<Event>>(); Unit }
+        coEvery { mockGrovsService.addEvents(any()) } answers {
+            val part = firstArg<List<Event>>()
+            if (refused in part) LSResult.Error(io.grovs.service.HttpStatusException(400, "refused")) else accepted(part.size)
+        }
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        assertEquals(events.toSet(), removed.toSet())
+        assertEquals(refused, removed.last())
+    }
+
+    // A distinct transaction token per payment: PaymentEvent equality is type + token + date.
+    private fun payment(sku: String) = PaymentEvent(
+        eventType = io.grovs.model.events.PaymentEventType.BUY, appId = "app", priceCents = 100,
+        currency = "USD", date = InstantCompat.ofEpochMilli(1_000L), transactionToken = "token-$sku",
+        productId = sku, store = false,
+    )
+
+    @Test
+    fun `a payment the backend refuses does not block the payments behind it`() = runTest {
+        val invalid = payment("invalid")
+        val valid = payment("valid")
+        val removed = mutableListOf<PaymentEvent>()
+        coEvery { mockEventsStorage.getPaymentEvents() } returns listOf(invalid, valid)
+        coEvery { mockEventsStorage.removePaymentEvent(any()) } answers { removed += firstArg<PaymentEvent>(); Unit }
+        coEvery { mockGrovsService.addPaymentEvent(invalid) } returns LSResult.Error(io.grovs.service.HttpStatusException(422, "invalid"))
+        coEvery { mockGrovsService.addPaymentEvent(valid) } returns LSResult.Success(true)
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        coVerify(exactly = 1) { mockGrovsService.addPaymentEvent(valid) }
+        assertEquals("the accepted payment proves the refusal is about the invalid one", listOf(valid, invalid), removed)
+    }
+
+    @Test
+    fun `a refused payment is kept while no other payment is accepted`() = runTest {
+        coEvery { mockEventsStorage.getPaymentEvents() } returns listOf(payment("invalid"))
+        coEvery { mockGrovsService.addPaymentEvent(any()) } returns LSResult.Error(io.grovs.service.HttpStatusException(422, "not configured"))
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        coVerify(exactly = 0) { mockEventsStorage.removePaymentEvent(any()) }
+    }
+
+    @Test
+    fun `a transient payment failure stops the flush and keeps every payment`() = runTest {
+        val first = payment("first")
+        val second = payment("second")
+        coEvery { mockEventsStorage.getPaymentEvents() } returns listOf(first, second)
+        coEvery { mockGrovsService.addPaymentEvent(first) } returns LSResult.Error(java.io.IOException("connection reset"))
+        coEvery { mockGrovsService.addPaymentEvent(second) } returns LSResult.Success(true)
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        eventsManager.flush()
+
+        coVerify(exactly = 0) { mockGrovsService.addPaymentEvent(second) }
+        coVerify(exactly = 0) { mockEventsStorage.removePaymentEvent(any()) }
+    }
+
+    @Test
     fun `open time-spent nodes are not sent, closed ones are`() = runTest {
         val open = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.ofEpochMilli(1_000L))
         val closed = Event(event = EventType.TIME_SPENT, createdAt = InstantCompat.ofEpochMilli(2_000L), engagementTime = 30)

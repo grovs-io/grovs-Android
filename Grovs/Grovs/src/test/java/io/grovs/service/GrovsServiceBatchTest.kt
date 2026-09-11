@@ -85,10 +85,15 @@ class GrovsServiceBatchTest : ServiceTestBase() {
     }
 
     @Test
-    fun `a 4xx is Error`() = runTest {
+    fun `a non-2xx is Error carrying its status`() = runTest {
         mockWebServer.enqueue(MockResponse().setResponseCode(400).setBody("""{"error":"events must be an array"}"""))
+        mockWebServer.enqueue(MockResponse().setResponseCode(403).setBody("""{"error":"Invalid credentials"}"""))
 
-        assertTrue(service.addEvents(listOf(systemEvent())) is LSResult.Error)
+        val refused = (service.addEvents(listOf(systemEvent())) as LSResult.Error).exception as HttpStatusException
+        val forbidden = (service.addEvents(listOf(systemEvent())) as LSResult.Error).exception as HttpStatusException
+
+        assertEquals(400, refused.code)
+        assertEquals(403, forbidden.code)
     }
 
     @Test

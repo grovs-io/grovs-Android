@@ -163,3 +163,15 @@ internal suspend fun ConsentController.storeIfConsented(
     permit.finish(block)
     return true
 }
+
+/**
+ * Removes records the backend acknowledged, if the acknowledgement is admitted before revocation.
+ * Returns false when it is not: the records then stay queued, because a cancellation is not proof
+ * the backend consumed them. An admitted removal runs to completion even if consent is withdrawn
+ * while it writes, so storage never still believes it owes records it has already sent.
+ */
+internal suspend fun ConsentController.acknowledge(token: ConsentToken, removal: suspend () -> Unit): Boolean {
+    val permit = tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT) ?: return false
+    permit.use { withContext(NonCancellable) { removal() } }
+    return true
+}

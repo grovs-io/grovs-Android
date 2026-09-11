@@ -330,7 +330,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                 if (!response.isSuccessful) {
                     val body = response.errorBody()?.string()
                     DebugLogger.instance.log(LogLevel.INFO, "$label batch - Failed (${response.code()}) $body")
-                    return@single LSResult.Error(java.io.IOException("$label batch failed (${response.code()}). $body"))
+                    return@single LSResult.Error(HttpStatusException(response.code(), "$label batch failed (${response.code()}). $body"))
                 }
                 // The backend always answers with counts; an empty 2xx body still means "consumed".
                 val parsed = response.body() ?: BatchEventsResponse(accepted = events.size, rejected = 0)
@@ -348,28 +348,22 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    /// Adds an event.
-    ///
-    /// - Parameters:
-    ///   - event: The payment event to add.
-    ///   return: A closure indicating the success or failure of the operation.
+    /// Adds a payment event. Any 2xx means the backend took it. A non-2xx carries its status, so
+    /// the caller can tell a payment the backend refuses from a failure worth retrying.
     override suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean> = singleResult { token ->
         DebugLogger.instance.log(LogLevel.INFO, "Add payment event - $event")
         val response = grovsApi.addPaymentEvent(event, token)
         if (response.isSuccessful) {
-            val body = response.body()
-            body?.let {
-                DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Successful - $event")
-
-                return@singleResult LSResult.Success(true)
-            }
+            DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Successful - $event")
+            return@singleResult LSResult.Success(true)
         }
 
-        val error = gson.fromJson(response.errorBody()!!.string(), ErrorMessage::class.java)
+        val body = response.errorBody()?.string()
+        val reason = runCatching { gson.fromJson(body, ErrorMessage::class.java)?.error }.getOrNull() ?: body
 
-        DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Failed - $event ${error.error}")
+        DebugLogger.instance.log(LogLevel.INFO, "Add payment event - Failed (${response.code()}) - $event $reason")
 
-        LSResult.Error(java.io.IOException("Failed to log the payment event. ${error.error}"))
+        LSResult.Error(HttpStatusException(response.code(), "Failed to log the payment event (${response.code()}). $reason"))
     }
 
     override suspend fun updateAttributes(identifier: String?, attributes: Map<String, Any>?, pushToken: String?): LSResult<Boolean> {

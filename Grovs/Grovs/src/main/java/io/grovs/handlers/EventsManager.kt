@@ -8,6 +8,7 @@ import io.grovs.model.LogLevel
 import io.grovs.model.events.PaymentEvent
 import io.grovs.model.events.PaymentEventType
 import io.grovs.service.GrovsService
+import io.grovs.service.HttpStatusException
 import io.grovs.service.IGrovsService
 import io.grovs.storage.EventsStorage
 import io.grovs.storage.IEventsStorage
@@ -338,50 +339,74 @@ class EventsManager(
             // Re-checked per chunk against this flush's own token: a revocation between chunks stops
             // the next send, and a grant that arrives after it does not resume this flush.
             if (eventsHeld || !consent.isCurrent(token)) return
-            when (val result = grovsService.addEvents(chunk)) {
-                is LSResult.Success -> if (!retire(consent, token) { eventsStorage.removeEvents(chunk) }) return
-                is LSResult.Error -> {
-                    DebugLogger.instance.log(LogLevel.INFO, "System events batch failed, keeping for retry: ${result.exception.message}")
-                    return
-                }
-            }
+            val delivered = deliverInHalves(
+                label = "System events",
+                events = chunk,
+                describe = { it.event.toString() },
+                send = { grovsService.addEvents(it) },
+                retire = { part -> retire(consent, token) { eventsStorage.removeEvents(part) } },
+                canContinue = { !eventsHeld && consent.isCurrent(token) },
+            )
+            if (!delivered) return
         }
     }
 
     /**
-     * Retires the records an accepted response acknowledged, if the acknowledgement is admitted
-     * before revocation. Returns false when it is not: the records then stay queued for a later
-     * retry, because a cancellation is not proof the backend consumed them.
-     *
-     * An admitted removal runs to completion even if consent is withdrawn while it is writing, so
-     * storage never ends up having sent records it still believes are pending.
+     * Retires records the backend acknowledged. Returns false, keeping them queued, when consent was
+     * withdrawn before the acknowledgement was admitted; see [ConsentController.acknowledge].
      */
-    private suspend fun retire(consent: ConsentController, token: ConsentToken, removal: suspend () -> Unit): Boolean {
-        val permit = consent.tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT) ?: run {
-            DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement was accepted; keeping the records")
-            return false
+    private suspend fun retire(consent: ConsentController, token: ConsentToken, removal: suspend () -> Unit): Boolean =
+        consent.acknowledge(token, removal).also { admitted ->
+            if (!admitted) {
+                DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement was accepted; keeping the records")
+            }
         }
-        permit.use { withContext(NonCancellable) { removal() } }
-        return true
-    }
 
-    /// One request per payment event (the backend has no batch endpoint for them); same
-    /// stop-on-first-failure rule.
+    /// One request per payment event (the backend has no batch endpoint for them). A transient
+    /// failure stops the flush and keeps the rest for the next trigger. A payment the backend
+    /// refuses is skipped so it cannot block the payments behind it, and is dropped only when another
+    /// payment was accepted in the same flush: the endpoint answers an invalid payment and an app
+    /// that is not configured with the same 422, and only an accepted sibling proves the refusal is
+    /// about that payment. Refused payments stay queued until then; payments never age out.
     private suspend fun sendPaymentEventsToBackend() {
         val consent = grovsContext.consent
         val token = consent.workToken(configuration) ?: return
         if (!canSend(token)) return
+        var anyAccepted = false
+        val refused = mutableListOf<PaymentEvent>()
         for (event in paymentQueue.snapshot()) {
-            if (eventsHeld || !consent.isCurrent(token)) return
+            if (eventsHeld || !consent.isCurrent(token)) break
             when (val result = grovsService.addPaymentEvent(event)) {
-                is LSResult.Success -> if (!retire(consent, token) { paymentQueue.remove(event) }) return
+                is LSResult.Success -> {
+                    anyAccepted = true
+                    if (!retire(consent, token) { paymentQueue.remove(event) }) return
+                }
                 is LSResult.Error -> {
+                    if (isRefusedPayment(result.exception)) {
+                        refused += event
+                        continue
+                    }
                     DebugLogger.instance.log(LogLevel.INFO, "Payment event failed, keeping for retry: ${result.exception.message}")
-                    return
+                    break
                 }
             }
         }
+        if (refused.isEmpty()) return
+        if (!anyAccepted) {
+            DebugLogger.instance.log(LogLevel.INFO, "Keeping ${refused.size} refused payment event(s) until another payment is accepted")
+            return
+        }
+        DebugLogger.instance.log(
+            LogLevel.ERROR,
+            "Dropping ${refused.size} payment event(s) the backend refuses: " +
+                refused.joinToString { it.productId?.take(64) ?: "unknown product" },
+        )
+        retire(consent, token) { refused.forEach { paymentQueue.remove(it) } }
     }
+
+    /** A refusal of one payment: 400 or 413 as sent, 422 when the backend rejects it as invalid. */
+    private fun isRefusedPayment(failure: Exception): Boolean =
+        failure is HttpStatusException && (failure.code == 400 || failure.code == 413 || failure.code == 422)
 
     /// Enabled, not held, and past the first-batch delay.
     private fun canSend(token: ConsentToken): Boolean {

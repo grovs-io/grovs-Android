@@ -315,4 +315,23 @@ class GrovsServiceTest {
             context = "after markNotificationAsRead(123) with successful mock response"
         )
     }
+
+    @Test
+    fun `GrovsService addPaymentEvent reports a refused payment with its status`() = runTest {
+        mockGrovsApi.addPaymentEventResponse = MockGrovsApi.createErrorResponseTyped(422, "Validation failed: Currency can't be blank")
+
+        val result = grovsService.addPaymentEvent(io.grovs.model.events.PaymentEvent(productId = "sku"))
+
+        val failure = (result as io.grovs.utils.LSResult.Error).exception as HttpStatusException
+        assertEqualsWithContext(422, failure.code, "failure.code", "after a 422 payment response")
+    }
+
+    @Test
+    fun `GrovsService addPaymentEvent treats a 2xx without a body as delivered`() = runTest {
+        mockGrovsApi.addPaymentEventResponse = Response.success<Unit>(null)
+
+        val result = grovsService.addPaymentEvent(io.grovs.model.events.PaymentEvent(productId = "sku"))
+
+        assertResultSuccess(result, context = "after a 2xx payment response with no body")
+    }
 }
