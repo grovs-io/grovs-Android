@@ -209,7 +209,9 @@ Grovs.track("checkout_completed", properties = mapOf("sku" to "abc", "total" to 
 
 Event names must not be blank, and cannot be one of the SDK's reserved names: `view`, `open`, `install`, `reinstall`, `app_open`, `time_spent`, `reactivation`, `user_referred`, `custom`, `screen_view`. Rejected events are logged and dropped.
 
-Properties are sanitized before sending: `NaN` and `Infinity` values are dropped, `Date`, `URL` and `UUID` are coerced to strings, and the whole map is dropped if it serializes to more than 8KB. Tags are capped at 20 per event, 255 characters each.
+Properties support strings, booleans, standard numbers, string-keyed maps, lists, and arrays. Nested `Date`, `URL`, and `UUID` values are converted to strings. Sanitization copies nested collections and preserves valid list order and null entries. If a property's subtree contains `NaN`, infinity, unsupported objects, non-string map keys, a cycle, or more than 16 nested containers, that entire top-level property is dropped; valid siblings and the event are retained. Shared references without cycles are allowed. These rules also apply to `trackScreenView` properties.
+
+Numbers must remain finite when read back as doubles from SDK storage; larger `BigInteger` or `BigDecimal` values cause their containing property to be dropped. The whole properties map is omitted if its serialized JSON exceeds 8KB in UTF-8 or input traversal exceeds 8,192 values. Tags are capped at 20 per event, 255 characters each.
 
 ### Global tags
 
