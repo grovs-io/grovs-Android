@@ -188,6 +188,39 @@ class EventsStorage(context: Context) : IEventsStorage {
         }
     }
 
+    /** Launch events and counters share one preference edit, including across process death. */
+    internal suspend fun recordLaunch(cache: LocalCache, lastSeen: InstantCompat?, link: String?, sessionId: String) =
+        withContext(storageSerialDispatcher) {
+            val now = InstantCompat.now()
+            val opens = cache.numberOfOpens
+            val events = getEvents().filterNot { it.event == EventType.TIME_SPENT && it.engagementTime == null }.toMutableList()
+            fun add(type: EventType) { events.add(Event(type, now, link = link, sessionId = sessionId)) }
+            if (opens == 0) add(if (lastSeen == null) EventType.INSTALL else EventType.REINSTALL)
+            cache.lastStartTimestamp?.let {
+                if (DurationCompat.between(it, now).toDays() >= 7) add(EventType.REACTIVATION)
+            }
+            add(EventType.APP_OPEN)
+            add(EventType.TIME_SPENT)
+            val editor = preferences.edit().putString(STORED_EVENTS, gson.toJson(capped(events)))
+            cache.stageLaunch(editor, opens + 1, now)
+            editor.apply()
+        }
+
+    /** Close only an existing segment, at the lifecycle/consent boundary rather than dispatch time. */
+    internal suspend fun closeEngagementAt(end: InstantCompat) = withContext(storageSerialDispatcher) {
+        val events = getEvents()
+        if (events.none { it.event == EventType.TIME_SPENT && it.engagementTime == null }) return@withContext
+        val updated = events.filter { event ->
+            if (event.event != EventType.TIME_SPENT || event.engagementTime != null) return@filter true
+            val seconds = DurationCompat.between(event.createdAt, end).seconds
+            if (event.createdAt.isAfter(end)) return@filter true
+            if (seconds <= 0) return@filter false
+            event.engagementTime = seconds.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            true
+        }
+        preferences.edit().putString(STORED_EVENTS, gson.toJson(updated)).apply()
+    }
+
     /// Retrieves all events from the storage, dropping any that are too old to be useful.
     override suspend fun getEvents(): List<Event> = withContext(storageSerialDispatcher) {
         val jsonString = preferences.getString(STORED_EVENTS, null)

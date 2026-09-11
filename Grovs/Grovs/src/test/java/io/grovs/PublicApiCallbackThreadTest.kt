@@ -134,4 +134,21 @@ class PublicApiCallbackThreadTest {
         assertEquals("https://test.grovs.io/deferred", received?.link)
         controller.pause().stop().destroy()
     }
+    @Test
+    fun `disabled link errors called from a worker are delivered once on main`() {
+        Grovs.setSDK(false)
+        val results = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Looper?>>()
+        val worker = Thread {
+            Grovs.generateLink(title = "disabled") { _, _ -> results += "generate" to Looper.myLooper() }
+            Grovs.linkDetails("disabled") { _, _ -> results += "details" to Looper.myLooper() }
+        }
+        worker.start()
+        worker.join(1_000)
+        org.junit.Assert.assertFalse("Public calls must return without waiting for main", worker.isAlive)
+        assertEquals("No callback may run inline on the worker", 0, results.size)
+        E2ETestUtils.waitForCondition(description = "both consent errors") { results.size == 2 }
+        results.forEach { (name, looper) -> assertSame(name, Looper.getMainLooper(), looper) }
+        assertEquals(setOf("generate", "details"), results.map { it.first }.toSet())
+    }
+
 }

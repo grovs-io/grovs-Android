@@ -332,6 +332,9 @@ internal class ConsentController(
     /** Completes once every revocation/retirement cleanup started so far has finished. */
     fun pendingWork(): Job = allOf(synchronized(lock) { pendingCleanups.toList() })
 
+    /** Local writes accepted by a previous owner must finish before a replacement uses its storage. */
+    internal fun pendingCommits(): Job = allOf(synchronized(lock) { permits.map { it.done } })
+
     internal fun registrationCount(): Int = synchronized(lock) { registrations.size }
 
     internal fun outstandingCommitCount(): Int = synchronized(lock) { permits.size }

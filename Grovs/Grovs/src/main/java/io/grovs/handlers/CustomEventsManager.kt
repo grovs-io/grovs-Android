@@ -111,7 +111,9 @@ internal class CustomEventsManager(
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn, dropping event: $name")
             return
         }
-        customEventsStorage.addEvent(event)
+        withContext(token) {
+            grovsContext.consent.storeIfConsented(configuration) { customEventsStorage.addEvent(event) }
+        }
     }
 
     override fun setGlobalTags(tags: List<String>?) {
@@ -124,11 +126,9 @@ internal class CustomEventsManager(
 
     override suspend fun attributePendingEvents(link: String, sessionId: String) {
         try {
-            customEventsStorage.updateEvents { event ->
-                if (event.link == null && event.sessionId == sessionId) {
-                    event.copy(link = link)
-                } else {
-                    event
+            grovsContext.consent.storeIfConsented(configuration) {
+                customEventsStorage.updateEvents { event ->
+                    if (event.link == null && event.sessionId == sessionId) event.copy(link = link) else event
                 }
             }
         } catch (e: CancellationException) {
@@ -142,36 +142,49 @@ internal class CustomEventsManager(
         eventsHeld = held
     }
 
-    override suspend fun flush() = flushMutex.withLock {
+    override suspend fun flush() {
+        val consent = grovsContext.consent
+        val token = consent.workToken(configuration) ?: return
+        try {
+            consent.runOperation(token) {
+                flushMutex.withLock { flushUnderConsent() }
+            }
+        } catch (_: ConsentRevokedException) {
+            // End this delivery attempt, not the periodic worker that will serve the next grant.
+        }
+    }
+
+    private suspend fun flushUnderConsent() {
         val consent = grovsContext.consent
         // Disable pauses delivery; nothing leaves the device until a new grant. Events stay queued,
         // and this flush belongs to the token it started with: a later grant runs its own flush
         // rather than resuming this one.
         val token = consent.workToken(configuration) ?: run {
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: consent not granted")
-            return@withLock
+            return
         }
         if (eventsHeld) {
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: link lookup pending")
-            return@withLock
+            return
         }
-        if (grovsContext.grovsId == null) {
+        if (grovsContext.grovsId == null ||
+            (grovsContext.requiresAuthentication && grovsContext.authenticatedConfiguration !== configuration)) {
             // Without a device id the backend rejects the send as terminal, which would drop the
             // events for good. Leave them queued; a later tick retries once authenticated.
             DebugLogger.instance.log(
                 LogLevel.INFO,
                 "Skipping custom events flush: not yet authenticated"
             )
-            return@withLock
+            return
         }
 
         val pending = customEventsStorage.getEvents().take(BATCH_SIZE)
-        if (pending.isEmpty()) return@withLock
+        if (pending.isEmpty()) return
 
         DebugLogger.instance.log(LogLevel.INFO, "Flushing ${pending.size} custom events")
         if (!consent.isCurrent(token)) {
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: consent withdrawn")
-            return@withLock
+            return
         }
         when (val result = grovsService.addCustomEvents(pending)) {
             // Consumed. Items the backend rejected are reported in the response and can never be
@@ -182,7 +195,7 @@ internal class CustomEventsManager(
                 val permit = consent.tryAdmitCommit(token, CommitKind.ACKNOWLEDGEMENT)
                 if (permit == null) {
                     DebugLogger.instance.log(LogLevel.INFO, "Consent withdrawn before the acknowledgement; keeping the batch")
-                    return@withLock
+                    return
                 }
                 permit.use { withContext(NonCancellable) { customEventsStorage.removeEvents(pending) } }
             }

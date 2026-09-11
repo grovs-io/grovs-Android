@@ -717,4 +717,103 @@ class LinkAttributionTest {
             assertEquals(listOf("before_late_match" to directUrl, "after_late_match" to directUrl), links)
         } finally { rig.manager.close() }
     }
+    @Test
+    fun `revoked lookup cleanup and deadline cannot release the next generation hold`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val oldGate = CompletableDeferred<Unit>()
+        val nextGate = CompletableDeferred<Unit>()
+        val oldStarted = CompletableDeferred<Unit>()
+        val nextStarted = CompletableDeferred<Unit>()
+        val oldUrl = "https://demo.sqd.link/revoked"
+        val nextUrl = "https://demo.sqd.link/current"
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == oldUrl }) } coAnswers {
+            oldStarted.complete(Unit)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { oldGate.await() }
+            LSResult.Success(DeeplinkDetails(oldUrl, null, null))
+        }
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == nextUrl }) } coAnswers {
+            nextStarted.complete(Unit)
+            nextGate.await()
+            LSResult.Success(DeeplinkDetails(nextUrl, null, null))
+        }
+        try {
+            val old = async { rig.manager.handleIntent(Intent().setData(Uri.parse(oldUrl)), false) }
+            oldStarted.await()
+            rig.deadlineClock.runCurrent()
+            rig.deadlineClock.advanceTimeBy(10_000)
+            rig.context.settings.sdkEnabled = false
+            rig.context.settings.sdkEnabled = true
+            val next = async { rig.manager.handleIntent(Intent().setData(Uri.parse(nextUrl)), false) }
+            nextStarted.await()
+            rig.deadlineClock.runCurrent()
+            oldGate.complete(Unit)
+            assertNull(old.await())
+            rig.deadlineClock.advanceTimeBy(15_001)
+            rig.deadlineClock.runCurrent()
+            assertTrue("Old deadline must not release the new hold", rig.events.eventsHeld)
+            rig.manager.track("current_pending", null, null)
+            rig.custom.flush()
+            assertTrue(rig.sentCustom.isEmpty())
+            nextGate.complete(Unit)
+            assertEquals(nextUrl, next.await()?.link)
+            rig.custom.flush()
+            assertEquals(listOf(nextUrl), rig.sentCustom)
+        } finally {
+            oldGate.complete(Unit)
+            nextGate.complete(Unit)
+            rig.manager.close()
+        }
+    }
+
+    @Test
+    fun `new fingerprint result does not wait for a revoked explicit lookup`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val oldGate = CompletableDeferred<Unit>()
+        val oldStarted = CompletableDeferred<Unit>()
+        val oldUrl = "https://demo.sqd.link/revoked-explicit"
+        val newUrl = "https://demo.sqd.link/current-fingerprint"
+        coEvery { rig.service.payloadWithLinkFor(any()) } coAnswers {
+            oldStarted.complete(Unit)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { oldGate.await() }
+            LSResult.Success(DeeplinkDetails(oldUrl, null, null))
+        }
+        coEvery { rig.service.payloadFor(any()) } returns LSResult.Success(DeeplinkDetails(newUrl, null, null))
+        try {
+            val old = async { rig.manager.handleIntent(Intent().setData(Uri.parse(oldUrl)), false) }
+            oldStarted.await()
+            rig.context.settings.sdkEnabled = false
+            rig.context.settings.sdkEnabled = true
+            val current = async { rig.manager.handleIntent(Intent(), false) }
+            val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                kotlinx.coroutines.withTimeout(5_000) { current.await() }
+            }
+            assertEquals(newUrl, result?.link)
+            assertFalse("The revoked response is still withheld", oldGate.isCompleted)
+            oldGate.complete(Unit)
+            assertNull(old.await())
+            rig.assertFutureLink(newUrl)
+        } finally { oldGate.complete(Unit); rig.manager.close() }
+    }
+
+    @Test
+    fun `revoked intent can be retried explicitly with the same object after re-enable`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val started = CompletableDeferred<Unit>()
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl))
+        coEvery { rig.service.payloadWithLinkFor(any()) } coAnswers {
+            started.complete(Unit)
+            kotlinx.coroutines.awaitCancellation()
+        }
+        try {
+            val old = async { rig.manager.handleIntent(intent, false, cacheIntent = true) }
+            started.await()
+            rig.context.settings.sdkEnabled = false
+            assertNull(old.await())
+            rig.context.settings.sdkEnabled = true
+            coEvery { rig.service.payloadWithLinkFor(any()) } returns LSResult.Success(DeeplinkDetails(directUrl, null, null))
+            assertEquals(directUrl, rig.manager.handleIntent(intent, false, cacheIntent = true)?.link)
+            coVerify(exactly = 2) { rig.service.payloadWithLinkFor(match { it.url == directUrl }) }
+        } finally { rig.manager.close() }
+    }
+
 }

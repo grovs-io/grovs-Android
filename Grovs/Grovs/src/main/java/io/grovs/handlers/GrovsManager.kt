@@ -86,11 +86,11 @@ internal class GrovsManager(
     internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
 
     private val grovsService: IGrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
-    private val appDetails: IAppDetailsHelper = appDetailsHelper ?: grovsContext.getAppDetails(context = context)
+    private val appDetails: IAppDetailsHelper by lazy { appDetailsHelper ?: grovsContext.getAppDetails(context = context) }
     private val eventsManager: IEventsManager = eventsManager ?: EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
     private val customEventsManager: ICustomEventsManager = customEventsManager
         ?: CustomEventsManager(context = context, grovsContext = grovsContext, grovsService = this.grovsService)
-    private val appDetailsHelperForIntent: IAppDetailsHelper = appDetailsHelper ?: AppDetailsHelper(context)
+    private val appDetailsHelperForIntent: IAppDetailsHelper by lazy { appDetailsHelper ?: AppDetailsHelper(context) }
     private val screenTracker: ScreenTracker = ScreenTracker(customEventsManager = this.customEventsManager)
 
     // Must be constructed before any launch event is logged: the handler arms itself on a zero opens counter.
@@ -109,8 +109,9 @@ internal class GrovsManager(
     /// A link lookup in flight. `generation` is the number of links committed when it started; a
     /// later commit makes its result stale. `done` completes when the call exits, so fingerprint
     /// results can wait for a direct link the user opened (which takes precedence) to settle.
-    private class Lookup(val generation: Int, val sessionId: String, val explicit: Boolean) {
+    private class Lookup(val generation: Int, val sessionId: String, val explicit: Boolean, val token: ConsentToken) {
         val done: CompletableJob = Job()
+        var committed = false
     }
 
     /// Every state below is guarded by [resolutionMutex]. [close] never touches it: it only flips
@@ -125,6 +126,7 @@ internal class GrovsManager(
     private val lookupsInFlight = mutableSetOf<Lookup>()
     /// Non-null while queued events are held for a pending lookup.
     private var holdDeadline: Job? = null
+    private var holdToken: ConsentToken? = null
 
     private data class ResolvedDeeplink(val details: DeeplinkDetails, val eventLink: String?)
 
@@ -179,6 +181,7 @@ internal class GrovsManager(
             prefs.edit().putString(KEY_LAST_REFERRER, value).apply()
         }
 
+    @set:Synchronized
     var identifier: String?
         get() = grovsContext.identifier
         set(value) {
@@ -186,6 +189,7 @@ internal class GrovsManager(
             updateAttributesIfNeeded()
         }
 
+    @set:Synchronized
     var pushToken: String?
         get() = grovsContext.pushToken
         set(value) {
@@ -194,6 +198,7 @@ internal class GrovsManager(
         }
 
 
+    @set:Synchronized
     var attributes: Map<String, Any>?
         get() = grovsContext.attributes
         set(value) {
@@ -202,12 +207,15 @@ internal class GrovsManager(
         }
 
     suspend fun onAppForegrounded() {
-        if (!grovsContext.settings.sdkEnabled) return
+        grovsContext.isForeground = true
+        if (grovsContext.consent.workToken(configuration) == null) return
         eventsManager.onAppForegrounded()
         syncScreenAliasesIfNeeded()
     }
 
     fun onAppBackgrounded() {
+        grovsContext.isForeground = false
+        // Campaigns belong to a session; a brief background does not end that session.
         if (!grovsContext.settings.sdkEnabled) {
             // Disabled: no storage writes, but the committed link still ends with the session,
             // exactly as when enabled, so it cannot leak into the next session's events.
@@ -217,27 +225,39 @@ internal class GrovsManager(
         eventsManager.onAppBackgrounded()
     }
 
-    /// Consent granted on an already-authenticated SDK: send what was held while disabled.
-    /// An unauthenticated SDK is instead re-authenticated by Grovs.setSDK, which records the launch.
+    /** Called under the storage permit reserved at revocation, after accepted launch writes finish. */
+    internal suspend fun onDisabled(timestamp: InstantCompat) {
+        (eventsManager as? EventsManager)?.closeEngagementAt(timestamp)
+    }
+
+    /** Resume permitted state and queues; never replay a previous intent. */
     suspend fun onEnabled() {
+        if (grovsContext.consent.workToken(configuration) == null) return
         if (authenticationState != AuthenticationState.AUTHENTICATED) return
         if (shouldUpdateAttributes) updateAttributesIfNeeded()
         syncScreenAliasesIfNeeded()
+        if (grovsContext.isForeground) (eventsManager as? EventsManager)?.resumeEngagement()
         customEventsManager.flush()
         eventsManager.flush()
     }
 
-    private fun isCurrent(lookup: Lookup): Boolean = !isClosed && committedLinks == lookup.generation
+    private fun isCurrent(lookup: Lookup): Boolean = !isClosed && committedLinks == lookup.generation && grovsContext.consent.isCurrent(lookup.token)
 
-    /// Arms the events hold once; later lookups share the deadline already running.
-    private fun armHold() {
-        if (holdDeadline != null) return
+    private fun ownsHold(token: ConsentToken): Boolean = holdToken?.let {
+        it.configuration === token.configuration && it.generation == token.generation
+    } == true
+
+    /** Lookups share a deadline only within the same consent generation. */
+    private fun armHold(token: ConsentToken) {
+        if (holdDeadline != null && ownsHold(token)) return
+        holdDeadline?.cancel()
+        holdToken = token
         eventsManager.beginLinkResolution()
         customEventsManager.setEventsHeld(true)
-        holdDeadline = attributionScope.launch {
+        holdDeadline = grovsContext.consent.launchOperation(token, scope = attributionScope) {
             delay(attributionTimeoutMs)
             resolutionMutex.withLock {
-                if (isClosed || holdDeadline == null) return@withLock
+                if (isClosed || holdDeadline == null || !ownsHold(token) || !grovsContext.consent.isCurrent(token)) return@withLock
                 holdDeadline = null
                 // Nothing below may escape: this runs unattended on the SDK's own scope, so an
                 // uncaught throw (events storage, disk) would reach the host app's default handler.
@@ -255,12 +275,14 @@ internal class GrovsManager(
     }
 
     /// Releases the hold without changing attribution. Held events flush with whatever link they carry.
-    private suspend fun releaseHold(delayEvents: Boolean) {
+    private suspend fun releaseHold(token: ConsentToken, delayEvents: Boolean) {
+        if (!ownsHold(token)) return
         val deadline = holdDeadline ?: return
         holdDeadline = null
         deadline.cancel()
         customEventsManager.setEventsHeld(false)
-        eventsManager.releaseLinkResolution(delayEvents = delayEvents)
+        eventsManager.setEventsHeld(false)
+        if (grovsContext.consent.isCurrent(token)) eventsManager.releaseLinkResolution(delayEvents = delayEvents)
     }
 
     /// Resolves a candidate without committing it. Null when nothing resolved or the lookup went stale.
@@ -315,7 +337,7 @@ internal class GrovsManager(
     /// wait for in-flight direct lookups; a committed one makes them stale, a rejected one lets them through.
     private suspend fun awaitExplicitLookups() {
         while (true) {
-            val pending = resolutionMutex.withLock { explicitLookups.toList() }
+            val pending = resolutionMutex.withLock { explicitLookups.filter(::isCurrent) }
             if (pending.isEmpty()) return
             pending.forEach { it.done.join() }
         }
@@ -334,21 +356,26 @@ internal class GrovsManager(
                 DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not committing the resolved link")
                 return@withLock null
             }
-            committedLinks++
-            // A resolved link from any path makes the clipboard flow moot.
-            clipboardHandler.markResolved()
-            val link = result.details.link
-            // A late match attributes the session it lands in, the same one future events carry.
-            // Attributing the session it was requested for would split one session's attribution.
-            val sessionId = grovsContext.sessionId
-            customEventsManager.setLinkForFutureEvents(link, sessionId)
-            if (link != null) customEventsManager.attributePendingEvents(link, sessionId)
-            // Keep the hold closed while storage is updated: a background flush must not take
-            // INSTALL between releasing the hold and applying the link.
-            holdDeadline?.cancel()
-            holdDeadline = null
-            customEventsManager.setEventsHeld(false)
-            eventsManager.completeLinkResolution(eventLink, delayEvents = delayEvents)
+            val permit = grovsContext.consent.tryAdmitCommit(token, CommitKind.STORAGE_TRANSACTION)
+                ?: return@withLock null
+            permit.finish {
+                committedLinks++
+                lookup.committed = true
+                clipboardHandler.markResolved()
+                val link = result.details.link
+                // Future events and backfill belong to the same session captured at commit time.
+                val sessionId = grovsContext.sessionId
+                customEventsManager.setLinkForFutureEvents(link, sessionId)
+                if (link != null) customEventsManager.attributePendingEvents(link, sessionId)
+                eventsManager.completeLinkResolution(eventLink, delayEvents = delayEvents)
+            }
+            if (ownsHold(token)) {
+                holdDeadline?.cancel()
+                holdDeadline = null
+                customEventsManager.setEventsHeld(false)
+                eventsManager.setEventsHeld(false)
+                if (grovsContext.consent.isCurrent(token)) eventsManager.flush()
+            }
             result.details
         }
 
@@ -383,7 +410,7 @@ internal class GrovsManager(
         }.collect { deviceResult ->
             when (deviceResult) {
                 is GVRetryResult.Success -> {
-                    grovsContext.lastSeen = deviceResult.data.lastSeen
+                    if (consent.isCurrent(token)) grovsContext.lastSeen = deviceResult.data.lastSeen
                 }
                 is GVRetryResult.Retrying -> {
                     authenticationState = AuthenticationState.RETRYING
@@ -422,18 +449,20 @@ internal class GrovsManager(
                     // the launch record, the opens counters and the AUTHENTICATED state become
                     // visible together. A revocation racing this waits for the permit to close, so
                     // the next grant resumes after it rather than recording a second launch.
-                    permit.use {
-                        withContext(NonCancellable) {
-                            grovsContext.grovsId = result.data.grovsId
+                    permit.finish {
+                        grovsContext.grovsId = result.data.grovsId
+                        synchronized(this@GrovsManager) {
                             if (!shouldUpdateAttributes) {
                                 grovsContext.identifier = result.data.sdkIdentifier
                                 grovsContext.attributes = result.data.sdkAttributes
                             }
-                            eventsManager.logAppLaunchEvents()
-                            authenticationState = AuthenticationState.AUTHENTICATED
                         }
+                        clipboardHandler.armIfNeeded()
+                        eventsManager.logAppLaunchEvents()
+                        grovsContext.authenticatedConfiguration = configuration
+                        authenticationState = AuthenticationState.AUTHENTICATED
                     }
-
+                    if (!consent.isCurrent(token)) return@collect
                     // Network work, so outside the commit: cancellable and gated like any other.
                     if (shouldUpdateAttributes) {
                         updateAttributesIfNeeded()
@@ -517,6 +546,15 @@ internal class GrovsManager(
     }
 
     suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): DeeplinkDetails? {
+        val token = grovsContext.consent.workToken(configuration) ?: return null
+        return try {
+            grovsContext.consent.runOperation(token) { handleIntentUnderConsent(intent, delayEvents, cacheIntent, token) }
+        } catch (_: ConsentRevokedException) {
+            null
+        }
+    }
+
+    private suspend fun handleIntentUnderConsent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean, token: ConsentToken): DeeplinkDetails? {
         if (!grovsContext.settings.sdkEnabled) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return null
@@ -527,21 +565,25 @@ internal class GrovsManager(
         }
 
         if (isClosed) return null
+        if (!grovsContext.consent.storeIfConsented(configuration) { clipboardHandler.armIfNeeded() }) return null
 
-        val repeatedIntent = intent.hashCode() == lastIntentHandledReference?.get()?.hashCode() ||
-            (cacheIntent && handledIntentTokens.contains(intent.hashCode()))
-        lastIntentHandledReference = WeakReference(intent)
-        if (cacheIntent && !repeatedIntent) handledIntentTokens.add(intent.hashCode())
-
-        val explicitLink = if (repeatedIntent) null else intent.data?.toString()
+        var repeatedIntent = false
+        var newlyCachedIntent = false
+        var explicitLink: String? = null
         val lookup = resolutionMutex.withLock {
-            if (isClosed) return@withLock null
+            if (isClosed || !grovsContext.consent.isCurrent(token)) return@withLock null
+            repeatedIntent = intent.hashCode() == lastIntentHandledReference?.get()?.hashCode() ||
+                (cacheIntent && handledIntentTokens.contains(intent.hashCode()))
+            lastIntentHandledReference = WeakReference(intent)
+            newlyCachedIntent = cacheIntent && !repeatedIntent
+            if (newlyCachedIntent) handledIntentTokens.add(intent.hashCode())
+            explicitLink = if (repeatedIntent) null else intent.data?.toString()
             // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.
             if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
-            Lookup(committedLinks, grovsContext.sessionId, explicit = explicitLink != null).also {
+            Lookup(committedLinks, grovsContext.sessionId, explicit = explicitLink != null, token = token).also {
                 if (it.explicit) explicitLookups.add(it) else sharedLookup = it
                 lookupsInFlight.add(it)
-                armHold()
+                armHold(token)
                 if (it.explicit) {
                     // The user opened this link: events logged from now on carry it even if the
                     // lookup is cancelled. The backend's answer replaces it either way.
@@ -572,8 +614,14 @@ internal class GrovsManager(
                 resolutionMutex.withLock {
                     if (lookup.explicit) explicitLookups.remove(lookup) else if (sharedLookup === lookup) sharedLookup = null
                     lookupsInFlight.remove(lookup)
+                    // Revocation is not consumption. Permit a later explicit call with this same
+                    // intent to retry, without changing a newer intent's cache or replaying here.
+                    if (!grovsContext.consent.isCurrent(token) && !lookup.committed && !repeatedIntent) {
+                        if (newlyCachedIntent) handledIntentTokens.remove(intent.hashCode())
+                        if (lastIntentHandledReference?.get() === intent) lastIntentHandledReference = null
+                    }
                     // The last lookup out with no link committed lets the queued events go as they are.
-                    if (lookupsInFlight.isEmpty() && !isClosed) releaseHold(delayEvents)
+                    if (!isClosed && lookupsInFlight.none { grovsContext.consent.isCurrent(it.token) }) releaseHold(token, delayEvents)
                 }
                 lookup.done.complete()
             }
@@ -591,7 +639,7 @@ internal class GrovsManager(
     }
 
     suspend fun logInAppPurchase(originalJson: String) {
-        if (!grovsContext.settings.sdkEnabled) {
+        if (grovsContext.consent.workToken(configuration) == null) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Payment events cannot be sent.")
             return
         }
@@ -611,7 +659,8 @@ internal class GrovsManager(
     }
 
     suspend fun trackScreenView(screenName: String, properties: Map<String, Any>?) {
-        screenTracker.trackScreen(rawName = screenName, properties = properties)
+        val token = grovsContext.consent.workToken(configuration) ?: return
+        screenTracker.trackScreen(rawName = screenName, properties = properties, consentGeneration = token.generation)
     }
 
     /**
@@ -639,7 +688,7 @@ internal class GrovsManager(
         val pending = pendingScreenAliases ?: return
 
         val generation = aliasSyncGeneration
-        when (grovsService.syncScreenAliases(pending)) {
+        when (consent.runOperation(token) { grovsService.syncScreenAliases(pending) }) {
             is LSResult.Success -> {
                 // A newer setScreenAliases landed while this was in flight, or consent was withdrawn
                 // and granted again; either way that response no longer describes the pending set
@@ -661,7 +710,8 @@ internal class GrovsManager(
      */
     suspend fun autoTrackScreen(screenName: String, screenClass: String? = null) {
         if (!grovsContext.settings.autoTrackScreenViews) return
-        screenTracker.trackScreen(rawName = screenName, properties = null, dedupKey = screenClass)
+        val token = grovsContext.consent.workToken(configuration) ?: return
+        screenTracker.trackScreen(rawName = screenName, properties = null, dedupKey = screenClass, consentGeneration = token.generation)
     }
 
     fun resetScreenDedup() {
@@ -677,7 +727,7 @@ internal class GrovsManager(
     }
 
     suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
-        if (!grovsContext.settings.sdkEnabled) {
+        if (grovsContext.consent.workToken(configuration) == null) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Payment events cannot be sent.")
             return
         }
@@ -695,6 +745,10 @@ internal class GrovsManager(
 
             referrerClient.startConnection(object : InstallReferrerStateListener {
                 override fun onInstallReferrerSetupFinished(responseCode: Int) {
+                    if (!continuation.isActive) {
+                        referrerClient.endConnection()
+                        return
+                    }
                     DebugLogger.instance.log(LogLevel.INFO, "Got response from InstallReferrer: $responseCode")
                     when (responseCode) {
                         InstallReferrerClient.InstallReferrerResponse.OK -> {
@@ -778,8 +832,10 @@ internal class GrovsManager(
             val pushToken = pushToken
 
             val result = grovsService.updateAttributes(identifier = identifier, attributes = attributes, pushToken = pushToken)
-            if (result is LSResult.Success && revision == attributesRevision && consent.isCurrent(token)) {
-                shouldUpdateAttributes = false
+            synchronized(this@GrovsManager) {
+                if (result is LSResult.Success && revision == attributesRevision && consent.isCurrent(token)) {
+                    shouldUpdateAttributes = false
+                }
             }
         }
     }

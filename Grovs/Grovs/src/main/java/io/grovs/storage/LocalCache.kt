@@ -14,6 +14,12 @@ class LocalCache(val context: Context) : ILocalCache {
         private const val GROVS_CLIPBOARD_FLOW_PENDING = "grovs_clipboard_flow_pending"
     }
 
+    /** Stage launch counters in the same preference transaction as the launch events. */
+    internal fun stageLaunch(editor: android.content.SharedPreferences.Editor, opens: Int, timestamp: InstantCompat) {
+        editor.putInt(GROVS_NUMBER_OF_OPENS, opens)
+        editor.putString(GROVS_LAST_START_TIMESTAMP, timestamp.toString())
+    }
+
     override var numberOfOpens:Int
         set(value) {
             val editor = preferences.edit()

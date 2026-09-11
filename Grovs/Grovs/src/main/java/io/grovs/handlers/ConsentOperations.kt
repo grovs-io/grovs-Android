@@ -7,6 +7,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -125,7 +128,7 @@ private fun requireNoJob(context: CoroutineContext) {
  */
 internal suspend fun ConsentController.workToken(configuration: ConsentConfiguration): ConsentToken? {
     val inherited = currentConsentToken()
-    if (inherited != null) return inherited.takeIf { isCurrent(it) }
+    if (inherited != null) return inherited.takeIf { it.configuration === configuration && isCurrent(it) }
     return tryAcquire(configuration)
 }
 
@@ -136,4 +139,27 @@ internal inline fun <T> CommitPermit.use(block: (CommitPermit) -> T): T {
     } finally {
         close()
     }
+}
+
+/** A storage-only finalization already admitted before revocation. Nested writes share its permit. */
+internal class ConsentCommit(val permit: CommitPermit) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<ConsentCommit>
+}
+
+internal suspend fun <T> CommitPermit.finish(block: suspend () -> T): T =
+    use { withContext(NonCancellable + token + ConsentCommit(this)) { block() } }
+
+internal suspend fun ConsentController.storeIfConsented(
+    configuration: ConsentConfiguration,
+    block: suspend () -> Unit,
+): Boolean {
+    val admitted = currentCoroutineContext()[ConsentCommit]?.permit
+    if (admitted != null && admitted.token.configuration === configuration) {
+        block()
+        return true
+    }
+    val token = workToken(configuration) ?: return false
+    val permit = tryAdmitCommit(token, CommitKind.STORAGE_TRANSACTION) ?: return false
+    permit.finish(block)
+    return true
 }

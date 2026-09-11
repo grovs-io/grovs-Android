@@ -17,7 +17,7 @@ class GrovsSettings {
     var useTestEnvironment: Boolean = false
 
     /// Consent gate. In memory only: every process starts from the value passed to configure().
-    /// While false nothing is authenticated, resolved, written or sent.
+    /// While false no new collection or request is admitted. Previously admitted local commits may finish.
     /// Reads the consent controller. Writing false revokes consent (every operation admitted so far
     /// stays invalid, even after a later enable); writing true starts a new consent generation.
     /// Writing the current value does nothing.

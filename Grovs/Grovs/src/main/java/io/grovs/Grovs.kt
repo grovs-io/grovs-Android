@@ -15,6 +15,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
 import io.grovs.handlers.ClipboardHandler
+import io.grovs.handlers.CommitKind
+import io.grovs.handlers.finish
 import io.grovs.handlers.ConsentRevokedException
 import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.ConsentTransition
@@ -38,6 +40,7 @@ import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -144,7 +147,7 @@ public class Grovs: ActivityProvider {
          * Configures Grovs with custom link hosts for clipboard-assisted deferred deep linking.
          * - clipboardDomains: hosts your links are served from (e.g. `["links.example.com"]`).
          *   `*.sqd.link` and `*.grovs.link` hosts are always accepted; content on any other host is
-         *   never read or sent.
+         *   never sent for matching. Host validation occurs after reading clipboard text.
          */
         fun configure(
             application: Application,
@@ -190,8 +193,8 @@ public class Grovs: ActivityProvider {
         }
 
         /// Toggles SDK consent at runtime.
-        /// - Parameter enabled: `false` stops collection and sending immediately; queued events
-        ///   stay on the device. `true` authenticates if the SDK is not authenticated yet (which
+        /// - Parameter enabled: `false` rejects new work and cancels outstanding operations;
+        ///   queued events stay on the device and accepted local bookkeeping may finish. `true` authenticates if the SDK is not authenticated yet (which
         ///   records install/open once), or otherwise sends what was held. Not persisted.
         fun setSDK(enabled: Boolean) {
             instance.setSDK(enabled)
@@ -488,15 +491,15 @@ public class Grovs: ActivityProvider {
      * fragment tree once to find the visible leaf.
      */
     private fun scheduleScreenResolution(activity: Activity) {
-        if (grovsManager == null) return
-        if (!grovsContext.settings.autoTrackScreenViews || !grovsContext.settings.sdkEnabled) return
-
-        val job = GlobalScope.launch(Dispatchers.Main) {
+        val manager = grovsManager ?: return
+        if (!grovsContext.settings.autoTrackScreenViews) return
+        val token = grovsContext.consent.tryAcquire(manager.configuration) ?: return
+        val job = grovsContext.consent.launchOperation(token, context = Dispatchers.Main) {
             val lifecycleOwner = activity as? LifecycleOwner
             if (lifecycleOwner != null &&
                 !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
             ) {
-                return@launch
+                return@launchOperation
             }
             val leaf = (activity as? FragmentActivity)
                 ?.supportFragmentManager
@@ -508,9 +511,9 @@ public class Grovs: ActivityProvider {
             val screenClass = leaf?.name ?: activity.javaClass.name
 
             withContext(grovsContext.serialDispatcher) {
-                grovsManager?.autoTrackScreen(screenName, screenClass)
+                manager.autoTrackScreen(screenName, screenClass)
             }
-        }
+        } ?: return
         pendingScreenResolutionJobs.put(activity, job)?.cancel()
         // Fires immediately if the job already finished, so the map cannot leak completed jobs.
         job.invokeOnCompletion { pendingScreenResolutionJobs.remove(activity, job) }
@@ -563,6 +566,7 @@ public class Grovs: ActivityProvider {
             // App moved to the foreground
             DebugLogger.instance.log(LogLevel.INFO, "App is in the foreground")
 
+            grovsContext.isForeground = true
             val previousSession = grovsContext.sessionId
             grovsContext.rotateSessionIfNeeded()
             val sessionRotated = grovsContext.sessionId != previousSession
@@ -582,6 +586,7 @@ public class Grovs: ActivityProvider {
         private fun onAppBackgrounded() {
             // App moved to the background
             DebugLogger.instance.log(LogLevel.INFO, "App is in the background")
+            grovsContext.isForeground = false
             grovsContext.markBackgrounded()
             grovsManager?.onAppBackgrounded()
         }
@@ -642,17 +647,16 @@ public class Grovs: ActivityProvider {
         clipboardDomains: List<String>?,
         enabled: Boolean,
     ) {
+        this.grovsContext.consent.retireConfiguration(enabled = enabled)
+        this.grovsContext.requiresAuthentication = true
+        this.grovsContext.authenticatedConfiguration = null
+        this.grovsContext.grovsId = null
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
         this.grovsContext.settings.baseURL = baseURL
         this.grovsContext.settings.autoTrackScreenViews = autoTrackScreenViews
         this.grovsContext.settings.clipboardDomains = ClipboardHandler.normalizeDomains(clipboardDomains)
-        // Always a new consent configuration, even for the same key: everything owned by the previous
-        // one (its tokens, registered operations and lifetime scope) is retired, and the managers
-        // built below belong to the new one.
-        this.grovsContext.consent.retireConfiguration(enabled = enabled)
-
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
         // A job chained off the previous manager must not keep retrying against a manager that is
@@ -671,7 +675,7 @@ public class Grovs: ActivityProvider {
             apiKey = apiKey,
             activityProvider = this)
 
-        checkConfiguration()
+        checkConfiguration(awaiting = grovsContext.consent.pendingCommits())
         // registerActivityLifecycleCallbacks adds to a list, so registering on every configure()
         // would duplicate lifecycle callbacks (and double-report screen views).
         application.unregisterActivityLifecycleCallbacks(applicationLifecycleObserver)
@@ -683,18 +687,37 @@ public class Grovs: ActivityProvider {
         // One atomic transition: a repeated value changes nothing and schedules nothing. Revocation
         // invalidates every admitted operation synchronously and cancels them off this thread, so
         // this returns promptly however slow an operation's cancellation turns out to be.
+        val manager = grovsManager
+        val cutoff = InstantCompat.now()
+        // Reserve storage-only closure before revocation; the next enable waits for this permit.
+        val endingSegment = if (!enabled) manager?.let { m ->
+            consent.tryAcquire(m.configuration)?.let { consent.tryAdmitCommit(it, CommitKind.STORAGE_TRANSACTION) }
+        } else null
         val transition = if (enabled) consent.enable() else consent.revoke()
-        if (!transition.changed) return
+        if (!transition.changed) {
+            endingSegment?.close()
+            return
+        }
         DebugLogger.instance.log(LogLevel.INFO, "SDK setEnabled to: $enabled")
 
-        // Revocation needs nothing more here: every admitted operation, the authentication job
-        // included, is registered with the controller and cancelled by the transition itself.
-        if (!enabled) return
+        // The controller owns cancellation. Finish only the engagement bookkeeping admitted above.
+        if (!enabled) {
+            if (endingSegment != null && manager != null) {
+                val authentication = authenticationJob
+                manager.configuration.scope.launch(NonCancellable + grovsContext.serialDispatcher) {
+                    endingSegment.finish {
+                        authentication?.join()
+                        manager.onDisabled(cutoff)
+                    }
+                }
+            }
+            return
+        }
 
         // Resume work waits for the previous generation's cleanup - including any launch commit
         // admitted just before the revocation - so it cannot duplicate what that commit is finishing.
         val priorWork = (transition as ConsentTransition.Enabled).priorWork
-        val manager = grovsManager ?: return
+        if (manager == null) return
         if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
             consent.launchOperation(manager.configuration, context = grovsContext.serialDispatcher) {
                 priorWork.join()
@@ -798,7 +821,9 @@ public class Grovs: ActivityProvider {
             }
 
             val token = explicitToken(manager) ?: run {
-                listener.onLinkGenerated(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR))
+                (lifecycleOwner?.lifecycleScope ?: GlobalScope).launch(Dispatchers.Main) {
+                    listener.onLinkGenerated(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_GENERATION_ERROR))
+                }
                 return
             }
             val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
@@ -897,7 +922,9 @@ public class Grovs: ActivityProvider {
             }
 
             val token = explicitToken(manager) ?: run {
-                listener.onLinkDetails(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR))
+                (lifecycleOwner?.lifecycleScope ?: GlobalScope).launch(Dispatchers.Main) {
+                    listener.onLinkDetails(null, GrovsException(CONSENT_REJECTED, GrovsErrorCode.LINK_DETAILS_ERROR))
+                }
                 return
             }
             val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
@@ -965,9 +992,8 @@ public class Grovs: ActivityProvider {
 
     fun setGlobalTags(tags: List<String>? = null) {
         // globalTags is confined to serialDispatcher and unsynchronized, so it must be written there.
-        GlobalScope.launch(grovsContext.serialDispatcher) {
-            grovsManager?.setGlobalTags(tags)
-        }
+        val manager = grovsManager ?: return
+        manager.configuration.scope.launch(grovsContext.serialDispatcher) { manager.setGlobalTags(tags) }
     }
 
     fun trackScreenView(screenName: String, properties: Map<String, Any>? = null) {
@@ -984,10 +1010,8 @@ public class Grovs: ActivityProvider {
 
     fun setScreenAliases(aliases: Map<String, String>) {
         // ScreenTracker.aliases is confined to serialDispatcher; the backend sync needs authentication.
-        GlobalScope.launch(grovsContext.serialDispatcher) {
-            authenticationJob?.join()
-            grovsManager?.setScreenAliases(aliases)
-        }
+        val manager = grovsManager ?: return
+        manager.configuration.scope.launch(grovsContext.serialDispatcher) { manager.setScreenAliases(aliases) }
     }
 
     fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat? = InstantCompat.now()) {
@@ -1150,6 +1174,7 @@ public class Grovs: ActivityProvider {
                     // example a configure(enabled = false) job that raced setSDK(true) flipping the
                     // flag before it ran). Re-authenticating here would record a second launch.
                     if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) {
+                        manager.onEnabled()
                         return@launchOperation
                     }
                     val response = try {

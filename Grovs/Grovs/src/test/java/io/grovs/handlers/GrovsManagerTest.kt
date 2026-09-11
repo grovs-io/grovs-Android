@@ -1700,4 +1700,23 @@ class GrovsManagerTest {
         coVerify(exactly = 0) { mockGrovsService.clipboardStatus() }
         manager.close()
     }
+    @Test
+    fun `revoked install referrer callback cannot send or consume the referrer after re-enable`() = runTest {
+        servePlayInstallReferrer(referrerUrl)
+        val manager = clipboardManager(ClipboardRig())
+        manager.attributionScope = backgroundScope
+        try {
+            val lookup = async { manager.handleIntent(Intent(), delayEvents = true) }
+            runCurrent()
+            grovsContext.settings.sdkEnabled = false
+            grovsContext.settings.sdkEnabled = true
+            deliverServiceConnection()
+            runCurrent()
+            assertNull(lookup.await())
+            coVerify(exactly = 0) { mockGrovsService.payloadFor(any()) }
+            coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(any()) }
+            assertNull(context.getSharedPreferences("grovs_prefs", Context.MODE_PRIVATE).getString("last_referrer", null))
+        } finally { manager.close() }
+    }
+
 }

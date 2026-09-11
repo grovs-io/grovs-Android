@@ -30,6 +30,13 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
 
     @Volatile
     var attributes: Map<String, Any>? = null
+    @Volatile
+    internal var isForeground: Boolean = false
+    @Volatile
+    internal var requiresAuthentication: Boolean = false
+    @Volatile
+    internal var authenticatedConfiguration: ConsentConfiguration? = null
+
     var lastSeen: InstantCompat? = null
 
     /// The current analytics session. Attached to every event, system and custom.

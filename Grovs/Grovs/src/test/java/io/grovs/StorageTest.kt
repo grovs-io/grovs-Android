@@ -30,7 +30,7 @@ class StorageTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        context.getSharedPreferences("grovs_storage", Context.MODE_PRIVATE)
+        context.getSharedPreferences("GrovsStorage", Context.MODE_PRIVATE)
             .edit()
             .clear()
             .commit()
@@ -174,4 +174,21 @@ class StorageTest {
         val second = io.grovs.storage.LocalCache(context)
         assertEquals(true, second.clipboardFlowPending)
     }
+    @Test
+    fun `launch records and counters persist together across storage instances`() = kotlinx.coroutines.test.runTest {
+        val storage = io.grovs.storage.EventsStorage(context)
+        storage.recordLaunch(localCache, null, null, "session-one")
+        val first = storage.getEvents()
+        assertEquals(1, first.count { it.event == io.grovs.model.EventType.INSTALL })
+        assertEquals(1, first.count { it.event == io.grovs.model.EventType.APP_OPEN })
+        assertEquals(1, LocalCache(context).numberOfOpens)
+        assertEquals(first.first().createdAt, LocalCache(context).lastStartTimestamp)
+        val next = io.grovs.storage.EventsStorage(context)
+        next.recordLaunch(LocalCache(context), null, null, "session-two")
+        assertEquals(1, next.getEvents().count { it.event == io.grovs.model.EventType.INSTALL })
+        assertEquals(2, next.getEvents().count { it.event == io.grovs.model.EventType.APP_OPEN })
+        assertEquals(2, LocalCache(context).numberOfOpens)
+    }
+
+
 }

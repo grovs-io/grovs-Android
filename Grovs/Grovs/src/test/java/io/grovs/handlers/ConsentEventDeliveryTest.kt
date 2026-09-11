@@ -1,5 +1,12 @@
 package io.grovs.handlers
 
+import java.util.concurrent.Executor
+import retrofit2.Response
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.awaitCancellation
+import io.grovs.service.GrovsService
+import io.grovs.api.GrovsApi
 import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.model.BatchEventsResponse
@@ -47,6 +54,8 @@ class ConsentEventDeliveryTest {
     private lateinit var storage: ICustomEventsStorage
     private lateinit var grovsContext: GrovsContext
     private lateinit var manager: CustomEventsManager
+
+    private val app: android.app.Application get() = RuntimeEnvironment.getApplication()
 
     private val stored = mutableListOf<CustomEvent>()
     private val sentBatches = CopyOnWriteArrayList<List<String>>()
@@ -253,44 +262,42 @@ class ConsentEventDeliveryTest {
     // ==================== Q07 ====================
 
     @Test
-    fun `Q07 repeated grants leave one active flush timer, and an old generation's tick cannot send`() = runTest {
-        val timed = CustomEventsManager(
-            context = context,
-            grovsContext = grovsContext,
-            grovsService = service,
-            customEventsStorage = storage,
-            timerDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler),
-            flushIntervalMs = 1_000L,
-            startFlushTimer = true,
-        )
-        try {
-            timed.track("tick", null, null)
-            // Never advanceUntilIdle here: the flush timer is an endless loop, so "idle" never
-            // arrives and virtual time would run away. Only bounded advances.
-            runCurrent()
-
-            grovsContext.settings.sdkEnabled = false
-            grovsContext.settings.sdkEnabled = true
-            grovsContext.settings.sdkEnabled = true // repeated grant: no second timer
-
-            val before = sentBatches.size
-            testScheduler.advanceTimeBy(1_100L)
-            runCurrent()
-            val afterOneInterval = sentBatches.size - before
-
-            assertTrue(
-                "one interval must produce at most one batch, saw $afterOneInterval",
-                afterOneInterval <= 1,
-            )
-
-            testScheduler.advanceTimeBy(1_100L)
-            runCurrent()
-            assertTrue(
-                "a second interval must not produce a burst either, saw ${sentBatches.size - before}",
-                sentBatches.size - before <= 2,
-            )
-        } finally {
-            timed.close()
+    fun periodicDeliverySurvivesRevocationDuringSend() = runTest {
+        val context = GrovsContext(StandardTestDispatcher(testScheduler)).also { it.grovsId = "device" }
+        context.useConsentController(ConsentController(cleanupExecutor = Executor { it.run() }))
+        val api = mockk<GrovsApi>()
+        var sends = 0
+        coEvery { api.addEventsBatch(any()) } coAnswers {
+            sends++
+            if (sends == 1) awaitCancellation()
+            Response.success(BatchEventsResponse(1, 0))
         }
+        val service = GrovsService(app, "key", context)
+        GrovsService::class.java.getDeclaredField("grovsApi").apply { isAccessible = true; set(service, api) }
+        val queued = mutableListOf<CustomEvent>()
+        val storage = mockk<ICustomEventsStorage>(relaxed = true)
+        coEvery { storage.addEvent(any()) } answers { queued.add(firstArg()); Unit }
+        coEvery { storage.getEvents() } answers { queued.toList() }
+        coEvery { storage.removeEvents(any()) } answers { queued.removeAll(firstArg<List<CustomEvent>>().toSet()); Unit }
+        val manager = CustomEventsManager(app, context, service, storage,
+            timerDispatcher = StandardTestDispatcher(testScheduler), flushIntervalMs = 1_000)
+        try {
+            manager.track("before_disable", null, null)
+            runCurrent()
+            advanceTimeBy(1_001)
+            runCurrent()
+            assertEquals("Positive control: first timer send started", 1, sends)
+            context.settings.sdkEnabled = false
+            runCurrent()
+            context.settings.sdkEnabled = true
+            manager.flush() // Same immediate flush performed by GrovsManager.onEnabled.
+            assertEquals(2, sends)
+            assertTrue(queued.isEmpty())
+            manager.track("after_enable", null, null)
+            advanceTimeBy(3_001)
+            runCurrent()
+            assertEquals("The periodic timer must still deliver new events after re-enable", 3, sends)
+            assertTrue(queued.isEmpty())
+        } finally { manager.close(); runCurrent() }
     }
 }

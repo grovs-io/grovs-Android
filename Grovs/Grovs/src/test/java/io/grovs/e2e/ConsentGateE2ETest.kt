@@ -85,8 +85,17 @@ class ConsentGateE2ETest {
         E2ETestUtils.runWithLooperPumping(1_000) { E2ETestUtils.getAuthenticationJob()?.join() }
 
         assertNull("No request may leave the device while disabled", server.takeRequest(1, TimeUnit.SECONDS))
+        assertTrue("Disabled startup must not persist clipboard or telemetry state",
+            application.getSharedPreferences(EventsStorage.GROVS_STORAGE, 0).all.isEmpty())
         assertEquals(emptyList<String>(), storedEventTypes())
         assertEquals(GrovsManager.AuthenticationState.UNAUTHENTICATED, manager().authenticationState)
+        listOf("appDetails\$delegate", "appDetailsHelperForIntent\$delegate").forEach { fieldName ->
+            val details = GrovsManager::class.java.getDeclaredField(fieldName).run {
+                isAccessible = true
+                get(manager()) as Lazy<*>
+            }
+            assertFalse("Disabled construction must not read device identifiers: $fieldName", details.isInitialized())
+        }
     }
 
     @Test

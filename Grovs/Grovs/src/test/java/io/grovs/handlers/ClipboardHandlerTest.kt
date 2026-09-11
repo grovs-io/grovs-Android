@@ -61,10 +61,12 @@ class ClipboardHandlerTest {
     // ==================== Arming ====================
 
     @Test
-    fun `fresh install arms the flow`() {
+    fun `fresh install is eligible without writing until enabled startup arms it`() {
         cache.numberOfOpens = 0
         val h = handler()
         assertTrue(h.isPending)
+        assertFalse(cache.clipboardFlowPending)
+        h.armIfNeeded()
         assertTrue(cache.clipboardFlowPending)
     }
 
@@ -78,7 +80,7 @@ class ClipboardHandlerTest {
 
     @Test
     fun `pending flag persists across a relaunch`() {
-        handler()                       // fresh install arms it
+        handler().armIfNeeded()          // enabled startup persists eligibility
         cache.numberOfOpens = 1         // opens counter moved on
         val relaunched = handler()      // same cache, new instance
         assertTrue(relaunched.isPending)

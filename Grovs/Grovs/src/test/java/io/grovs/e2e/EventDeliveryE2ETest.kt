@@ -144,4 +144,59 @@ class EventDeliveryE2ETest {
         assertNull("The periodic worker must honor disable, not only track()", awaitTimerRequest(1_000))
         assertEquals(1, storage.getEvents().size)
     }
+    @Test
+    fun `periodic HTTP delivery recovers when consent cancels a send in flight`() = runBlocking {
+        manager.close()
+        val clock = TestScope()
+        manager = CustomEventsManager(app, context, GrovsService(app, "test-key", context), storage,
+            timerDispatcher = StandardTestDispatcher(clock.testScheduler), flushIntervalMs = 1_000)
+        fun awaitRequest(): okhttp3.mockwebserver.RecordedRequest {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (System.nanoTime() < deadline) {
+                clock.runCurrent()
+                server.takeRequest(10, TimeUnit.MILLISECONDS)?.let { return it }
+            }
+            throw AssertionError("Timer did not send an HTTP request")
+        }
+        fun awaitIdle(condition: () -> Boolean) {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!condition() && System.nanoTime() < deadline) {
+                clock.runCurrent()
+                Thread.sleep(5)
+            }
+            assertTrue("Delivery did not finish", condition())
+        }
+        try {
+            server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            manager.track("before_revocation", null, null)
+            clock.runCurrent()
+            clock.advanceTimeBy(1_001)
+            val first = awaitRequest()
+            val originalId = JSONObject(first.body.readUtf8()).getJSONArray("events").getJSONObject(0).getString("event_id")
+            Grovs.setSDK(false)
+            val cleanup = context.consent.pendingWork()
+            awaitIdle { cleanup.isCompleted }
+            assertEquals(1, storage.getEvents().size)
+            assertEquals(1, server.requestCount)
+
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+            Grovs.setSDK(true)
+            clock.advanceTimeBy(1_001)
+            val retry = awaitRequest()
+            assertEquals(originalId, JSONObject(retry.body.readUtf8()).getJSONArray("events").getJSONObject(0).getString("event_id"))
+            awaitIdle { runBlocking { storage.getEvents().isEmpty() } }
+
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
+            manager.track("after_recovery", null, null)
+            clock.advanceTimeBy(1_001)
+            val next = awaitRequest()
+            assertEquals("after_recovery", JSONObject(next.body.readUtf8()).getJSONArray("events").getJSONObject(0).getString("event_name"))
+            awaitIdle { runBlocking { storage.getEvents().isEmpty() } }
+            assertEquals("One cancelled send, its retry, then the new event", 3, server.requestCount)
+        } finally {
+            manager.close()
+            awaitIdle { context.consent.registrationCount() == 0 }
+        }
+    }
+
 }

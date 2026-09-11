@@ -136,7 +136,7 @@ class EventsManagerTest {
     fun `EventsManager onAppBackgrounded sets resignTimestamp in localCache`() {
         eventsManager.onAppBackgrounded()
 
-        verify { mockLocalCache.resignTimestamp = any() }
+        verify(timeout = 1_000) { mockLocalCache.resignTimestamp = any() }
     }
 
     @Test

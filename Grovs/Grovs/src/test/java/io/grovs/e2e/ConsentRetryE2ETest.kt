@@ -265,7 +265,9 @@ class ConsentRetryE2ETest {
 
         backend.phase = "explicit"
         Grovs.pushToken = "push-2"
-        pumpUntil("the explicit update") { backend.count(attributes, "explicit") == 1 }
+        pumpUntil("the explicit update") {
+            backend.seen.any { it.path == attributes && JSONObject(it.body).optString("push_token") == "push-2" }
+        }
         driver.advanceTimeBy(intervals)
         pump()
         assertEquals(1, backend.count(attributes, "explicit"))

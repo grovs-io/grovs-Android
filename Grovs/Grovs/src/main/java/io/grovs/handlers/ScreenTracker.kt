@@ -16,6 +16,7 @@ internal class ScreenTracker(
 ) {
 
     private var aliases: Map<String, String> = emptyMap()
+    private var lastConsentGeneration: Long? = null
     private var lastDedupKey: String? = null
     private var lastScreenAt: InstantCompat? = null
 
@@ -57,7 +58,12 @@ internal class ScreenTracker(
         rawName: String,
         properties: Map<String, Any>? = null,
         dedupKey: String? = null,
+        consentGeneration: Long? = null,
     ) {
+        if (consentGeneration != null && consentGeneration != lastConsentGeneration) {
+            resetDedup()
+            lastConsentGeneration = consentGeneration
+        }
         if (shouldSkip(rawName)) return
 
         val resolved = aliases[rawName] ?: rawName

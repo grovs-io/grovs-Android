@@ -1,7 +1,6 @@
 package io.grovs.handlers
 
 import android.content.Context
-import com.google.gson.annotations.SerializedName
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
@@ -20,15 +19,12 @@ import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.isValidUrl
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.time.Duration
-import java.time.Instant
 
 class EventsManager(
     val context: Context, 
@@ -67,21 +63,45 @@ class EventsManager(
     }
 
     override suspend fun onAppForegrounded() {
-        flush()
-        eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
+        val token = grovsContext.consent.workToken(configuration) ?: return
+        withContext(token) {
+            flush()
+            grovsContext.consent.storeIfConsented(configuration) {
+                eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
+            }
+        }
     }
 
     override fun onAppBackgrounded() {
-        localCache.resignTimestamp = InstantCompat.now()
+        val consent = grovsContext.consent
+        val token = consent.tryAcquire(configuration) ?: return
+        val permit = consent.tryAdmitCommit(token, CommitKind.STORAGE_TRANSACTION) ?: return
+        val timestamp = InstantCompat.now()
         linkForFutureActions = null
+        configuration.scope.launch(NonCancellable + grovsContext.serialDispatcher) {
+            permit.finish {
+                localCache.resignTimestamp = timestamp
+                closeEngagementAt(timestamp)
+            }
+        }
+    }
 
-        val sessionId = grovsContext.sessionId
-        GlobalScope.launch {
-            eventsStorage.markTimeSpentNode(startingNode = false, endingNode = true, link = null, sessionId = sessionId)
+    internal suspend fun closeEngagementAt(timestamp: InstantCompat) {
+        if (eventsStorage is EventsStorage) eventsStorage.closeEngagementAt(timestamp)
+        else eventsStorage.markTimeSpentNode(startingNode = false, endingNode = true, link = null, sessionId = grovsContext.sessionId)
+    }
+
+    internal suspend fun resumeEngagement() {
+        grovsContext.consent.storeIfConsented(configuration) {
+            eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
         }
     }
 
     override suspend fun logAppLaunchEvents() {
+        if (eventsStorage is EventsStorage && localCache is LocalCache) {
+            eventsStorage.recordLaunch(localCache, grovsContext.lastSeen, linkForFutureActions, grovsContext.sessionId)
+            return
+        }
         addInitialEvents()
         addOpenEvent()
         eventsStorage.markTimeSpentNode(startingNode = true, link = linkForFutureActions, sessionId = grovsContext.sessionId)
@@ -95,27 +115,28 @@ class EventsManager(
             newEvent.link = linkForFutureActions
         }
 
-        eventsStorage.addEvent(newEvent)
-        flush()
+        if (grovsContext.consent.storeIfConsented(configuration) { eventsStorage.addEvent(newEvent) }) flush()
     }
 
     /// Logs an in app payment event and sends it to the backend.
     /// - Parameter event: The event to log
     override suspend fun logInAppPurchase(originalJson: String) {
+        val token = grovsContext.consent.workToken(configuration) ?: return
         val events = PaymentEvent.fromOriginalJson(originalJson = originalJson)
 
         if (events.isEmpty()) {
             DebugLogger.instance.log(LogLevel.ERROR, "The provided originalJson seems to be invalid. Please use the string provided by billing library purchase.originalJson")
         }
 
-        for (event in events) {
-            logPurchase(event = event.withSessionId(grovsContext.sessionId))
+        withContext(token) {
+            for (event in events) logPurchase(event = event.withSessionId(grovsContext.sessionId))
         }
     }
 
     /// Logs an in app payment event and sends it to the backend.
     /// - Parameter event: The event to log
     override suspend fun logCustomPurchase(type: PaymentEventType, priceInCents: Int, currency: String, productId: String, startDate: InstantCompat?) {
+        val token = grovsContext.consent.workToken(configuration) ?: return
         val applicationId = AppDetailsHelper(context).applicationId
         val event = PaymentEvent(eventType = type,
             appId = applicationId,
@@ -127,7 +148,7 @@ class EventsManager(
             sessionId = grovsContext.sessionId
         )
 
-        logPurchase(event = event)
+        withContext(token) { logPurchase(event = event) }
     }
 
     override fun setLinkForFutureEvents(link: String?) {
@@ -142,7 +163,8 @@ class EventsManager(
     }
 
     override suspend fun completeLinkResolution(link: String, delayEvents: Boolean) {
-        linkForFutureActions = link
+        val token = grovsContext.consent.workToken(configuration)
+            ?: kotlinx.coroutines.currentCoroutineContext()[ConsentCommit]?.permit?.token ?: return
         // Keep the gate closed while storage is updated. A background flush must not take INSTALL
         // between releasing the hold and applying the resolved link.
         //
@@ -153,14 +175,21 @@ class EventsManager(
         // before or fully after any in-flight flush's removeEvents call.
         try {
             flushMutex.withLock {
-                addLinkToEvents(link)
-                addLinkToPaymentEvents(link)
-                eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
+                grovsContext.consent.storeIfConsented(configuration) {
+                    linkForFutureActions = link
+                    addLinkToEvents(link)
+                    addLinkToPaymentEvents(link)
+                    eventsStorage.markTimeSpentNode(startingNode = false, link = link, sessionId = grovsContext.sessionId)
+                }
             }
         } finally {
             // Outside the lock: releaseLinkResolution() calls flush(), which takes flushMutex again,
             // and Mutex is not reentrant.
-            releaseLinkResolution(delayEvents)
+            setEventsHeld(false)
+            allowedToSendToBackend = !delayEvents
+            if (kotlinx.coroutines.currentCoroutineContext()[ConsentCommit] == null && grovsContext.consent.isCurrent(token)) {
+                releaseLinkResolution(delayEvents)
+            }
         }
     }
 
@@ -188,8 +217,7 @@ class EventsManager(
             newEvent.link = linkForFutureActions
         }
 
-        paymentQueue.add(newEvent)
-        flush()
+        if (grovsContext.consent.storeIfConsented(configuration) { paymentQueue.add(newEvent) }) flush()
     }
 
     /// Adds initial events such as install or reactivation events.
@@ -275,9 +303,19 @@ class EventsManager(
         eventsStorage.addOrReplaceEvents(newEvents)
     }
 
-    override suspend fun flush() = flushMutex.withLock {
-        sendSystemEventsToBackend()
-        sendPaymentEventsToBackend()
+    override suspend fun flush() {
+        val consent = grovsContext.consent
+        val token = consent.workToken(configuration) ?: return
+        try {
+            consent.runOperation(token) {
+                flushMutex.withLock {
+                    sendSystemEventsToBackend()
+                    sendPaymentEventsToBackend()
+                }
+            }
+        } catch (_: ConsentRevokedException) {
+            // The queue remains available to a new consent operation.
+        }
     }
 
     /// Chunks of BATCH_SIZE. An accepted chunk leaves storage; the first failed chunk ends this

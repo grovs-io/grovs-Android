@@ -16,14 +16,16 @@ internal class CustomEventsStorage(context: Context) : ICustomEventsStorage {
     private val preferences =
         context.getSharedPreferences(EventsStorage.GROVS_STORAGE, Context.MODE_PRIVATE)
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
 
     private val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
         LSJsonInstantCompatTypeAdapterFactory()
     ).create()
 
     companion object {
+        // All instances share a preference file; serialize read/modify/write across instances too.
+        @OptIn(ExperimentalCoroutinesApi::class)
+        private val storageSerialDispatcher = Dispatchers.IO.limitedParallelism(1)
+
         private const val STORED_CUSTOM_EVENTS = "stored_custom_events"
     }
 

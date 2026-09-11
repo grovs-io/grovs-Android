@@ -71,17 +71,24 @@ internal class ClipboardHandler(
     /** Kept across a failed match so a retry never re-reads the clipboard (and never re-shows the toast). */
     private var cachedClipboardString: String? = null
 
-    init {
-        if (localCache.numberOfOpens == 0) {
+    private val freshInstall = localCache.numberOfOpens == 0
+    private var resolved = false
+    private var armed = false
+
+    /** Construction is read-only; enabled launch bookkeeping persists eligibility before opens increments. */
+    fun armIfNeeded() {
+        if (freshInstall && !armed && !resolved) {
             localCache.clipboardFlowPending = true
+            armed = true
         }
     }
 
     val isPending: Boolean
-        get() = localCache.clipboardFlowPending
+        get() = !resolved && (freshInstall || localCache.clipboardFlowPending)
 
     /** Ends the flow for the life of this install. The clipboard must never be touched afterwards. */
     fun markResolved() {
+        resolved = true
         localCache.clipboardFlowPending = false
     }
 
@@ -91,6 +98,7 @@ internal class ClipboardHandler(
     ): ClipboardFlowOutcome {
         if (!isCurrent()) return ClipboardFlowOutcome.Superseded
         if (!isPending) return ClipboardFlowOutcome.Resolved
+        armIfNeeded()
         // Re-entry mid-flight (a second onStart) must not release the held INSTALL or stack a valve.
         if (running) return ClipboardFlowOutcome.AlreadyRunning
         running = true
