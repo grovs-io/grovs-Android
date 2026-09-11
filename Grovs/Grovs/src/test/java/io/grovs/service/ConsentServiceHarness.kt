@@ -253,6 +253,13 @@ class ConsentBackend : Closeable {
         object Disconnect : Mode()
         class FailTimes(val remaining: AtomicInteger, val body: String) : Mode()
         class Hold(val gate: CountDownLatch, val body: String) : Mode()
+        class Status(val code: Int, val body: String) : Mode()
+        class StatusTimes(
+            val remaining: AtomicInteger,
+            val code: Int,
+            val body: String,
+            val recoveredBody: String,
+        ) : Mode()
     }
 
     val server = MockWebServer()
@@ -286,6 +293,14 @@ class ConsentBackend : Closeable {
                         mode.gate.await(30, TimeUnit.SECONDS)
                         ok(mode.body)
                     }
+                    is Mode.Status -> MockResponse().setResponseCode(mode.code)
+                        .setHeader("Content-Type", "application/json").setBody(mode.body)
+                    is Mode.StatusTimes -> if (mode.remaining.getAndDecrement() > 0) {
+                        MockResponse().setResponseCode(mode.code)
+                            .setHeader("Content-Type", "application/json").setBody(mode.body)
+                    } else {
+                        ok(mode.recoveredBody)
+                    }
                 }
             }
         }
@@ -304,6 +319,16 @@ class ConsentBackend : Closeable {
 
     fun failThenRespond(path: String, failures: Int, body: String) {
         routes[path] = Mode.FailTimes(AtomicInteger(failures), body)
+    }
+
+    /** An HTTP error response. Unlike [fail] this is a complete round trip. */
+    fun failWithStatus(path: String, code: Int, body: String = "") {
+        routes[path] = Mode.Status(code, body)
+    }
+
+    /** Fails [times] times, then answers [recoveredBody]: a backend that recovers. */
+    fun failWithStatusTimes(path: String, times: Int, code: Int, body: String, recoveredBody: String) {
+        routes[path] = Mode.StatusTimes(AtomicInteger(times), code, body, recoveredBody)
     }
 
     /** Holds every request on [path] until the returned gate opens (also opened by [close]). */
