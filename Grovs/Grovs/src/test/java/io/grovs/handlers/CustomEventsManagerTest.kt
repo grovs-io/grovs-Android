@@ -2,6 +2,7 @@ package io.grovs.handlers
 
 import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.grovs.TestFixtures
 import io.grovs.model.BatchEventError
 import io.grovs.model.BatchEventsResponse
 import io.grovs.model.CustomEvent
@@ -24,6 +25,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -141,10 +143,55 @@ class CustomEventsManagerTest {
 
     @Test
     fun `tracked events carry the current link`() = runTest {
-        manager.setLinkForFutureEvents("https://test.link/abc")
+        manager.setLinkForFutureEvents("https://test.link/abc", grovsContext.sessionId)
         manager.track("checkout", null, null)
 
         assertEquals("https://test.link/abc", stored.single().link)
+    }
+
+    @Test
+    fun `a link tagged with an earlier session cannot attribute the current session`() = runTest {
+        val sessionA = grovsContext.sessionId
+        val campaignA = "https://test.link/campaign-a"
+        manager.setLinkForFutureEvents(campaignA, sessionA)
+        manager.track("session_a", null, null)
+
+        TestFixtures.startNewSession(grovsContext)
+        val sessionB = grovsContext.sessionId
+        assertNotEquals(sessionA, sessionB)
+        // The supplied ownership must be respected even if the context changed before the setter.
+        manager.setLinkForFutureEvents(campaignA, sessionA)
+        manager.track("session_b", null, null)
+
+        assertEquals(listOf(sessionA, sessionB), stored.map { it.sessionId })
+        assertEquals(listOf(campaignA, null), stored.map { it.link })
+        coVerify(exactly = 0) { storage.updateEvents(any()) }
+
+        manager.flush()
+        coVerify(exactly = 1) {
+            service.addCustomEvents(match { events ->
+                events.map { it.sessionId to it.link } == listOf(sessionA to campaignA, sessionB to null)
+            })
+        }
+    }
+
+    @Test
+    fun `regranting consent after session rotation does not revive an old campaign`() = runTest {
+        val sessionA = grovsContext.sessionId
+        val campaignA = "https://test.link/campaign-a"
+        manager.setLinkForFutureEvents(campaignA, sessionA)
+        manager.track("before_disable", null, null)
+
+        grovsContext.settings.sdkEnabled = false
+        TestFixtures.startNewSession(grovsContext)
+        assertNotEquals(sessionA, grovsContext.sessionId)
+        manager.track("while_disabled", null, null)
+        grovsContext.settings.sdkEnabled = true
+        manager.track("after_enable", null, null)
+
+        assertEquals(listOf("before_disable", "after_enable"), stored.map { it.eventName })
+        assertEquals(listOf(sessionA, grovsContext.sessionId), stored.map { it.sessionId })
+        assertEquals(listOf(campaignA, null), stored.map { it.link })
     }
 
     @Test
@@ -354,7 +401,7 @@ class CustomEventsManagerTest {
     @Test
     fun `setting a future link does not backfill queued events`() = runTest {
         manager.track("before_link", null, null)
-        manager.setLinkForFutureEvents("https://grovs.io/future")
+        manager.setLinkForFutureEvents("https://grovs.io/future", grovsContext.sessionId)
         manager.track("after_link", null, null)
 
         assertEquals(listOf(null, "https://grovs.io/future"), stored.map { it.link })
@@ -363,15 +410,15 @@ class CustomEventsManagerTest {
 
     @Test
     fun `clearing the link does not touch stored events`() = runTest {
-        val manager = backfillManager()
-        manager.track("checkout_started", null, null)
+        val campaign = "https://grovs.io/future"
+        manager.setLinkForFutureEvents(campaign, grovsContext.sessionId)
+        manager.track("before_clear", null, null)
 
-        manager.setLinkForFutureEvents(null)
-        advanceUntilIdle()
+        manager.setLinkForFutureEvents(null, grovsContext.sessionId)
+        manager.track("after_clear", null, null)
 
         coVerify(exactly = 0) { storage.updateEvents(any()) }
-        assertEquals(null, stored.first { it.eventName == "checkout_started" }.link)
-        manager.close()
+        assertEquals(listOf(campaign, null), stored.map { it.link })
     }
 
     /** A minimal real (non-mock) storage so removal genuinely happens between overlapping flushes. */

@@ -3,6 +3,7 @@ package io.grovs.handlers
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import com.google.gson.Gson
 import io.grovs.FakeClipboard
 import io.grovs.FakeLocalCache
 import io.grovs.TestFixtures
@@ -20,6 +21,7 @@ import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.mockk.*
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -498,7 +500,17 @@ class LinkAttributionTest {
 
     @Test
     fun `old offline events keep their attribution when a new session opens another campaign`() = runTest(timeout = 40.seconds) {
+        verifyOfflineSessionAttribution(campaignA = null)
+    }
+
+    @Test
+    fun `custom events and screens do not inherit the previous session campaign`() = runTest(timeout = 40.seconds) {
+        verifyOfflineSessionAttribution(campaignA = "https://demo.sqd.link/campaign-a")
+    }
+
+    private suspend fun CoroutineScope.verifyOfflineSessionAttribution(campaignA: String?) {
         val rig = Rig(freshInstall = false)
+        val gson = Gson()
         val sessionA = rig.context.sessionId
         val campaignB = "https://demo.sqd.link/campaign-b"
         val started = CompletableDeferred<Unit>()
@@ -508,14 +520,25 @@ class LinkAttributionTest {
         coEvery { rig.service.addPaymentEvent(any()) } returns offline
         coEvery { rig.service.addCustomEvents(any()) } returns offline
         try {
+            if (campaignA != null) {
+                coEvery { rig.service.payloadWithLinkFor(any()) } returns
+                    LSResult.Success(DeeplinkDetails(campaignA, null, null))
+                assertEquals(campaignA, rig.manager.handleIntent(
+                    Intent().setData(Uri.parse(campaignA)), delayEvents = true
+                )?.link)
+            }
             rig.events.logAppLaunchEvents()
             rig.manager.track("old_checkout", null, null)
+            rig.manager.trackScreenView("OldScreen", null)
             rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "old_sku", InstantCompat.now())
             rig.events.onAppForegrounded()
             rig.custom.flush()
             assertTrue(rig.storage.getEvents().any { it.event == EventType.APP_OPEN && it.sessionId == sessionA })
             assertEquals(1, rig.storage.getPaymentEvents().size)
-            assertEquals(1, rig.customStorage.getEvents().size)
+            val oldCustom = rig.customStorage.getEvents()
+            assertEquals(2, oldCustom.size)
+            assertEquals(listOf(campaignA, campaignA), oldCustom.map { it.link })
+            val oldCustomPayloads = oldCustom.map { gson.toJson(it) }
 
             rig.manager.onAppBackgrounded()
             rig.context.markBackgrounded()
@@ -536,7 +559,10 @@ class LinkAttributionTest {
             started.await()
             rig.events.logAppLaunchEvents()
             rig.manager.track("new_checkout", null, null)
+            rig.manager.trackScreenView("NewScreen", null)
             rig.manager.logCustomPurchase(PaymentEventType.BUY, 200, "USD", "new_sku", InstantCompat.now())
+            assertEquals("No campaign from session A may pre-attribute session B",
+                listOf(null, null), rig.customStorage.getEvents().filter { it.sessionId == sessionB }.map { it.link })
 
             val sent = mutableListOf<String>()
             fun record(kind: String, session: String?, link: String?) {
@@ -557,14 +583,20 @@ class LinkAttributionTest {
             }
             coEvery { rig.service.addCustomEvents(any()) } answers {
                 val events = firstArg<List<io.grovs.model.CustomEvent>>()
-                events.forEach { event -> record("custom", event.sessionId, event.link) }
+                events.forEach { event ->
+                    record(if (event.eventName == "screen_view") "screen" else "custom", event.sessionId, event.link)
+                }
                 LSResult.Success(BatchEventsResponse(accepted = events.size, rejected = 0))
             }
             reply.complete(Unit)
             lookup.await()
+            val queued = rig.customStorage.getEvents()
+            assertEquals("Earlier queued events keep every field, including IDs and timestamps",
+                oldCustomPayloads, queued.filter { it.sessionId == sessionA }.map { gson.toJson(it) })
+            assertEquals(listOf(campaignB, campaignB), queued.filter { it.sessionId == sessionB }.map { it.link })
             rig.custom.flush()
-            val expected = listOf("lifecycle", "purchase", "custom").flatMap {
-                listOf("$it|A|null", "$it|B|$campaignB")
+            val expected = listOf("lifecycle", "purchase", "custom", "screen").flatMap {
+                listOf("$it|A|$campaignA", "$it|B|$campaignB")
             }
             assertEquals("A later campaign must not rewrite the offline session", expected.sorted(), sent.sorted())
         } finally {
@@ -574,11 +606,34 @@ class LinkAttributionTest {
         }
     }
 
-
     // ==================== Real-world flows not previously covered ====================
 
     /** The launcher activity's onStart runs again on rotation and whenever the user navigates back to it. */
     private suspend fun GrovsManager.launcherOnStart(intent: Intent) = handleIntent(intent, delayEvents = true, cacheIntent = true)
+
+    @Test
+    fun `brief backgrounding retains the campaign for custom events and screens`() = runTest {
+        val rig = Rig(freshInstall = false)
+        val session = rig.context.sessionId
+        try {
+            assertEquals(directUrl, rig.manager.launcherOnStart(Intent().setData(Uri.parse(directUrl)))?.link)
+            rig.manager.track("before_background", null, null)
+            rig.manager.trackScreenView("BeforeBackground", null)
+
+            rig.manager.onAppBackgrounded()
+            rig.context.markBackgrounded()
+            rig.context.rotateSessionIfNeeded()
+            assertEquals("A brief background does not rotate the session", session, rig.context.sessionId)
+            rig.manager.onAppForegrounded()
+            rig.manager.track("after_background", null, null)
+            rig.manager.trackScreenView("AfterBackground", null)
+
+            val events = rig.customStorage.getEvents()
+            assertEquals(listOf("before_background", "screen_view", "after_background", "screen_view"),
+                events.map { it.eventName })
+            assertEquals(List(4) { session to directUrl }, events.map { it.sessionId to it.link })
+        } finally { rig.manager.close() }
+    }
 
     @Test
     fun `returning to the launcher activity keeps the link for later events`() = runTest {
@@ -616,10 +671,7 @@ class LinkAttributionTest {
             val old = async { rig.manager.launcherOnStart(Intent()) }
             started.await()
 
-            rig.context.markBackgrounded()
-            GrovsContext::class.java.getDeclaredField("backgroundedAt").apply { isAccessible = true }
-                .set(rig.context, InstantCompat.now().minusMillis((GrovsContext.SESSION_TIMEOUT_MINUTES + 1) * 60_000))
-            rig.context.rotateSessionIfNeeded()
+            TestFixtures.startNewSession(rig.context)
             assertNull(rig.manager.launcherOnStart(Intent()))
 
             rig.manager.track("while_pending", null, null)
@@ -652,10 +704,7 @@ class LinkAttributionTest {
             started.await()
 
             // Backgrounded for longer than the session timeout, then brought back.
-            rig.context.markBackgrounded()
-            GrovsContext::class.java.getDeclaredField("backgroundedAt").apply { isAccessible = true }
-                .set(rig.context, InstantCompat.now().minusMillis((GrovsContext.SESSION_TIMEOUT_MINUTES + 1) * 60_000))
-            rig.context.rotateSessionIfNeeded()
+            TestFixtures.startNewSession(rig.context)
             assertNotEquals(firstSession, rig.context.sessionId)
             assertNull(rig.manager.launcherOnStart(Intent()))
             rig.manager.track("before_late_match", null, null)
@@ -665,7 +714,7 @@ class LinkAttributionTest {
             rig.manager.track("after_late_match", null, null)
 
             val links = rig.customStorage.getEvents().filter { it.sessionId == rig.context.sessionId }.map { it.eventName to it.link }
-            assertEquals(links.toString(), 1, links.map { it.second }.distinct().size)
+            assertEquals(listOf("before_late_match" to directUrl, "after_late_match" to directUrl), links)
         } finally { rig.manager.close() }
     }
 }

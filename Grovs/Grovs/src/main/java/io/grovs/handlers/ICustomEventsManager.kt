@@ -18,8 +18,8 @@ internal interface ICustomEventsManager {
     /** Sends up to BATCH_SIZE pending events. Called by the flush timer and by tests. */
     suspend fun flush()
 
-    /** The link attributed to subsequently tracked events. */
-    fun setLinkForFutureEvents(link: String?)
+    /** The link attributed to subsequently tracked events in this session. Null clears the cache. */
+    fun setLinkForFutureEvents(link: String?, sessionId: String)
 
     /** Attributes queued, linkless events only after a link was resolved for this session. */
     suspend fun attributePendingEvents(link: String, sessionId: String)

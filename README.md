@@ -182,6 +182,8 @@ When a link with copy-to-clipboard enabled is opened in the browser, the preview
 
 Install attribution has a single 25-second waiting budget covering install-referrer lookup, fingerprint matching, and clipboard fallback. Queued lifecycle, purchase, and custom events are held during resolution. If the deadline expires, they may upload without attribution; a later match still applies to events that remain queued. A deep link the app was opened with is attributed to new lifecycle and purchase events immediately and takes precedence over a pending launch lookup; a link the backend rejects yields back to that lookup. Custom-event backfill uses only resolved links from the same session.
 
+Custom events and screen views retain a resolved campaign within their current analytics session, including brief trips to the background. Returning to the foreground after more than 30 minutes starts a new session; its events do not inherit the previous campaign. Already queued events keep their original session and attribution.
+
 On that first launch Android 12+ shows its system "pasted from your clipboard" toast once. The check is skipped entirely for projects with no clipboard-enabled link clicks in the last 48h and for devices whose clipboard holds no web URL, so an organic installer on a project with active clipboard links may see the toast once. Content on any host other than your Grovs link hosts is never read or sent.
 
 If your project serves links from a custom domain, list it so the SDK recognizes your links on the clipboard:

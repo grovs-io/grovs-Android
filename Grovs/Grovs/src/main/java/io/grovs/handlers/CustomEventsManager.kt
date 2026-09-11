@@ -37,7 +37,10 @@ internal class CustomEventsManager(
 ) : ICustomEventsManager {
 
     private var globalTags: List<String>? = null
-    private var linkForFutureEvents: String? = null
+    private data class Attribution(val sessionId: String, val link: String)
+
+    @Volatile
+    private var currentAttribution: Attribution? = null
     @Volatile
     private var eventsHeld = false
     private val timerScope = CoroutineScope(timerDispatcher + SupervisorJob())
@@ -91,10 +94,14 @@ internal class CustomEventsManager(
             return
         }
 
+        // Capture one session and one immutable attribution snapshot. A session rotation must
+        // not stamp the previous campaign onto a new session's events, even before another lookup.
+        val sessionId = grovsContext.sessionId
+        val attribution = currentAttribution
         val event = CustomEvent(
             eventName = name,
-            sessionId = grovsContext.sessionId,
-            link = linkForFutureEvents,
+            sessionId = sessionId,
+            link = attribution?.takeIf { it.sessionId == sessionId }?.link,
             createdAt = InstantCompat.now(),
             properties = CustomEventRules.sanitizeProperties(properties),
             tags = CustomEventRules.mergeTags(eventTags = tags, globalTags = globalTags),
@@ -111,8 +118,8 @@ internal class CustomEventsManager(
         globalTags = CustomEventRules.sanitizeTags(tags)
     }
 
-    override fun setLinkForFutureEvents(link: String?) {
-        linkForFutureEvents = link
+    override fun setLinkForFutureEvents(link: String?, sessionId: String) {
+        currentAttribution = link?.let { Attribution(sessionId, it) }
     }
 
     override suspend fun attributePendingEvents(link: String, sessionId: String) {

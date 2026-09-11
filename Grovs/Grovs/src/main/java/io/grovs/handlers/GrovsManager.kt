@@ -341,7 +341,7 @@ internal class GrovsManager(
             // A late match attributes the session it lands in, the same one future events carry.
             // Attributing the session it was requested for would split one session's attribution.
             val sessionId = grovsContext.sessionId
-            customEventsManager.setLinkForFutureEvents(link)
+            customEventsManager.setLinkForFutureEvents(link, sessionId)
             if (link != null) customEventsManager.attributePendingEvents(link, sessionId)
             // Keep the hold closed while storage is updated: a background flush must not take
             // INSTALL between releasing the hold and applying the link.

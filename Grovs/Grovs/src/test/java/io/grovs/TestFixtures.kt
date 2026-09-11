@@ -1,5 +1,6 @@
 package io.grovs
 
+import io.grovs.handlers.GrovsContext
 import io.grovs.model.AppDetails
 import io.grovs.model.CustomLinkRedirect
 import io.grovs.model.DeeplinkDetails
@@ -20,6 +21,16 @@ object TestFixtures {
     const val TEST_BUNDLE_ID = "io.grovs.test"
     const val TEST_URI_SCHEME = "testscheme"
     const val TEST_LINK = "https://test.link/abc123"
+
+    /** Drives real session rotation without sleeping or changing the process-wide clock. */
+    fun startNewSession(context: GrovsContext) {
+        context.markBackgrounded()
+        GrovsContext::class.java.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+            .set(context, context.backgroundedAt!!.minusMillis(
+                (GrovsContext.SESSION_TIMEOUT_MINUTES + 1) * 60_000
+            ))
+        context.rotateSessionIfNeeded()
+    }
 
     /**
      * Creates a test AppDetails with sensible defaults.

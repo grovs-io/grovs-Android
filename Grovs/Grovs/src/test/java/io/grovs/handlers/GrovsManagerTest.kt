@@ -1319,7 +1319,7 @@ class GrovsManagerTest {
             // ...but INSTALL is stamped with the raw clipboard string, verbatim.
             mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true)
         }
-        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink) }
+        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         assertFalse(rig.cache.clipboardFlowPending)
         manager.close()
     }
@@ -1369,7 +1369,7 @@ class GrovsManagerTest {
         // INSTALL still carries the raw clipboard string, verbatim.
         assertEqualsWithContext(resolvedLink, result?.link, "link", "after a late clipboard match")
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
-        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink) }
+        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         manager.close()
     }
 
@@ -1393,7 +1393,7 @@ class GrovsManagerTest {
         gate.complete(LSResult.Success(true))
         assertEqualsWithContext(resolvedLink, first.await()?.link, "link", "after the first run completes")
         coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
-        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink) }
+        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         manager.close()
     }
 
@@ -1432,7 +1432,7 @@ class GrovsManagerTest {
         // The first run's late match still patches, without touching the hold a second time.
         assertEqualsWithContext(resolvedLink, result?.link, "link", "after the late clipboard match")
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
-        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink) }
+        coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
         coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
         coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(any()) }
