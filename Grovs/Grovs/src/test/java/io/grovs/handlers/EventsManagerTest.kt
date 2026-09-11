@@ -24,6 +24,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -414,13 +415,64 @@ class EventsManagerTest {
         coVerify(exactly = 0) { mockGrovsService.addEvents(any()) }   // clearing alone does not flush
 
         eventsManager.releaseLinkResolution(delayEvents = false)
-        coVerify(exactly = 1) { mockGrovsService.addEvents(any()) }
+        // Releasing queues the delivery rather than waiting for it.
+        coVerify(timeout = 2_000, exactly = 1) { mockGrovsService.addEvents(any()) }
         assertEqualsWithContext(
             "https://test.link/direct",
             eventsManager.linkForFutureActions,
             "linkForFutureActions",
             "after releaseLinkResolution()"
         )
+    }
+
+    @Test
+    fun `flush requests queued behind a delivery in flight collapse into one`() = runTest {
+        coEvery { mockEventsStorage.getEvents() } returns listOf(Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now()))
+        val uploads = java.util.concurrent.atomic.AtomicInteger(0)
+        val firstStarted = CompletableDeferred<Unit>()
+        val firstUpload = CompletableDeferred<Unit>()
+        coEvery { mockGrovsService.addEvents(any()) } coAnswers {
+            if (uploads.incrementAndGet() == 1) {
+                firstStarted.complete(Unit)
+                firstUpload.await()
+            }
+            accepted(1)
+        }
+        eventsManager.allowedToSendToBackend = true
+        eventsManager.firstRequestTime = InstantCompat.now()
+
+        val first = async { eventsManager.flush() }
+        firstStarted.await()
+        try {
+            // Foreground, log(), link release and the deadline can all ask while one delivery runs.
+            val returned = withTimeoutOrNull(1_000) { repeat(3) { eventsManager.requestFlush() }; true }
+            assertEquals("requestFlush must only queue a delivery", true, returned)
+        } finally {
+            firstUpload.complete(Unit)
+        }
+        first.await()
+        // Queued behind those requests, so once it returns they have all been served.
+        eventsManager.flush()
+
+        assertEquals("the delivery in flight, one shared by the three requests, then the last flush", 3, uploads.get())
+    }
+
+    @Test
+    fun `releasing the hold queues the delivery instead of waiting for it`() = runTest {
+        coEvery { mockEventsStorage.getEvents() } returns listOf(Event(event = EventType.INSTALL, createdAt = InstantCompat.now()))
+        val upload = CompletableDeferred<Unit>()
+        coEvery { mockGrovsService.addEvents(any()) } coAnswers { upload.await(); accepted(1) }
+        eventsManager.beginLinkResolution()
+
+        try {
+            // GrovsManager releases the hold under its resolution lock, so this must not wait on the network.
+            val returned = withTimeoutOrNull(1_000) { eventsManager.releaseLinkResolution(delayEvents = false); true }
+            assertEquals("releaseLinkResolution must return while the upload is still in flight", true, returned)
+        } finally {
+            upload.complete(Unit)
+        }
+
+        coVerify(timeout = 2_000, exactly = 1) { mockGrovsService.addEvents(any()) }
     }
 
     // ==================== flush() ====================
@@ -631,11 +683,11 @@ class EventsManagerTest {
             accepted(batch.size)
         }
 
-        // The first flush reaches addEvents and, with it, holds flushMutex for the rest of its run.
+        // The first flush reaches addEvents and occupies the delivery worker for the rest of its run.
         val first = async { manager.flush() }
         started.await()
-        // A second, fully overlapping trigger (foreground, log(), the leeway timer, ...) queues
-        // behind flushMutex instead of running concurrently against the same not-yet-removed events.
+        // A second, fully overlapping trigger (foreground, log(), the leeway timer, ...) queues on
+        // the worker instead of running concurrently against the same not-yet-removed events.
         val second = async { manager.flush() }
         gate.complete(Unit)
         first.await()
@@ -667,8 +719,8 @@ class EventsManagerTest {
             accepted(batch.size)
         }
 
-        // The flush is already in flight (holding flushMutex, mid network call) before resolution
-        // commits the link.
+        // The flush is already in flight (on the delivery worker, mid network call) before
+        // resolution commits the link.
         val flushJob = async { manager.flush() }
         started.await()
         val commit = async { manager.completeLinkResolution("https://test.link/resolved", delayEvents = false) }
@@ -676,8 +728,9 @@ class EventsManagerTest {
         flushJob.await()
         commit.await()
 
-        // Lock ordering this test observes: flushMutex is fair FIFO and the flush acquired it first,
-        // so completeLinkResolution's storage rewrite cannot start until the whole in-flight flush —
+        // Ordering this test observes: the delivery worker runs tasks in the order they were queued
+        // and the flush was queued first, so completeLinkResolution's storage rewrite cannot start
+        // until the whole in-flight flush —
         // network round trip and removeEvents(chunk) — has finished. By the time the rewrite runs,
         // the INSTALL event is already gone from storage (successfully sent), so there is nothing
         // left to relink: the event goes out unlinked (attribution resolved after it had already

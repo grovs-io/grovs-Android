@@ -98,20 +98,23 @@ class LinkAttributionTest {
             assertEquals(expected, events.linkForFutureActions)
         }
 
-        /// Fires the attribution deadline. Releasing the hold now suspends through EventsStorage's
-        /// real IO dispatcher and EventsManager.flushMutex (EventsManager.flush is a genuine suspend
-        /// chain, not a runBlocking call), so the continuation lands back on deadlineClock
-        /// asynchronously and a single runCurrent() can miss it. Drain in real time until [until]
-        /// reports the release actually happened, rather than assuming a fixed budget is enough;
-        /// fail loudly if it never does.
+        /// A commit or a release only queues its delivery. Waits for everything queued so far by
+        /// queueing one more flush behind it, so a test can check what was sent.
+        suspend fun awaitDeliveries() = events.flush()
+
+        /// Fires the attribution deadline. Releasing the hold queues a delivery on EventsManager's
+        /// delivery worker, which runs on real IO threads alongside EventsStorage, so its effects
+        /// land asynchronously and a single runCurrent() can miss them. Drain in real time until
+        /// [until] reports the release actually happened, rather than assuming a fixed budget is
+        /// enough; fail loudly if it never does.
         ///
         /// [until] only has to observe *some* effect of the release (an event landing in rig.sent,
-        /// say) — the coroutine that produced it is still mid-flight behind it (removeEvents(),
-        /// sendPaymentEventsToBackend(), then releasing flushMutex and finally
-        /// GrovsManager.resolutionMutex), so stopping the instant [until] turns true would leave
-        /// those locks held with nothing left to pump deadlineClock and finish releasing them —
-        /// exactly the kind of hang this helper exists to avoid. Keep draining a bit longer after
-        /// [until] is satisfied to let that tail run too.
+        /// say) — the delivery that produced it is still mid-flight behind it (removeEvents(),
+        /// sendPaymentEventsToBackend()), and the deadline coroutine still has to leave
+        /// GrovsManager.resolutionMutex on deadlineClock, so stopping the instant [until] turns true
+        /// would leave that lock held with nothing left to pump deadlineClock — exactly the kind of
+        /// hang this helper exists to avoid. Keep draining a bit longer after [until] is satisfied
+        /// to let that tail run too.
         fun releaseDeadline(afterMs: Long, until: () -> Boolean) {
             deadlineClock.advanceTimeBy(afterMs)
             val deadlineAt = System.currentTimeMillis() + 5_000
@@ -246,6 +249,7 @@ class LinkAttributionTest {
             assertTrue(rig.events.eventsHeld)
             gate.complete(Unit)
             assertEquals(directUrl, request.await()?.link)
+            rig.awaitDeliveries()
             assertEquals(listOf(EventType.INSTALL to clipboardUrl), rig.sent.filter { it.first == EventType.INSTALL })
         } finally { rig.manager.close() }
     }
@@ -329,6 +333,7 @@ class LinkAttributionTest {
             rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "sku", InstantCompat.now())
             gate.complete(Unit)
             request.await()
+            rig.awaitDeliveries()
             assertEquals(listOf(directUrl), rig.sentPurchases)
         } finally { rig.manager.close() }
     }
@@ -350,6 +355,7 @@ class LinkAttributionTest {
             assertTrue(rig.sentPurchases.isEmpty())
             gate.complete(Unit)
             request.await()
+            rig.awaitDeliveries()
             assertEquals(listOf(directUrl), rig.sentPurchases)
         } finally { rig.manager.close() }
     }
@@ -590,6 +596,7 @@ class LinkAttributionTest {
             }
             reply.complete(Unit)
             lookup.await()
+            rig.awaitDeliveries()
             val queued = rig.customStorage.getEvents()
             assertEquals("Earlier queued events keep every field, including IDs and timestamps",
                 oldCustomPayloads, queued.filter { it.sessionId == sessionA }.map { gson.toJson(it) })

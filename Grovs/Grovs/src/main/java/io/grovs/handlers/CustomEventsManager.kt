@@ -19,7 +19,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.withLock
 
 /**
  * Owns consumer-tracked analytics events. Runs parallel to [EventsManager], which owns the SDK's own
@@ -45,10 +44,10 @@ internal class CustomEventsManager(
     private var eventsHeld = false
     private val timerScope = CoroutineScope(timerDispatcher + SupervisorJob())
 
-    // serialDispatcher is Dispatchers.IO.limitedParallelism(1), which releases its slot whenever a
-    // coroutine suspends. So the periodic timer tick and a flush triggered from GrovsManager can
-    // overlap; without this lock both would read the same stored events and POST the same batch twice.
-    private val flushMutex = kotlinx.coroutines.sync.Mutex()
+    // The periodic tick and a flush triggered from GrovsManager can overlap, and both would read the
+    // same stored events and post the same batch twice. Every flush goes through this one worker,
+    // which runs them one at a time; close() stops it along with the timer.
+    private val deliveries = DeliveryWorker(timerScope) { token -> deliver(token) }
 
     /// The configuration this manager belongs to; a manager replaced by a later configure() can
     /// never acquire consent again, even for the same project key.
@@ -143,12 +142,13 @@ internal class CustomEventsManager(
     }
 
     override suspend fun flush() {
-        val consent = grovsContext.consent
-        val token = consent.workToken(configuration) ?: return
+        deliveries.flush(grovsContext.consent.workToken(configuration) ?: return)
+    }
+
+    /// One delivery, under the token of the call that asked for it.
+    private suspend fun deliver(token: ConsentToken) {
         try {
-            consent.runOperation(token) {
-                flushMutex.withLock { flushUnderConsent() }
-            }
+            grovsContext.consent.runOperation(token) { flushUnderConsent() }
         } catch (_: ConsentRevokedException) {
             // End this delivery attempt, not the periodic worker that will serve the next grant.
         }

@@ -58,6 +58,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
@@ -973,6 +974,28 @@ class GrovsManagerTest {
 
         coVerify { mockEventsManager.completeLinkResolution(any(), delayEvents = false) }
         coVerify { mockGrovsService.payloadWithLinkFor(any()) }
+    }
+
+    @Test
+    fun `committing a resolved link does not wait for the event upload`() = runTest {
+        grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
+        val link = "https://test.grovs.io/deep/link"
+        coEvery { mockGrovsService.payloadWithLinkFor(any()) } returns LSResult.Success(DeeplinkDetails(link = link, data = null, tracking = null))
+        coEvery { mockEventsManager.completeLinkResolution(any(), any()) } just Runs
+        // An upload that never answers. The commit runs under the resolution lock, so waiting on it
+        // would stall every other lookup behind the network.
+        val upload = CompletableDeferred<Unit>()
+        coEvery { mockEventsManager.flush() } coAnswers { upload.await() }
+
+        try {
+            val lookup = async { grovsManager.handleIntent(Intent().apply { data = Uri.parse(link) }, delayEvents = false) }
+            // Waited in real time: the commit also writes through real storage threads, and a
+            // virtual-time timeout would fire the moment the test scheduler went idle on them.
+            val result = withContext(Dispatchers.Default) { withTimeoutOrNull(5_000) { lookup.await() } }
+            assertEquals("the commit must return without waiting for the upload", link, result?.link)
+        } finally {
+            upload.complete(Unit)
+        }
     }
 
     @Test

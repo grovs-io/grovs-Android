@@ -23,8 +23,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class EventsManager(
     val context: Context, 
@@ -43,18 +41,17 @@ class EventsManager(
     internal var firstRequestTime: InstantCompat? = null
     internal var eventsDelaySeconds = 14
 
-    // grovsContext.serialDispatcher is Dispatchers.IO.limitedParallelism(1), which only serializes
-    // work between suspension points: it releases its slot every time a coroutine on it suspends
-    // (eventsStorage.getEvents(), grovsService.addEvents(), ...). Two flush triggers (foreground,
-    // link release, log(), the leeway timer, the attribution deadline) can therefore interleave and
-    // both read the same not-yet-removed events, double-posting them. This mutex is the actual
-    // serialization; it must be held across the whole flush, not just around individual awaits.
-    private val flushMutex = Mutex()
     private val paymentQueue = PaymentQueue(eventsStorage)
 
     /// The configuration this manager belongs to. A manager replaced by a later configure() is
     /// retired as an owner, so it can never acquire consent again even for the same project key.
     private val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
+
+    // Every flush trigger (foreground, link release, log(), the leeway timer, the attribution
+    // deadline) goes through this one worker. A flush suspends on storage and the network, so two
+    // running at once would both read the same not-yet-removed events and double-post them. The
+    // worker runs them one at a time and lives as long as the configuration.
+    private val deliveries = DeliveryWorker(configuration.scope, grovsContext.serialDispatcher) { token -> deliver(token) }
 
     companion object {
         const val BATCH_SIZE = 50
@@ -168,13 +165,12 @@ class EventsManager(
         // Keep the gate closed while storage is updated. A background flush must not take INSTALL
         // between releasing the hold and applying the resolved link.
         //
-        // Also hold flushMutex across the rewrite: without it, a flush already in flight for the
-        // unlinked copy can finish (network round trip, then removeEvents by type+createdAt) after
-        // this rewrite swaps in the linked copy, deleting the linked copy under an unlinked key the
-        // backend never received. Taking the lock here forces the rewrite to happen either fully
-        // before or fully after any in-flight flush's removeEvents call.
+        // The rewrite also runs on the delivery worker, between deliveries: a flush already in flight
+        // for the unlinked copy could otherwise finish (network round trip, then removeEvents by
+        // type+createdAt) after this rewrite swaps in the linked copy, deleting the linked copy under
+        // an unlinked key the backend never received.
         try {
-            flushMutex.withLock {
+            deliveries.runExclusive {
                 grovsContext.consent.storeIfConsented(configuration) {
                     linkForFutureActions = link
                     addLinkToEvents(link)
@@ -183,8 +179,6 @@ class EventsManager(
                 }
             }
         } finally {
-            // Outside the lock: releaseLinkResolution() calls flush(), which takes flushMutex again,
-            // and Mutex is not reentrant.
             setEventsHeld(false)
             allowedToSendToBackend = !delayEvents
             if (kotlinx.coroutines.currentCoroutineContext()[ConsentCommit] == null && grovsContext.consent.isCurrent(token)) {
@@ -196,7 +190,7 @@ class EventsManager(
     override suspend fun releaseLinkResolution(delayEvents: Boolean) {
         setEventsHeld(false)
         allowedToSendToBackend = !delayEvents
-        flush()
+        requestFlush()
     }
 
     /// Holds or releases the events hold gate. While held, no normal or payment event
@@ -303,15 +297,20 @@ class EventsManager(
         eventsStorage.addOrReplaceEvents(newEvents)
     }
 
+    override suspend fun requestFlush() {
+        deliveries.requestFlush(grovsContext.consent.workToken(configuration) ?: return)
+    }
+
     override suspend fun flush() {
-        val consent = grovsContext.consent
-        val token = consent.workToken(configuration) ?: return
+        deliveries.flush(grovsContext.consent.workToken(configuration) ?: return)
+    }
+
+    /// One delivery, under the token of the call that asked for it.
+    private suspend fun deliver(token: ConsentToken) {
         try {
-            consent.runOperation(token) {
-                flushMutex.withLock {
-                    sendSystemEventsToBackend()
-                    sendPaymentEventsToBackend()
-                }
+            grovsContext.consent.runOperation(token) {
+                sendSystemEventsToBackend()
+                sendPaymentEventsToBackend()
             }
         } catch (_: ConsentRevokedException) {
             // The queue remains available to a new consent operation.

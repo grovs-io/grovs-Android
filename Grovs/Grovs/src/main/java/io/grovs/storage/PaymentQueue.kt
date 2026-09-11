@@ -9,7 +9,7 @@ import kotlinx.coroutines.sync.withLock
  * between reads and writes. All SDK payment access goes through this helper; IEventsStorage's
  * public contract remains unchanged. Direct external writes to injected storage are not coordinated.
  *
- * Lock order: EventsManager's flush mutex -> this mutex -> built-in storage dispatcher.
+ * Lock order: EventsManager's delivery worker -> this mutex -> built-in storage dispatcher.
  * Never run HTTP requests or call back into the SDK while holding the queue mutex.
  */
 internal class PaymentQueue(private val storage: IEventsStorage) {

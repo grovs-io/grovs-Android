@@ -362,7 +362,8 @@ internal class GrovsManager(
                 holdDeadline = null
                 customEventsManager.setEventsHeld(false)
                 eventsManager.setEventsHeld(false)
-                if (grovsContext.consent.isCurrent(token)) eventsManager.flush()
+                // Queued, not awaited: this runs under the resolution lock and must not wait on the network.
+                if (grovsContext.consent.isCurrent(token)) eventsManager.requestFlush()
             }
             result.details
         }

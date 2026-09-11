@@ -32,6 +32,13 @@ interface IEventsManager {
     suspend fun flush()
 
     /**
+     * Queues a [flush] and returns without waiting for it, so it is safe to call under another
+     * lock. Requests made before the queued delivery starts share it. Nothing is queued when
+     * consent does not admit the work.
+     */
+    suspend fun requestFlush()
+
+    /**
      * Logs app launch events including install/reactivation and open events.
      */
     suspend fun logAppLaunchEvents()
@@ -55,7 +62,10 @@ interface IEventsManager {
     /** Commits attribution before releasing the lookup hold and allowing queued events to flush. */
     suspend fun completeLinkResolution(link: String, delayEvents: Boolean)
 
-    /** Releases the lookup hold and flushes queued events with whatever link they already carry. */
+    /**
+     * Releases the lookup hold and queues a flush of the held events with whatever link they
+     * already carry. Returns without waiting for that flush, so it is safe to call under a lock.
+     */
     suspend fun releaseLinkResolution(delayEvents: Boolean)
 
     /**
