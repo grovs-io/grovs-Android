@@ -39,7 +39,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.transformWhile
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.Serializable
@@ -130,26 +134,8 @@ internal class GrovsManager(
 
     private data class ResolvedDeeplink(val details: DeeplinkDetails, val eventLink: String?)
 
-    /// Scope the attribute update runs on. Its dispatcher governs ordering, so tests can swap in a
-    /// `TestScope` bound to `runTest`'s scheduler. SupervisorJob so one failed update can never
-    /// cancel the scope for the next one.
-    internal var attributesUpdateScope: CoroutineScope =
-        CoroutineScope(grovsContext.serialDispatcher + SupervisorJob())
-
     private var lastIntentHandledReference: WeakReference<Intent>? = null
     private var handledIntentTokens: MutableList<Int> = mutableListOf()
-    /// Stores if attributes needs to be updated after auth
-    private var shouldUpdateAttributes = false
-
-    /// Bumped by every identifier/push-token/attributes write, so an update still in flight can
-    /// tell whether its response still describes the caller's latest intent.
-    private var attributesRevision: Int = 0
-
-    /// The one outstanding attribute update. A newer one cancels it so the last write wins.
-    /// Volatile because the public setters call in on whatever thread the host app uses; every
-    /// mutation is additionally serialised by the monitor (see [updateAttributesIfNeeded]).
-    @Volatile
-    private var attributesUpdateJob: Job? = null
 
     /// Aliases awaiting a successful sync. Held while unauthenticated and across failed syncs.
     private var pendingScreenAliases: Map<String, String>? = null
@@ -162,6 +148,28 @@ internal class GrovsManager(
     /// A flag indicating whether the user is authenticated with the Grovs backend.
     @Volatile
     var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
+
+    /// The user attributes the backend last confirmed, or that were adopted from it at
+    /// authentication. The attribute sync sends whenever [GrovsContext.userAttributes] differs.
+    @Volatile
+    private var acknowledgedAttributes: UserAttributes = grovsContext.userAttributes.value
+
+    /// Bumped to re-offer an unacknowledged value once sending can succeed again: after
+    /// authentication and on every new consent grant.
+    private val attributesResyncRequests = MutableStateFlow(0)
+
+    /// Scope the attribute sync runs in. Its dispatcher governs ordering, so tests can swap in
+    /// `runTest`'s `backgroundScope`; assigning a scope moves the sync there.
+    internal var attributesUpdateScope: CoroutineScope =
+        CoroutineScope(grovsContext.serialDispatcher + SupervisorJob())
+        set(value) {
+            field = value
+            attributesSync.cancel()
+            attributesSync = launchAttributesSync(value)
+        }
+
+    @Volatile
+    private var attributesSync: Job = launchAttributesSync(attributesUpdateScope)
 
     private val prefs = context.getSharedPreferences(GROVS_PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -181,30 +189,10 @@ internal class GrovsManager(
             prefs.edit().putString(KEY_LAST_REFERRER, value).apply()
         }
 
-    @set:Synchronized
-    var identifier: String?
-        get() = grovsContext.identifier
-        set(value) {
-            grovsContext.identifier = value
-            updateAttributesIfNeeded()
-        }
-
-    @set:Synchronized
-    var pushToken: String?
-        get() = grovsContext.pushToken
-        set(value) {
-            grovsContext.pushToken = value
-            updateAttributesIfNeeded()
-        }
-
-
-    @set:Synchronized
-    var attributes: Map<String, Any>?
-        get() = grovsContext.attributes
-        set(value) {
-            grovsContext.attributes = value
-            updateAttributesIfNeeded()
-        }
+    // Views onto the desired state. The attribute sync observes every write, from any thread.
+    var identifier: String? by grovsContext::identifier
+    var pushToken: String? by grovsContext::pushToken
+    var attributes: Map<String, Any>? by grovsContext::attributes
 
     suspend fun onAppForegrounded() {
         grovsContext.isForeground = true
@@ -234,7 +222,7 @@ internal class GrovsManager(
     suspend fun onEnabled() {
         if (grovsContext.consent.workToken(configuration) == null) return
         if (authenticationState != AuthenticationState.AUTHENTICATED) return
-        if (shouldUpdateAttributes) updateAttributesIfNeeded()
+        resyncAttributes()
         syncScreenAliasesIfNeeded()
         if (grovsContext.isForeground) (eventsManager as? EventsManager)?.resumeEngagement()
         customEventsManager.flush()
@@ -451,22 +439,16 @@ internal class GrovsManager(
                     // the next grant resumes after it rather than recording a second launch.
                     permit.finish {
                         grovsContext.grovsId = result.data.grovsId
-                        synchronized(this@GrovsManager) {
-                            if (!shouldUpdateAttributes) {
-                                grovsContext.identifier = result.data.sdkIdentifier
-                                grovsContext.attributes = result.data.sdkAttributes
-                            }
-                        }
+                        adoptBackendAttributes(result.data.sdkIdentifier, result.data.sdkAttributes)
                         clipboardHandler.armIfNeeded()
                         eventsManager.logAppLaunchEvents()
                         grovsContext.authenticatedConfiguration = configuration
                         authenticationState = AuthenticationState.AUTHENTICATED
                     }
                     if (!consent.isCurrent(token)) return@collect
-                    // Network work, so outside the commit: cancellable and gated like any other.
-                    if (shouldUpdateAttributes) {
-                        updateAttributesIfNeeded()
-                    }
+                    // Values set while unauthenticated can go out now. The send is network work, so
+                    // the attribute sync runs it outside the commit, cancellable and gated like any other.
+                    resyncAttributes()
 
                     // Aliases set before the SDK was ready are held; send them now.
                     syncScreenAliasesIfNeeded()
@@ -540,8 +522,7 @@ internal class GrovsManager(
         if (isClosed) return
         isClosed = true
         attributionScope.cancel()
-        attributesUpdateJob?.cancel()
-        attributesUpdateJob = null
+        attributesSync.cancel()
         customEventsManager.close()
     }
 
@@ -794,49 +775,51 @@ internal class GrovsManager(
     }
 
     /**
-     * Synchronized because the `identifier` / `attributes` / `pushToken` setters run on whatever
-     * thread the host app calls them from. Read-cancel-store has to be one atomic step: two threads
-     * that both read the same old job would each cancel it and each store their own, leaving one
-     * job unreferenced, uncancellable, and racing the other all the way to the backend.
+     * The one long-lived attribute sync. Each change to the desired values, and each resync
+     * request, cancels the send in flight and waits for it to stop before the next one starts. The
+     * service retries forever, so this is what keeps two updates from ever being at the backend at
+     * once and guarantees the last value written lands last.
      */
-    @Synchronized
-    private fun updateAttributesIfNeeded() {
-        // Every write makes the desired configuration dirty, whether or not it can be sent now.
-        // Only a success that still describes this exact write, under a consent operation that is
-        // still valid, may clear it - so an update interrupted by a revocation or superseded by a
-        // newer value stays pending and goes out on the next grant.
-        val revision = ++attributesRevision
-        shouldUpdateAttributes = true
+    private fun launchAttributesSync(scope: CoroutineScope): Job = scope.launch {
+        combine(grovsContext.userAttributes, attributesResyncRequests) { desired, _ -> desired }
+            .collectLatest { desired -> syncAttributes(desired) }
+    }
 
+    /**
+     * Sends [desired] unless the backend already holds it. Only a success that lands while its
+     * consent grant is still current acknowledges the value; anything else leaves it pending for
+     * the next write, authentication or grant. Never throws: one failure must not end the sync.
+     */
+    private suspend fun syncAttributes(desired: UserAttributes) {
+        if (desired == acknowledgedAttributes || authenticationState != AuthenticationState.AUTHENTICATED) return
         val consent = grovsContext.consent
-        val token = consent.tryAcquire(configuration)
-        if (authenticationState != AuthenticationState.AUTHENTICATED || token == null) {
-            // Retained, not sent. The latest values leave once the SDK is authenticated and consented.
-            return
-        }
-
-        // A newer write supersedes whatever is in flight. The service retries forever, so two
-        // concurrent updates race with no ordering and the stale one can land last.
-        val superseded = attributesUpdateJob
-        superseded?.cancel()
-        attributesUpdateJob = consent.launchOperation(token, scope = attributesUpdateScope) {
-            // Cancellation is a request, not an instant stop: the superseded call may still be
-            // unwinding. Wait for it to actually finish before issuing ours, so the two never sit
-            // in the backend's queue at once and land out of order.
-            superseded?.join()
-
-            // Read at launch time so the job always carries the newest values, not the ones the
-            // setter happened to see.
-            val identifier = identifier
-            val attributes = attributes
-            val pushToken = pushToken
-
-            val result = grovsService.updateAttributes(identifier = identifier, attributes = attributes, pushToken = pushToken)
-            synchronized(this@GrovsManager) {
-                if (result is LSResult.Success && revision == attributesRevision && consent.isCurrent(token)) {
-                    shouldUpdateAttributes = false
-                }
+        val token = consent.tryAcquire(configuration) ?: return
+        try {
+            val result = consent.runOperation(token) {
+                grovsService.updateAttributes(identifier = desired.identifier, attributes = desired.attributes, pushToken = desired.pushToken)
             }
+            if (result is LSResult.Success) acknowledgedAttributes = desired
+        } catch (_: ConsentRevokedException) {
+            // Revoked mid-send: the value stays pending for the next grant.
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DebugLogger.instance.log(LogLevel.ERROR, "Failed to update attributes: ${e.message}")
         }
+    }
+
+    private fun resyncAttributes() {
+        attributesResyncRequests.update { it + 1 }
+    }
+
+    /**
+     * Takes the backend's identifier and attributes unless the host has set values the backend has
+     * not confirmed yet. The compare-and-set loses to any concurrent host write, so that write is
+     * never overwritten by the server's older values.
+     */
+    private fun adoptBackendAttributes(identifier: String?, attributes: Map<String, Any>?) {
+        val acknowledged = acknowledgedAttributes
+        val adopted = acknowledged.copy(identifier = identifier, attributes = attributes)
+        if (grovsContext.userAttributes.compareAndSet(acknowledged, adopted)) acknowledgedAttributes = adopted
     }
 }

@@ -76,7 +76,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.coroutines.CoroutineContext
 
 /**
  * Core unit tests for GrovsManager.
@@ -486,7 +485,7 @@ class GrovsManagerTest {
 
     @Test
     fun `a newer attribute update cancels the one in flight`() = runTest {
-        grovsManager.attributesUpdateScope = this
+        grovsManager.attributesUpdateScope = backgroundScope
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         val probe = stubParkingFirstUpdate()
 
@@ -508,7 +507,7 @@ class GrovsManagerTest {
 
     @Test
     fun `the last attribute value written is the one the service ends up with`() = runTest {
-        grovsManager.attributesUpdateScope = this
+        grovsManager.attributesUpdateScope = backgroundScope
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         val probe = stubParkingFirstUpdate()
 
@@ -523,6 +522,23 @@ class GrovsManagerTest {
             probe.identifiersSeen
         )
         coVerify(exactly = 1) { mockGrovsService.updateAttributes("fresh", any(), any()) }
+    }
+
+    @Test
+    fun `an attribute update that throws is contained and the next value still goes out`() = runTest {
+        grovsManager.attributesUpdateScope = backgroundScope
+        grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
+        // The real service converts failures into LSResult.Error; an injected one may not. Either
+        // way nothing may escape the sync, and a failure must not stop the next value going out.
+        coEvery { mockGrovsService.updateAttributes("boom", any(), any()) } throws IllegalStateException("malformed response")
+        coEvery { mockGrovsService.updateAttributes("next", any(), any()) } returns LSResult.Success(true)
+
+        grovsManager.identifier = "boom"
+        runCurrent()
+        grovsManager.identifier = "next"
+        runCurrent()
+
+        coVerify(exactly = 1) { mockGrovsService.updateAttributes("next", any(), any()) }
     }
 
     /** Makes the service answer both legs of [GrovsManager.authenticate] with a success. */
@@ -591,7 +607,7 @@ class GrovsManagerTest {
 
     @Test
     fun `the superseded update is fully stopped before the new request goes out`() = runTest {
-        grovsManager.attributesUpdateScope = this
+        grovsManager.attributesUpdateScope = backgroundScope
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
 
         val order = mutableListOf<String>()
@@ -621,7 +637,10 @@ class GrovsManagerTest {
         assertTrue("the first update should be in flight", staleCallStarted.isCompleted)
 
         grovsManager.identifier = "fresh"
-        advanceUntilIdle()
+        // backgroundScope work runs under runCurrent/advanceTimeBy; advanceUntilIdle stops as soon
+        // as no foreground work is left, so it would never let the unwinding delay elapse.
+        advanceTimeBy(200)
+        runCurrent()
 
         assertEquals(
             "the new request must not be issued while the superseded one is still unwinding",
@@ -630,42 +649,15 @@ class GrovsManagerTest {
         )
     }
 
-    /**
-     * Holds the very first `launch` inside [CoroutineScope.launch] itself - after
-     * updateAttributesIfNeeded has read and cancelled the previous job, but before it has stored the
-     * new one. That is the exact window a second thread must not be able to slip through.
-     */
-    private class FirstDispatchGate(
-        val arrived: CountDownLatch = CountDownLatch(1),
-        val release: CountDownLatch = CountDownLatch(1),
-    ) : CoroutineDispatcher() {
-        private val gated = AtomicBoolean(false)
-        private var delegate: CoroutineDispatcher = Dispatchers.Default
-
-        fun on(delegate: CoroutineDispatcher): FirstDispatchGate {
-            this.delegate = delegate
-            return this
-        }
-
-        override fun dispatch(context: CoroutineContext, block: Runnable) {
-            if (gated.compareAndSet(false, true)) {
-                arrived.countDown()
-                release.await()
-            }
-            delegate.dispatch(context, block)
-        }
-    }
-
     @Test
-    fun `two setters racing on different threads never leave two updates in flight`() {
-        val gate = FirstDispatchGate()
+    fun `setters racing on different threads never leave two updates in flight`() {
         // A dedicated pool, not Dispatchers.Default: under a full-suite run the shared pool can be
-        // saturated, and this test needs its two jobs to actually get to run.
+        // saturated, and this test needs the sync to actually get to run.
         val pool = java.util.concurrent.Executors.newFixedThreadPool(4)
         // Swallow, don't propagate: these jobs are torn down mid-flight below, and an escaping
         // throw would surface as an uncaught exception charged to whichever test runs next.
         val silence = CoroutineExceptionHandler { _, _ -> }
-        val scope = CoroutineScope(gate.on(pool.asCoroutineDispatcher()) + SupervisorJob() + silence)
+        val scope = CoroutineScope(pool.asCoroutineDispatcher() + SupervisorJob() + silence)
         grovsManager.attributesUpdateScope = scope
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
 
@@ -674,9 +666,11 @@ class GrovsManagerTest {
         val peakInFlight = AtomicInteger(0)
         val entered = AtomicInteger(0)
         val anyCallEntered = CountDownLatch(1)
+        val seen = java.util.concurrent.CopyOnWriteArrayList<String?>()
 
         coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } coAnswers {
             entered.incrementAndGet()
+            seen.add(firstArg())
             val concurrent = inFlight.incrementAndGet()
             peakInFlight.getAndUpdate { maxOf(it, concurrent) }
             anyCallEntered.countDown()
@@ -689,36 +683,29 @@ class GrovsManagerTest {
         }
 
         try {
-            val first = Thread({ grovsManager.identifier = "first" }, "attr-setter-1")
-            first.start()
-            assertTrue(
-                "the first launch should reach the dispatcher",
-                gate.arrived.await(10, TimeUnit.SECONDS)
-            )
-
-            // The second setter runs while the first is still mid-launch: it has already cancelled
-            // the previous job but has not yet stored its own.
-            val second = Thread({ grovsManager.identifier = "second" }, "attr-setter-2")
-            second.start()
-            Thread.sleep(100)
-
-            gate.release.countDown()
-            first.join(10_000)
-            second.join(10_000)
+            // Eight setters released at once, each writing its own value from its own thread.
+            val go = CountDownLatch(1)
+            val setters = (1..8).map { n ->
+                Thread({ go.await(); grovsManager.identifier = "user-$n" }, "attr-setter-$n")
+            }
+            setters.forEach { it.start() }
+            go.countDown()
+            setters.forEach { it.join(10_000) }
+            val last = grovsManager.identifier
 
             assertTrue(
                 "at least one update should have reached the service",
                 anyCallEntered.await(10, TimeUnit.SECONDS)
             )
 
-            // Deliberately no assertion that *both* jobs ran, and none on which value the surviving
-            // call carried. Once the gate opens, the first job is handed to the pool while the
-            // second thread is concurrently cancelling it; if the cancel wins that race the first
-            // job never reaches the service at all. One entry and two entries are both correct
-            // outcomes here, so waiting on a second entry - or on a particular last value - would
-            // fail against a correct implementation on a loaded machine. Last-write-wins has its
-            // own deterministic single-threaded test above; what this test owns is the pair of
-            // properties below, neither of which depends on who won that race.
+            // Every call parks until superseded, so the service settles on whichever value was
+            // written last. The wait is generous and the assertion positive: a slow machine makes
+            // this slower, never redder.
+            val settleBy = System.currentTimeMillis() + 10_000
+            while (seen.lastOrNull() != last && System.currentTimeMillis() < settleBy) {
+                Thread.sleep(10)
+            }
+            assertEquals("the service must end up with the last value written, saw $seen", last, seen.lastOrNull())
             assertTrue(
                 "two attribute updates must never be in flight at once, " +
                     "peaked at ${peakInFlight.get()} across ${entered.get()} call(s)",
@@ -744,7 +731,6 @@ class GrovsManagerTest {
             // half-torn-down job would otherwise resume onto a dead dispatcher, or into a mock
             // that tearDown has already unmocked.
             park.complete(Unit)
-            gate.release.countDown()
             runBlocking { scope.coroutineContext.job.cancelAndJoin() }
             pool.shutdown()
         }
@@ -752,7 +738,7 @@ class GrovsManagerTest {
 
     @Test
     fun `attributes set while unauthenticated are sent once authentication succeeds`() = runTest {
-        grovsManager.attributesUpdateScope = this
+        grovsManager.attributesUpdateScope = backgroundScope
         assertUnauthenticated(grovsManager, context = "before setting the identifier")
 
         grovsManager.identifier = "queued-while-offline"
@@ -773,6 +759,7 @@ class GrovsManagerTest {
 
     @Test
     fun `attribute changes while disabled are held and sent on enable`() = runTest {
+        grovsManager.attributesUpdateScope = backgroundScope
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
         grovsContext.settings.sdkEnabled = false
@@ -782,17 +769,10 @@ class GrovsManagerTest {
 
         grovsContext.settings.sdkEnabled = true
         grovsManager.onEnabled()
-        attributesJob(grovsManager)?.join()
+        runCurrent()
 
         coVerify(exactly = 1) { mockGrovsService.updateAttributes("user-1", any(), any()) }
     }
-
-    /** The attributes update runs on its own scope; join it so the verify below is deterministic. */
-    private fun attributesJob(manager: GrovsManager): Job? =
-        GrovsManager::class.java.getDeclaredField("attributesUpdateJob").run {
-            isAccessible = true
-            get(manager) as? Job
-        }
 
     // ==================== Generate Link Tests ====================
 

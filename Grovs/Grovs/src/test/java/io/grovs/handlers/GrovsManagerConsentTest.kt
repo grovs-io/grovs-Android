@@ -250,7 +250,7 @@ class GrovsManagerConsentTest {
     /** A05 */
     @Test
     fun `A05 identifier, push token and attributes set while disabled are sent as one latest snapshot on enable`() = runTest {
-        manager.attributesUpdateScope = this
+        manager.attributesUpdateScope = backgroundScope
         authenticateSuccessfully()
 
         grovsContext.settings.sdkEnabled = false
@@ -260,12 +260,14 @@ class GrovsManagerConsentTest {
         manager.pushToken = "token-1"
         manager.attributes = mapOf("plan" to "pro")
         manager.pushToken = null
-        advanceUntilIdle()
+        // The sync lives in backgroundScope, which runCurrent drives; advanceUntilIdle stops as
+        // soon as no foreground work is left, so it would never let the sync run.
+        runCurrent()
         coVerify(exactly = 0) { service.updateAttributes(any(), any(), any()) }
 
         grovsContext.settings.sdkEnabled = true
         manager.onEnabled()
-        advanceUntilIdle()
+        runCurrent()
 
         // Exactly one request, carrying the last value of each field - the null push token included.
         coVerify(exactly = 1) { service.updateAttributes("user-2", mapOf("plan" to "pro"), null) }
@@ -275,7 +277,7 @@ class GrovsManagerConsentTest {
     @Test
     fun `A06 a stale attribute success cannot clear the dirty state a newer value established`() = runTest {
         holdCleanup()
-        manager.attributesUpdateScope = this
+        manager.attributesUpdateScope = backgroundScope
         authenticateSuccessfully()
 
         val oldSent = CompletableDeferred<Unit>()
@@ -307,7 +309,7 @@ class GrovsManagerConsentTest {
             // non-cooperatively; releasing it lets the stale success land first.
             manager.identifier = "new"
             releaseOld.complete(Unit)
-            advanceUntilIdle()
+            runCurrent()
             assertTrue("the newer value must have been sent, got $sent", sent.contains("new"))
         }
 
@@ -315,7 +317,7 @@ class GrovsManagerConsentTest {
         // allowed to clear the dirty state, the unacknowledged newer value would never be retried.
         val before = sent.count { it == "new" }
         manager.onEnabled()
-        advanceUntilIdle()
+        runCurrent()
         assertEquals(
             "the unacknowledged newer value must still be pending, sends so far: $sent",
             before + 1,

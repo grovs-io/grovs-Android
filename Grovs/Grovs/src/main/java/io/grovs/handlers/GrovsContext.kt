@@ -8,6 +8,8 @@ import io.grovs.utils.WebViewUtils
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import java.util.UUID
 
 class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
@@ -20,16 +22,21 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     internal val consent: ConsentController get() = settings.consent
     var grovsId: String? = null
 
-    // Written by the host app on whatever thread it likes and read from the SDK's own coroutines,
-    // so the write has to be visible to the reader without a lock between them.
-    @Volatile
-    var identifier: String? = null
+    /// What the host app wants the backend to hold for this user. Written on whatever thread the
+    /// host likes; each setter below is one atomic update, and GrovsManager syncs every change.
+    internal val userAttributes = MutableStateFlow(UserAttributes())
 
-    @Volatile
-    var pushToken: String? = null
+    var identifier: String?
+        get() = userAttributes.value.identifier
+        set(value) = userAttributes.update { it.copy(identifier = value) }
 
-    @Volatile
-    var attributes: Map<String, Any>? = null
+    var pushToken: String?
+        get() = userAttributes.value.pushToken
+        set(value) = userAttributes.update { it.copy(pushToken = value) }
+
+    var attributes: Map<String, Any>?
+        get() = userAttributes.value.attributes
+        set(value) = userAttributes.update { it.copy(attributes = value) }
     @Volatile
     internal var isForeground: Boolean = false
     @Volatile
@@ -73,3 +80,11 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     fun getAppDetails(context: Context): AppDetailsHelper = AppDetailsHelper(context)
     fun getUserAgent(context: Context): String = WebViewUtils.getUserAgent(context)
 }
+
+/// The user attributes the backend should hold. Compared by value, so rewriting an unchanged value
+/// is not sent again.
+internal data class UserAttributes(
+    val identifier: String? = null,
+    val pushToken: String? = null,
+    val attributes: Map<String, Any>? = null,
+)
