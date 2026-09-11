@@ -4,25 +4,18 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.fragment.app.Fragment
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 07 — Manual FragmentTransactions with back stack (replace + addToBackStack).
@@ -38,75 +31,7 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S07ManualFragmentsE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
-
-    @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    // harness
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    // Replicated from ScreenTrackingE2ETest — NOT exposed by E2ETestUtils.
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /**
-     * Flushes stored custom events, drains the MockWebServer, and returns the ordered screen_name
-     * list emitted SINCE the previous call (the server queue and the events storage are both drained,
-     * so consecutive calls read only what is new). Also settles any still-pending resolution first.
-     */
-    private fun drainEmittedScreens(): List<String> {
-        settleAutomaticScreenResolution()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
-    }
+class S07ManualFragmentsE2ETest : ScreenTrackingTestBase() {
 
     /** Build the host resumed (root Home installed) and run Home's resolution job. */
     private fun buildHostSettled(): ActivityController<S07HostActivity> {
@@ -162,7 +87,7 @@ class S07ManualFragmentsE2ETest {
                 "S07ListFragment",
                 "S07HomeFragment",
             ),
-            drainEmittedScreens(),
+            drainScreenNames(),
         )
     }
 
@@ -179,11 +104,11 @@ class S07ManualFragmentsE2ETest {
 
         assertEquals(
             listOf("S07HomeFragment", "S07ListFragment", "S07DetailFragment"),
-            drainEmittedScreens(),
+            drainScreenNames(),
         )
 
         activity.popInclusive("list-entry") // pops Detail + List in one shot -> Home
-        assertEquals(listOf("S07HomeFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment"), drainScreenNames())
     }
 
     // Actions 9 & 10: add()-on-top resumes the added Detail (tracked). Popping it reveals the List
@@ -200,12 +125,12 @@ class S07ManualFragmentsE2ETest {
 
         assertEquals(
             listOf("S07HomeFragment", "S07ListFragment", "S07DetailFragment"),
-            drainEmittedScreens(),
+            drainScreenNames(),
         )
 
         pop(activity) // remove added Detail; List underneath was never stopped
         // add()-reveal gap: List is not re-resumed, so nothing emits (would ideally be [S07ListFragment]).
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     // Action 11: replacing with another instance of the SAME class resolves to the same name within
@@ -219,7 +144,7 @@ class S07ManualFragmentsE2ETest {
         push(activity, S07DetailFragment())
         push(activity, S07DetailFragment()) // same class again, < 1s later
 
-        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainScreenNames())
     }
 
     // Action 12: two rapid replace() transactions (List->Detail->Edit) before the looper drains
@@ -231,7 +156,7 @@ class S07ManualFragmentsE2ETest {
 
         val activity = buildHostSettled().get()
         push(activity, S07ListFragment())
-        assertEquals(listOf("S07HomeFragment", "S07ListFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07ListFragment"), drainScreenNames())
 
         // Two transactions, executed back-to-back, WITHOUT settling in between (one "navigation").
         activity.supportFragmentManager.beginTransaction()
@@ -242,7 +167,7 @@ class S07ManualFragmentsE2ETest {
             .addToBackStack(null).commit()
         activity.supportFragmentManager.executePendingTransactions()
 
-        assertEquals(listOf("S07EditFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07EditFragment"), drainScreenNames())
     }
 
     // Action 13: rotation recreates the Activity; the restored Detail resumes again, resolving to the
@@ -255,10 +180,10 @@ class S07ManualFragmentsE2ETest {
         val controller = buildHostSettled()
         val activity = controller.get()
         push(activity, S07DetailFragment())
-        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainScreenNames())
 
         controller.recreate() // configuration change
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     // Action 14: background then foreground within the same session (no session rotation) leaves the
@@ -271,12 +196,12 @@ class S07ManualFragmentsE2ETest {
         val controller = buildHostSettled()
         val activity = controller.get()
         push(activity, S07DetailFragment())
-        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainScreenNames())
 
         controller.pause().stop()   // background
         controller.start().resume() // foreground (same session -> dedup NOT reset)
 
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     // Action 15: process death + restore. A fresh SDK process has fresh dedup state, and restoring the
@@ -294,7 +219,7 @@ class S07ManualFragmentsE2ETest {
         // Drain everything emitted so far AND empty the events storage before the "process death".
         assertEquals(
             listOf("S07HomeFragment", "S07ListFragment", "S07DetailFragment", "S07EditFragment"),
-            drainEmittedScreens(),
+            drainScreenNames(),
         )
 
         val savedState = Bundle()
@@ -309,7 +234,7 @@ class S07ManualFragmentsE2ETest {
         Robolectric.buildActivity(S07HostActivity::class.java)
             .create(savedState).start().resume()
 
-        assertEquals(listOf("S07EditFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07EditFragment"), drainScreenNames())
     }
 
     // Action 16: commitNow() (synchronous resume) and commit()+settle each yield exactly one emission
@@ -336,7 +261,7 @@ class S07ManualFragmentsE2ETest {
 
         assertEquals(
             listOf("S07HomeFragment", "S07ListFragment", "S07EditFragment"),
-            drainEmittedScreens(),
+            drainScreenNames(),
         )
     }
 
@@ -350,7 +275,7 @@ class S07ManualFragmentsE2ETest {
         val activity = buildHostSettled().get()
         push(activity, S07NestedDetailFragment())
 
-        assertEquals(listOf("S07HomeFragment", "S07DetailChildFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07DetailChildFragment"), drainScreenNames())
     }
 
     // Action 18: a DialogFragment shown over Detail is a modal overlay, NOT a screen — the resolver
@@ -363,18 +288,18 @@ class S07ManualFragmentsE2ETest {
 
         val activity = buildHostSettled().get()
         push(activity, S07DetailFragment())
-        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment", "S07DetailFragment"), drainScreenNames())
 
         val dialog = S07DialogFragment()
         dialog.show(activity.supportFragmentManager, "s07-dialog")
         activity.supportFragmentManager.executePendingTransactions()
         // Modal skipped by the resolver -> resolves back to Detail -> deduped -> nothing emitted.
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
 
         dialog.dismiss()
         activity.supportFragmentManager.executePendingTransactions()
         // Detail is never re-resumed on dismiss, so nothing re-emits.
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     // Action 19: when a transaction sets a primaryNavigationFragment, the resolver prefers it over the
@@ -385,7 +310,7 @@ class S07ManualFragmentsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val activity = buildHostSettled().get()
-        assertEquals(listOf("S07HomeFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment"), drainScreenNames())
 
         val primary = S07PrimaryFragment()
         val secondary = S07SecondaryFragment()
@@ -397,7 +322,7 @@ class S07ManualFragmentsE2ETest {
             .commit()
         activity.supportFragmentManager.executePendingTransactions()
 
-        assertEquals(listOf("S07PrimaryFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07PrimaryFragment"), drainScreenNames())
     }
 
     // Action 20: a back press at root Home (empty back stack) exits the Activity — no fragment resumes,
@@ -408,13 +333,13 @@ class S07ManualFragmentsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val activity = buildHostSettled().get()
-        assertEquals(listOf("S07HomeFragment"), drainEmittedScreens())
+        assertEquals(listOf("S07HomeFragment"), drainScreenNames())
 
         @Suppress("DEPRECATION")
         activity.onBackPressed() // empty back stack -> finishes the Activity
         Shadows.shadowOf(Looper.getMainLooper()).idle()
 
-        assertEquals(emptyList<String>(), drainEmittedScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
         assertTrue("Activity should be finishing after root back press", activity.isFinishing)
     }
 }

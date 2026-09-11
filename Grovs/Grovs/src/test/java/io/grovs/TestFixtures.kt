@@ -6,8 +6,6 @@ import io.grovs.model.DeeplinkDetails
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.GenerateLinkRequest
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.utils.InstantCompat
 
 /**
@@ -102,23 +100,6 @@ object TestFixtures {
         link = link,
         engagementTime = engagementTime
     )
-
-    // PURCHASE_EVENT_DISABLED: /**
-    // PURCHASE_EVENT_DISABLED:  * Creates a test PaymentEvent.
-    // PURCHASE_EVENT_DISABLED:  */
-    // PURCHASE_EVENT_DISABLED: fun createPaymentEvent(
-    // PURCHASE_EVENT_DISABLED:     eventType: PaymentEventType = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:     priceCents: Long? = 999L,
-    // PURCHASE_EVENT_DISABLED:     currency: String? = "USD",
-    // PURCHASE_EVENT_DISABLED:     productId: String? = "test_product",
-    // PURCHASE_EVENT_DISABLED:     date: InstantCompat? = InstantCompat.now()
-    // PURCHASE_EVENT_DISABLED: ) = PaymentEvent(
-    // PURCHASE_EVENT_DISABLED:     eventType = eventType,
-    // PURCHASE_EVENT_DISABLED:     priceCents = priceCents,
-    // PURCHASE_EVENT_DISABLED:     currency = currency,
-    // PURCHASE_EVENT_DISABLED:     productId = productId,
-    // PURCHASE_EVENT_DISABLED:     date = date
-    // PURCHASE_EVENT_DISABLED: )
 
     /**
      * Creates a test DeeplinkDetails.

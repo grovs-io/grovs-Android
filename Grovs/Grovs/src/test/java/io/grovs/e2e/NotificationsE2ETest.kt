@@ -15,7 +15,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TestName
 import org.junit.runner.RunWith
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
@@ -54,10 +53,24 @@ class NotificationsE2ETest {
         E2ETestUtils.configureAndWaitForAuth(application, baseURL = mockWebServer.url("/").toString())
     }
 
-    // ==================== Notifications Tests ====================
+    private fun json(body: String) =
+        MockResponse().setHeader("Content-Type", "application/json").setBody(body)
 
-    private fun json(body: String) = okhttp3.mockwebserver.MockResponse().setResponseCode(200)
-        .setHeader("Content-Type", "application/json").setBody(body)
+    private suspend fun configureWithUnreadResponse(response: MockResponse) {
+        // Route by endpoint so concurrent startup requests cannot consume the unread-count reply.
+        E2ETestUtils.setUrlDispatcher(mockWebServer, mapOf(
+            "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
+            "device_for_vendor_id" to json("""{"last_seen":null}"""),
+            "data_for_device" to json("""{"link":null,"data":null}"""),
+            "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
+            "clipboard_status" to json("""{"clipboard_active":false}"""),
+            "number_of_unread_notifications" to response,
+        ))
+        configureAndWaitForAuth()
+        E2ETestUtils.assertAuthenticationCompleted()
+    }
+
+    // ==================== Notifications Tests ====================
 
     @Test
     fun `Set automatic notifications listener does not crash`() {
@@ -119,70 +132,9 @@ class NotificationsE2ETest {
     }
 
     @Test
-    fun `Get number of unread notifications returns count`() {
-        runBlocking {
-            // Arrange. Routed by path rather than enqueued in order: any extra request the SDK
-            // makes (an events batch, say) would otherwise consume the queued unread-count response
-            // and this test would read someone else's body as the count.
-            E2ETestUtils.setUrlDispatcher(mockWebServer, linkedMapOf(
-                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":5}"""),
-                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
-                "device_for_vendor_id" to json("""{"last_seen":null}"""),
-                "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
-                "data_for_device" to json("""{"link":null,"data":null}"""),
-            ))
-
-            // Act
-            configureAndWaitForAuth()
-            delay(200)
-
-            val result = E2ETestUtils.runWithLooperPumping(10_000) {
-                Grovs.numberOfUnreadMessages()
-            }
-
-            // Assert - verify the mocked unread count (5) is returned
-            if (result != null) {
-                assertEquals("Should return mocked unread count", 5, result)
-            } else {
-                E2ETestUtils.assertAuthenticationCompleted()
-            }
-        }
-    }
-
-    @Test
-    fun `Number of unread notifications before authentication returns null`() {
-        // Arrange - don't configure SDK
-
-        // Act & Assert
-        try {
-            runBlocking {
-                val result = Grovs.numberOfUnreadMessages()
-                assertNull("numberOfUnreadMessages should return null when not authenticated", result)
-            }
-        } catch (e: Exception) {
-            val message = e.message?.lowercase() ?: ""
-            assertTrue(
-                "Exception should indicate SDK not initialized, got: ${e.message}",
-                message.contains("not initialized") || message.contains("not configured") || message.contains("null")
-            )
-        }
-    }
-
-    @Test
     fun `Number of unread messages with callback style API works`() {
         runBlocking {
-            // Startup lookup and notification requests can overlap; route replies by endpoint.
-            fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
-            E2ETestUtils.setUrlDispatcher(mockWebServer, mapOf(
-                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
-                "device_for_vendor_id" to json("""{"last_seen":null}"""),
-                "clipboard_status" to json("""{"clipboard_active":false}"""),
-                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":3}"""),
-            ))
-
-            configureAndWaitForAuth()
-            delay(200)
-
+            configureWithUnreadResponse(json("""{"number_of_unread_notifications":3}"""))
 
             // Act
             var callbackInvoked = false
@@ -217,93 +169,25 @@ class NotificationsE2ETest {
     }
 
     @Test
-    fun `numberOfUnreadMessages returns value after authentication`() {
-        runBlocking {
-            // Arrange. Routed by path rather than enqueued in order: any extra request the SDK
-            // makes (an events batch, say) would otherwise consume the queued unread-count response
-            // and this test would read someone else's body as the count.
-            E2ETestUtils.setUrlDispatcher(mockWebServer, linkedMapOf(
-                "number_of_unread_notifications" to json("""{"number_of_unread_notifications":5}"""),
-                "authenticate" to json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}"""),
-                "device_for_vendor_id" to json("""{"last_seen":null}"""),
-                "events/batch" to json("""{"accepted":50,"rejected":0,"errors":[]}"""),
-                "data_for_device" to json("""{"link":null,"data":null}"""),
-            ))
+    fun `numberOfUnreadMessages returns value after authentication`() = runBlocking {
+        configureWithUnreadResponse(json("""{"number_of_unread_notifications":5}"""))
 
-            // Act
-            configureAndWaitForAuth()
-            delay(200)
+        val count = E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
 
-            val count = E2ETestUtils.runWithLooperPumping(10_000) {
-                Grovs.numberOfUnreadMessages()
-            }
-
-            // Assert - verify the mocked unread count (5) is returned
-            if (count != null) {
-                assertEquals("Should return mocked unread count", 5, count)
-            } else {
-                E2ETestUtils.assertAuthenticationCompleted()
-            }
-        }
+        assertEquals("Should return the backend count", 5, count)
     }
 
     @Test
-    fun `numberOfUnreadMessages handles server error gracefully`() {
-        runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueErrorResponse(mockWebServer, 500, "Server Error")
+    fun `numberOfUnreadMessages handles server error gracefully`() = runBlocking {
+        configureWithUnreadResponse(json("""{"error":"Server Error"}""").setResponseCode(500))
 
-            // Act
-            configureAndWaitForAuth()
-            val count = E2ETestUtils.runWithLooperPumping(10_000) {
-                Grovs.numberOfUnreadMessages()
-            }
+        val count = E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
 
-            // Assert
-            E2ETestUtils.assertAuthenticationCompleted()
-        }
-    }
-
-    @Test
-    fun `numberOfUnreadMessages with callback invokes listener`() {
-        runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 3)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 3)
-
-            configureAndWaitForAuth()
-
-            var callbackInvoked = false
-            var receivedCount: Int? = null
-            val latch = CountDownLatch(1)
-
-            // Act
-            Grovs.numberOfUnreadMessages(lifecycleOwner = null) { count ->
-                callbackInvoked = true
-                receivedCount = count
-                latch.countDown()
-            }
-
-            val startTime = System.currentTimeMillis()
-            while (latch.count > 0 && System.currentTimeMillis() - startTime < 5000) {
-    
-                Thread.sleep(50)
-            }
-
-            // Assert - verify callback was invoked and received the mocked unread count
-            E2ETestUtils.assertAuthenticationCompleted()
-            if (callbackInvoked && receivedCount != null && receivedCount != 0) {
-                assertEquals("Callback should receive mocked unread count", 3, receivedCount)
-            }
-        }
+        assertNull("A backend error should return null", count)
+        E2ETestUtils.assertRequestMade(
+            E2ETestUtils.collectAllRequests(mockWebServer), "number_of_unread_notifications"
+        )
+        E2ETestUtils.assertAuthenticationCompleted()
     }
 
     @Test
@@ -320,28 +204,12 @@ class NotificationsE2ETest {
     }
 
     @Test
-    fun `numberOfUnreadMessages returns zero for new user`() {
-        runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueUnreadCountResponse(mockWebServer, 0)
+    fun `numberOfUnreadMessages returns zero for new user`() = runBlocking {
+        configureWithUnreadResponse(json("""{"number_of_unread_notifications":0}"""))
 
-            // Act
-            configureAndWaitForAuth()
-            val count = E2ETestUtils.runWithLooperPumping(10_000) {
-                Grovs.numberOfUnreadMessages()
-            }
+        val count = E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
 
-            // Assert
-            if (count != null) {
-                assertEquals("Should return 0 for new user", 0, count)
-            } else {
-                E2ETestUtils.assertAuthenticationCompleted()
-            }
-        }
+        assertEquals("Should return the backend count", 0, count)
     }
 
     @Test

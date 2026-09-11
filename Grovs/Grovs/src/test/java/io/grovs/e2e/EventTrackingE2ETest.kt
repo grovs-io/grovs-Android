@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import io.grovs.Grovs
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.utils.InstantCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -39,7 +38,6 @@ class EventTrackingE2ETest {
     private lateinit var mockWebServer: MockWebServer
     private lateinit var application: Application
     private lateinit var capturedEventBodies: MutableList<String>
-    private lateinit var capturedPaymentBodies: MutableList<String>
 
     @get:Rule
     val testName = TestName()
@@ -53,13 +51,11 @@ class EventTrackingE2ETest {
         application = RuntimeEnvironment.getApplication()
         E2ETestUtils.setupTestApplication(application)
         capturedEventBodies = mutableListOf()
-        capturedPaymentBodies = mutableListOf()
     }
 
     @After
     fun tearDown() {
         capturedEventBodies.clear()
-        capturedPaymentBodies.clear()
         E2ETestUtils.cleanupMockWebServer(mockWebServer)
     }
 
@@ -77,17 +73,7 @@ class EventTrackingE2ETest {
         mockWebServer.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path ?: ""
-                val body = request.body.clone().readUtf8()
-
-                if (path.contains("add_payment_event")) {
-                    synchronized(capturedPaymentBodies) {
-                        capturedPaymentBodies.add(body)
-                    }
-                } else if (path.contains("event")) {
-                    synchronized(capturedEventBodies) {
-                        capturedEventBodies.add(body)
-                    }
-                }
+                captureEventRequest(request)
 
                 return when {
                     path.contains("authenticate") -> MockResponse()
@@ -111,6 +97,15 @@ class EventTrackingE2ETest {
                         .setHeader("Content-Type", "application/json")
                         .setBody("{}")
                 }
+            }
+        }
+    }
+
+    private fun captureEventRequest(request: RecordedRequest) {
+        val path = request.path.orEmpty()
+        if (path.contains("event") && !path.contains("add_payment_event")) {
+            synchronized(capturedEventBodies) {
+                capturedEventBodies.add(request.body.clone().readUtf8())
             }
         }
     }
@@ -176,17 +171,7 @@ class EventTrackingE2ETest {
         mockWebServer.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path ?: ""
-                val body = request.body.clone().readUtf8()
-
-                if (path.contains("add_payment_event")) {
-                    synchronized(capturedPaymentBodies) {
-                        capturedPaymentBodies.add(body)
-                    }
-                } else if (path.contains("event")) {
-                    synchronized(capturedEventBodies) {
-                        capturedEventBodies.add(body)
-                    }
-                }
+                captureEventRequest(request)
 
                 return when {
                     path.contains("authenticate") -> MockResponse()
@@ -238,48 +223,6 @@ class EventTrackingE2ETest {
     // ==================== Event Tracking Tests ====================
 
     @Test
-    fun `test SDK sends INSTALL event on first app open`() {
-        // Arrange - lastSeen=null means brand new device → INSTALL event
-        installEventCapturingDispatcher(lastSeen = null)
-
-        // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-        E2ETestUtils.enableImmediateEventSending()
-
-        val activityController = Robolectric.buildActivity(TestActivity::class.java)
-        activityController.create().start()
-
-        waitForEvent("install")
-
-        // Assert
-        E2ETestUtils.assertAuthenticationCompleted()
-        assertEventSent("install")
-
-        activityController.stop().destroy()
-    }
-
-    @Test
-    fun `test SDK sends APP_OPEN event on app open`() {
-        // Arrange
-        installEventCapturingDispatcher(lastSeen = null)
-
-        // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-        E2ETestUtils.enableImmediateEventSending()
-
-        val activityController = Robolectric.buildActivity(TestActivity::class.java)
-        activityController.create().start()
-
-        waitForEvent("app_open")
-
-        // Assert
-        E2ETestUtils.assertAuthenticationCompleted()
-        assertEventSent("app_open")
-
-        activityController.stop().destroy()
-    }
-
-    @Test
     fun `test first app open sends both INSTALL and APP_OPEN events`() {
         // Arrange - first launch should produce both install and app_open
         installEventCapturingDispatcher(lastSeen = null)
@@ -298,31 +241,6 @@ class EventTrackingE2ETest {
         E2ETestUtils.assertAuthenticationCompleted()
         assertEventSent("install")
         assertEventSent("app_open")
-
-        activityController.stop().destroy()
-    }
-
-    @Test
-    fun `test SDK sends REINSTALL event when lastSeen is set`() {
-        // Arrange - lastSeen is set means device was seen before → REINSTALL (not INSTALL)
-        installEventCapturingDispatcher(lastSeen = "2026-01-20T10:00:00.000Z")
-
-        // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-        E2ETestUtils.enableImmediateEventSending()
-
-        val activityController = Robolectric.buildActivity(TestActivity::class.java)
-        activityController.create().start()
-
-        waitForEvent("reinstall")
-
-        // Assert - should send reinstall, not install
-        E2ETestUtils.assertAuthenticationCompleted()
-        assertEventSent("reinstall")
-        assertEquals(
-            "Should not send install event for a returning device",
-            0, eventCount("install")
-        )
 
         activityController.stop().destroy()
     }
@@ -510,108 +428,6 @@ class EventTrackingE2ETest {
     }
 
     @Test
-    fun `test cold start deeplink attributes link to install event`() {
-        // Arrange - cold start with deeplink, server resolves to a known link
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-        try {
-            installDeeplinkEventCapturingDispatcher(
-                lastSeen = null,
-                resolvedLink = "https://test.grovs.io/campaign123"
-            )
-
-            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-            // Do NOT enable immediate event sending yet — let the SDK's delay hold events
-            // in storage so addLinkToEvents can retroactively patch the resolved link
-
-            // Act - cold start with deeplink intent
-            val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse("testapp://open?link=campaign123")
-            }
-            val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
-            activityController.create()
-
-            Grovs.setOnDeeplinkReceivedListener(activityController.get()) { _ -> }
-            activityController.start()
-
-            // Wait for deeplink resolution to complete (events get patched in storage)
-            Thread.sleep(2000)
-
-            // Now enable immediate sending so patched events flush to backend
-            E2ETestUtils.enableImmediateEventSending()
-
-            // Trigger event flush via foreground cycle
-            activityController.pause().stop()
-            activityController.start().resume()
-
-            // Wait for install event with resolved link
-            E2ETestUtils.waitForCondition(timeoutMs = 10_000, description = "install event with link attribution") {
-                E2ETestUtils.enableImmediateEventSending()
-                synchronized(capturedEventBodies) {
-                    capturedEventBodies.any {
-                        it.contains("\"event\":\"install\"") && it.contains("\"link\":\"https://test.grovs.io/campaign123\"")
-                    }
-                }
-            }
-
-            // Assert
-            assertEventHasLink("install", "https://test.grovs.io/campaign123")
-
-            activityController.stop().destroy()
-        } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
-    @Test
-    fun `test cold start deeplink attributes link to app_open event`() {
-        // Arrange
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-        try {
-            installDeeplinkEventCapturingDispatcher(
-                lastSeen = null,
-                resolvedLink = "https://test.grovs.io/promo"
-            )
-
-            E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-
-            // Act - cold start with deeplink
-            val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse("testapp://open?link=promo")
-            }
-            val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
-            activityController.create()
-
-            Grovs.setOnDeeplinkReceivedListener(activityController.get()) { _ -> }
-            activityController.start()
-
-            // Wait for deeplink resolution
-            Thread.sleep(2000)
-
-            // Enable immediate sending and trigger flush
-            E2ETestUtils.enableImmediateEventSending()
-            activityController.pause().stop()
-            activityController.start().resume()
-
-            // Wait for app_open event with link
-            E2ETestUtils.waitForCondition(timeoutMs = 10_000, description = "app_open event with link attribution") {
-                E2ETestUtils.enableImmediateEventSending()
-                synchronized(capturedEventBodies) {
-                    capturedEventBodies.any {
-                        it.contains("\"event\":\"app_open\"") && it.contains("\"link\":\"https://test.grovs.io/promo\"")
-                    }
-                }
-            }
-
-            // Assert
-            assertEventHasLink("app_open", "https://test.grovs.io/promo")
-
-            activityController.stop().destroy()
-        } finally {
-            Dispatchers.resetMain()
-        }
-    }
-
-    @Test
     fun `test deeplink attributes link to reinstall event`() {
         // Arrange - returning device with deeplink
         Dispatchers.setMain(UnconfinedTestDispatcher())
@@ -743,57 +559,6 @@ class EventTrackingE2ETest {
         activityController.stop().destroy()
     }
 
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `test custom purchase event is sent to backend`() {
-    // PURCHASE_EVENT_DISABLED:     // Arrange
-    // PURCHASE_EVENT_DISABLED:     installEventCapturingDispatcher(lastSeen = null)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Act - configure, authenticate, then log a custom purchase
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     val activityController = Robolectric.buildActivity(TestActivity::class.java)
-    // PURCHASE_EVENT_DISABLED:     activityController.create().start()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Wait for initial events first
-    // PURCHASE_EVENT_DISABLED:     waitForEvent("install")
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Log a custom purchase
-    // PURCHASE_EVENT_DISABLED:     Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:         currency = "USD",
-    // PURCHASE_EVENT_DISABLED:         productId = "premium_monthly"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Wait for the payment event to be captured
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.waitForCondition(timeoutMs = 10_000, description = "payment event sent to backend") {
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:         synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:             capturedPaymentBodies.any { it.contains("\"product_id\":\"premium_monthly\"") }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Assert - verify the payment event body contains expected values
-    // PURCHASE_EVENT_DISABLED:     val paymentBody = synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:         capturedPaymentBodies.first { it.contains("\"product_id\":\"premium_monthly\"") }
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain price_cents 999, got: ${paymentBody.take(300)}",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"price_cents\":999")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain currency USD, got: ${paymentBody.take(300)}",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"currency\":\"USD\"")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain event_type buy, got: ${paymentBody.take(300)}",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"event_type\":\"buy\"")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     activityController.stop().destroy()
-    // PURCHASE_EVENT_DISABLED: }
-
     @Test
     fun `test SDK remains functional after multiple background foreground cycles`() {
         // Arrange - verify SDK handles repeated lifecycle transitions without errors
@@ -862,96 +627,6 @@ class EventTrackingE2ETest {
 
         activityController.pause().stop().destroy()
     }
-
-    @Test
-    fun `test reinstall also sends app_open event`() {
-        // Arrange - returning device should get both reinstall AND app_open
-        installEventCapturingDispatcher(lastSeen = "2026-01-10T12:00:00.000Z")
-
-        // Act
-        E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-        E2ETestUtils.enableImmediateEventSending()
-
-        val activityController = Robolectric.buildActivity(TestActivity::class.java)
-        activityController.create().start()
-
-        waitForEvent("reinstall")
-        waitForEvent("app_open")
-
-        // Assert - returning device gets reinstall + app_open but NOT install
-        assertEventSent("reinstall")
-        assertEventSent("app_open")
-        assertEquals("Should not send install for returning device", 0, eventCount("install"))
-        assertTrue("Should have at least 1 reinstall event", eventCount("reinstall") >= 1)
-        assertTrue("Should have at least 1 app_open event", eventCount("app_open") >= 1)
-
-        activityController.stop().destroy()
-    }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `test payment event includes link attribution from deeplink`() {
-    // PURCHASE_EVENT_DISABLED:     // Arrange - cold start with deeplink, then log a purchase
-    // PURCHASE_EVENT_DISABLED:     Dispatchers.setMain(UnconfinedTestDispatcher())
-    // PURCHASE_EVENT_DISABLED:     try {
-    // PURCHASE_EVENT_DISABLED:         installDeeplinkEventCapturingDispatcher(
-    // PURCHASE_EVENT_DISABLED:             lastSeen = null,
-    // PURCHASE_EVENT_DISABLED:             resolvedLink = "https://test.grovs.io/purchase-campaign"
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Cold start with deeplink
-    // PURCHASE_EVENT_DISABLED:         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
-    // PURCHASE_EVENT_DISABLED:             data = Uri.parse("testapp://open?link=purchase-campaign")
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
-    // PURCHASE_EVENT_DISABLED:         activityController.create()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { _ -> }
-    // PURCHASE_EVENT_DISABLED:         activityController.start()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Wait for deeplink resolution so linkForFutureActions gets set
-    // PURCHASE_EVENT_DISABLED:         Thread.sleep(2000)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Now log a custom purchase - it should pick up linkForFutureActions
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:         Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:             type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:             priceInCents = 1999,
-    // PURCHASE_EVENT_DISABLED:             currency = "EUR",
-    // PURCHASE_EVENT_DISABLED:             productId = "annual_plan"
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Wait for payment event
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.waitForCondition(timeoutMs = 10_000, description = "payment event with link") {
-    // PURCHASE_EVENT_DISABLED:             E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:             synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:                 capturedPaymentBodies.any { it.contains("\"product_id\":\"annual_plan\"") }
-    // PURCHASE_EVENT_DISABLED:             }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Assert - payment event should carry the deeplink
-    // PURCHASE_EVENT_DISABLED:         val paymentBody = synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:             capturedPaymentBodies.first { it.contains("\"product_id\":\"annual_plan\"") }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should have link from deeplink, got: ${paymentBody.take(400)}",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"link\":\"https://test.grovs.io/purchase-campaign\"")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should contain price_cents 1999",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"price_cents\":1999")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should contain currency EUR",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"currency\":\"EUR\"")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         activityController.stop().destroy()
-    // PURCHASE_EVENT_DISABLED:     } finally {
-    // PURCHASE_EVENT_DISABLED:         Dispatchers.resetMain()
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
 
     // ==================== Events Before Deeplink Resolution Tests ====================
 
@@ -1035,179 +710,6 @@ class EventTrackingE2ETest {
         }
     }
 
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `test payment event logged before deeplink resolution gets raw link`() {
-    // PURCHASE_EVENT_DISABLED:     // Arrange - cold start with deeplink, log a purchase DURING resolution (before
-    // PURCHASE_EVENT_DISABLED:     // Call #2 in getDataForDevice). Payment events are NOT retroactively patched by
-    // PURCHASE_EVENT_DISABLED:     // addLinkToEvents(), so the payment should get whatever linkForFutureActions is
-    // PURCHASE_EVENT_DISABLED:     // at the time of logging — the raw URI from Call #1.
-    // PURCHASE_EVENT_DISABLED:     Dispatchers.setMain(UnconfinedTestDispatcher())
-    // PURCHASE_EVENT_DISABLED:     try {
-    // PURCHASE_EVENT_DISABLED:         // Use a slow data_for_device response to widen the resolution window
-    // PURCHASE_EVENT_DISABLED:         val lastSeenJson = "null"
-    // PURCHASE_EVENT_DISABLED:         mockWebServer.dispatcher = object : Dispatcher() {
-    // PURCHASE_EVENT_DISABLED:             override fun dispatch(request: RecordedRequest): MockResponse {
-    // PURCHASE_EVENT_DISABLED:                 val path = request.path ?: ""
-    // PURCHASE_EVENT_DISABLED:                 val body = request.body.clone().readUtf8()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:                 if (path.contains("add_payment_event")) {
-    // PURCHASE_EVENT_DISABLED:                     synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:                         capturedPaymentBodies.add(body)
-    // PURCHASE_EVENT_DISABLED:                     }
-    // PURCHASE_EVENT_DISABLED:                 } else if (path.contains("event")) {
-    // PURCHASE_EVENT_DISABLED:                     synchronized(capturedEventBodies) {
-    // PURCHASE_EVENT_DISABLED:                         capturedEventBodies.add(body)
-    // PURCHASE_EVENT_DISABLED:                     }
-    // PURCHASE_EVENT_DISABLED:                 }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:                 return when {
-    // PURCHASE_EVENT_DISABLED:                     path.contains("authenticate") -> MockResponse()
-    // PURCHASE_EVENT_DISABLED:                         .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:                         .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:                         .setBody("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}""")
-    // PURCHASE_EVENT_DISABLED:                     path.contains("device_for_vendor_id") -> MockResponse()
-    // PURCHASE_EVENT_DISABLED:                         .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:                         .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:                         .setBody("""{"last_seen":$lastSeenJson}""")
-    // PURCHASE_EVENT_DISABLED:                     path.contains("data_for_device") -> MockResponse()
-    // PURCHASE_EVENT_DISABLED:                         .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:                         .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:                         .setBody("""{"link":"https://test.grovs.io/resolved-purchase","data":null}""")
-    // PURCHASE_EVENT_DISABLED:                         .setBodyDelay(3, java.util.concurrent.TimeUnit.SECONDS) // slow resolution
-    // PURCHASE_EVENT_DISABLED:                     path.contains("add_payment_event") -> MockResponse()
-    // PURCHASE_EVENT_DISABLED:                         .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:                         .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:                         .setBody("{}")
-    // PURCHASE_EVENT_DISABLED:                     else -> MockResponse()
-    // PURCHASE_EVENT_DISABLED:                         .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:                         .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:                         .setBody("{}")
-    // PURCHASE_EVENT_DISABLED:                 }
-    // PURCHASE_EVENT_DISABLED:             }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Cold start with deeplink
-    // PURCHASE_EVENT_DISABLED:         val deeplinkIntent = Intent(Intent.ACTION_VIEW).apply {
-    // PURCHASE_EVENT_DISABLED:             data = Uri.parse("testapp://open?link=purchase-timing")
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
-    // PURCHASE_EVENT_DISABLED:         activityController.create()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { _ -> }
-    // PURCHASE_EVENT_DISABLED:         activityController.start()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Log a purchase IMMEDIATELY — before the 3s delayed data_for_device resolves.
-    // PURCHASE_EVENT_DISABLED:         // At this point linkForFutureActions has been set to the raw URI by Call #1
-    // PURCHASE_EVENT_DISABLED:         // in getDataForDevice(), but Call #2 (with resolved link) hasn't happened yet.
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:         Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:             type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:             priceInCents = 499,
-    // PURCHASE_EVENT_DISABLED:             currency = "USD",
-    // PURCHASE_EVENT_DISABLED:             productId = "early_purchase"
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Wait for payment event to be captured
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.waitForCondition(timeoutMs = 15_000, description = "payment event sent") {
-    // PURCHASE_EVENT_DISABLED:             E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:             synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:                 capturedPaymentBodies.any { it.contains("\"product_id\":\"early_purchase\"") }
-    // PURCHASE_EVENT_DISABLED:             }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Assert - payment event should NOT have the resolved link because:
-    // PURCHASE_EVENT_DISABLED:         // 1. Payment events are not retroactively patched by addLinkToEvents()
-    // PURCHASE_EVENT_DISABLED:         // 2. At the time of logPurchase, linkForFutureActions was set to the raw URI
-    // PURCHASE_EVENT_DISABLED:         //    by Call #1 (setLinkToNewFutureActions with the raw intent data)
-    // PURCHASE_EVENT_DISABLED:         // The payment event gets whatever linkForFutureActions holds at creation time.
-    // PURCHASE_EVENT_DISABLED:         val paymentBody = synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:             capturedPaymentBodies.first { it.contains("\"product_id\":\"early_purchase\"") }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should contain price_cents 499, got: ${paymentBody.take(400)}",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"price_cents\":499")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should contain currency USD",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"currency\":\"USD\"")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should contain event_type buy",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"event_type\":\"buy\"")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:         // Payment gets a link (either raw URI or resolved depending on timing),
-    // PURCHASE_EVENT_DISABLED:         // but it should NOT be null since linkForFutureActions was set by Call #1
-    // PURCHASE_EVENT_DISABLED:         assertTrue(
-    // PURCHASE_EVENT_DISABLED:             "Payment event should have a link value (raw or resolved), got: ${paymentBody.take(400)}",
-    // PURCHASE_EVENT_DISABLED:             paymentBody.contains("\"link\":")
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         activityController.stop().destroy()
-    // PURCHASE_EVENT_DISABLED:     } finally {
-    // PURCHASE_EVENT_DISABLED:         Dispatchers.resetMain()
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `test payment event without deeplink has no link attribution`() {
-    // PURCHASE_EVENT_DISABLED:     // Arrange - no deeplink, so linkForFutureActions stays null.
-    // PURCHASE_EVENT_DISABLED:     // Payment logged after auth should have null link.
-    // PURCHASE_EVENT_DISABLED:     installEventCapturingDispatcher(lastSeen = null)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     val activityController = Robolectric.buildActivity(TestActivity::class.java)
-    // PURCHASE_EVENT_DISABLED:     activityController.create().start()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Wait for initial events
-    // PURCHASE_EVENT_DISABLED:     waitForEvent("install")
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Log a custom purchase — no deeplink was opened, so no link
-    // PURCHASE_EVENT_DISABLED:     Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 299,
-    // PURCHASE_EVENT_DISABLED:         currency = "GBP",
-    // PURCHASE_EVENT_DISABLED:         productId = "no_link_purchase"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Wait for payment event
-    // PURCHASE_EVENT_DISABLED:     E2ETestUtils.waitForCondition(timeoutMs = 10_000, description = "payment event without link") {
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enableImmediateEventSending()
-    // PURCHASE_EVENT_DISABLED:         synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:             capturedPaymentBodies.any { it.contains("\"product_id\":\"no_link_purchase\"") }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Assert - payment event should have null link since no deeplink was opened
-    // PURCHASE_EVENT_DISABLED:     val paymentBody = synchronized(capturedPaymentBodies) {
-    // PURCHASE_EVENT_DISABLED:         capturedPaymentBodies.first { it.contains("\"product_id\":\"no_link_purchase\"") }
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain price_cents 299, got: ${paymentBody.take(400)}",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"price_cents\":299")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain currency GBP",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"currency\":\"GBP\"")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should contain event_type buy",
-    // PURCHASE_EVENT_DISABLED:         paymentBody.contains("\"event_type\":\"buy\"")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     // Without a deeplink, link should be null or absent
-    // PURCHASE_EVENT_DISABLED:     val hasNullLink = paymentBody.contains("\"link\":null")
-    // PURCHASE_EVENT_DISABLED:     val hasNoLink = !paymentBody.contains("\"link\":")
-    // PURCHASE_EVENT_DISABLED:     assertTrue(
-    // PURCHASE_EVENT_DISABLED:         "Payment event should have null or no link when no deeplink opened, got: ${paymentBody.take(400)}",
-    // PURCHASE_EVENT_DISABLED:         hasNullLink || hasNoLink
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     activityController.stop().destroy()
-    // PURCHASE_EVENT_DISABLED: }
-
     // ==================== Deferred Attribution (Install Referrer) Tests ====================
     //
     // These tests simulate the deferred attribution path: no deeplink intent, install
@@ -1232,17 +734,7 @@ class EventTrackingE2ETest {
         mockWebServer.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.path ?: ""
-                val body = request.body.clone().readUtf8()
-
-                if (path.contains("add_payment_event")) {
-                    synchronized(capturedPaymentBodies) {
-                        capturedPaymentBodies.add(body)
-                    }
-                } else if (path.contains("event")) {
-                    synchronized(capturedEventBodies) {
-                        capturedEventBodies.add(body)
-                    }
-                }
+                captureEventRequest(request)
 
                 return when {
                     path.contains("authenticate") -> MockResponse()

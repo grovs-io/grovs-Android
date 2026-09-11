@@ -64,11 +64,11 @@ class ProcessRestartDeviceTest {
         app.getSharedPreferences(EventsStorage.GROVS_STORAGE, Context.MODE_PRIVATE).edit().clear().commit()
         app.getSharedPreferences("grovs_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         checkpoint.edit().clear().commit()
-        val attempts = CopyOnWriteArrayList<String>()
+        val attempts = CopyOnWriteArrayList<Pair<String, JSONObject>>()
         val server = MockWebServer().apply {
             dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
-                    attempts.add(request.path.orEmpty())
+                    attempts.add(request.path.orEmpty() to JSONObject(request.body.readUtf8().ifEmpty { "{}" }))
                     return MockResponse().setResponseCode(503).setBody("""{"error":"offline fixture"}""")
                 }
             }
@@ -85,9 +85,12 @@ class ProcessRestartDeviceTest {
             rig.manager.handleIntent(Intent().setData(Uri.parse("https://demo.sqd.link/launch")), false)
             rig.custom.flush()
 
-            assertTrue(attempts.contains("/api/v1/sdk/event"))
-            assertTrue(attempts.contains("/api/v1/sdk/event/custom"))
-            assertTrue(attempts.contains("/api/v1/sdk/add_payment_event"))
+            val attemptedEvents = batchEvents(attempts)
+            assertTrue("Lifecycle events must attempt delivery", attemptedEvents.any { it.has("event") })
+            assertTrue("Custom events must attempt delivery", attemptedEvents.any {
+                it.optString("event_name") == "offline_checkout"
+            })
+            assertTrue(attempts.any { it.first == "/api/v1/sdk/add_payment_event" })
             val lifecycle = rig.storage.getEvents().filter { it.event != EventType.TIME_SPENT }
             assertEquals(1, lifecycle.count { it.event == EventType.INSTALL })
             assertEquals(1, rig.customStorage.getEvents().size)
@@ -146,7 +149,7 @@ class ProcessRestartDeviceTest {
             rig.events.logAppLaunchEvents()
             rig.manager.handleIntent(Intent().setData(Uri.parse("https://demo.sqd.link/reopen")), false)
             rig.custom.flush()
-            val events = bodies.filter { it.first == "/api/v1/sdk/event" }.map { it.second }
+            val events = batchEvents(bodies)
             val oldIds = saved.getJSONArray("lifecycle_ids").let { array ->
                 (0 until array.length()).map { array.getString(it) }.toSet()
             }
@@ -157,7 +160,7 @@ class ProcessRestartDeviceTest {
             assertEquals("Relaunch must not produce another INSTALL", 1, events.count { it.optString("event") == "install" })
             assertTrue(events.any { it.optString("event") == "app_open" && it.optString("session_id") == rig.context.sessionId })
 
-            val custom = bodies.single { it.first == "/api/v1/sdk/event/custom" }.second
+            val custom = events.single { it.optString("event_name") == "offline_checkout" }
             assertEquals(saved.getString("custom_id"), custom.getString("event_id"))
             assertEquals(oldSession, custom.getString("session_id"))
             assertEquals(saved.getString("custom_created_at"), custom.getString("created_at"))
@@ -176,6 +179,12 @@ class ProcessRestartDeviceTest {
             server.shutdown()
         }
     }
+
+    private fun batchEvents(requests: List<Pair<String, JSONObject>>): List<JSONObject> =
+        requests.filter { it.first == "/api/v1/sdk/events/batch" }.flatMap { (_, body) ->
+            val events = body.getJSONArray("events")
+            (0 until events.length()).map(events::getJSONObject)
+        }
 
     private fun reportPhaseCompleted(phase: String) {
         InstrumentationRegistry.getInstrumentation().sendStatus(2, Bundle().apply {

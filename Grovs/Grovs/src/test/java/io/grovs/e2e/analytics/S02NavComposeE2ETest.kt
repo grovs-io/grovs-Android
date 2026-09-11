@@ -2,7 +2,6 @@ package io.grovs.e2e.analytics
 
 import android.content.Context
 import android.net.Uri
-import android.os.Looper
 import androidx.navigation.NavDeepLinkRequest
 import androidx.navigation.NavDestination
 import androidx.navigation.NavGraph
@@ -13,22 +12,15 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 02 — Navigation-Compose / route-based NavController via Grovs.trackNavigation.
@@ -41,71 +33,7 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S02NavComposeE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
-
-    @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    // Harness
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    // Replicated from ScreenTrackingE2ETest (these helpers are not in E2ETestUtils).
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /** Settle + flush + drain, then parse each custom-event POST body's screen_name. Call once per scenario. */
-    private fun screenNames(): List<String> {
-        settleAutomaticScreenResolution()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
-    }
+class S02NavComposeE2ETest : ScreenTrackingTestBase() {
 
     // NavController fixtures
 
@@ -171,7 +99,7 @@ class S02NavComposeE2ETest {
         nav.popBackStack()                  // settings -> detail
         nav.popBackStack()                  // detail -> home
 
-        assertEquals(listOf("home", "detail", "settings", "detail", "home"), screenNames())
+        assertEquals(listOf("home", "detail", "settings", "detail", "home"), drainScreenNames())
     }
 
     // Navigating an arg route "detail/42" reports the route pattern "detail/{id}", not the value.
@@ -184,7 +112,7 @@ class S02NavComposeE2ETest {
         Grovs.trackNavigation(nav)          // immediate -> home
         nav.navigate("detail/42")           // -> detail/{id}
 
-        assertEquals(listOf("home", "detail/{id}"), screenNames())
+        assertEquals(listOf("home", "detail/{id}"), drainScreenNames())
     }
 
     // Navigating to the same resolved route within the 1s dedup window emits nothing further.
@@ -198,7 +126,7 @@ class S02NavComposeE2ETest {
         nav.navigate("detail")              // -> detail
         nav.navigate("detail")              // same route -> deduped
 
-        assertEquals(listOf("home", "detail"), screenNames())
+        assertEquals(listOf("home", "detail"), drainScreenNames())
     }
 
     // Navigating via a NavDeepLinkRequest resolves to the target destination and reports its route.
@@ -213,7 +141,7 @@ class S02NavComposeE2ETest {
             NavDeepLinkRequest.Builder.fromUri(Uri.parse("s02app://detail")).build()
         )                                    // -> detail
 
-        assertEquals(listOf("home", "detail"), screenNames())
+        assertEquals(listOf("home", "detail"), drainScreenNames())
     }
 
     // Navigating to a nested graph lands on its start destination; popping re-emits the parent route.
@@ -227,7 +155,7 @@ class S02NavComposeE2ETest {
         nav.navigate("nested")              // -> nestedStart (nested graph start dest)
         nav.popBackStack()                  // back to parent -> home
 
-        assertEquals(listOf("home", "nestedStart", "home"), screenNames())
+        assertEquals(listOf("home", "nestedStart", "home"), drainScreenNames())
     }
 
     // Top-level tab switches emit each selected route; reselecting the current tab is deduped.
@@ -243,7 +171,7 @@ class S02NavComposeE2ETest {
         nav.navigate("home")                // -> home
         nav.navigate("home")                // reselect -> deduped
 
-        assertEquals(listOf("home", "search", "profile", "home"), screenNames())
+        assertEquals(listOf("home", "search", "profile", "home"), drainScreenNames())
     }
 
     // A config-change recreation produces a brand-new controller; per-controller idempotency does not
@@ -263,7 +191,7 @@ class S02NavComposeE2ETest {
         Grovs.trackNavigation(recreated)    // immediate -> settings (must NOT be suppressed)
 
         assertTrue("A new controller must be treated as untracked", added)
-        assertEquals(listOf("home", "detail", "settings"), screenNames())
+        assertEquals(listOf("home", "detail", "settings"), drainScreenNames())
     }
 
     // Calling trackNavigation twice on the same controller registers a single listener, so a
@@ -279,7 +207,7 @@ class S02NavComposeE2ETest {
         nav.navigate("detail")              // -> detail exactly once
 
         // [home, detail] — if two listeners were registered we'd see [home, detail, detail].
-        assertEquals(listOf("home", "detail"), screenNames())
+        assertEquals(listOf("home", "detail"), drainScreenNames())
     }
 
     // trackNavigation is ungated: it emits even with autoTrackScreenViews = false.
@@ -292,7 +220,7 @@ class S02NavComposeE2ETest {
         Grovs.trackNavigation(nav)          // immediate -> home
         nav.navigate("detail")              // -> detail
 
-        assertEquals(listOf("home", "detail"), screenNames())
+        assertEquals(listOf("home", "detail"), drainScreenNames())
     }
 
     // When a destination has both a route and a label, the route wins.
@@ -306,7 +234,7 @@ class S02NavComposeE2ETest {
         Grovs.trackNavigation(nav)          // immediate -> home
         nav.navigate("settings")            // route "settings" wins over label
 
-        assertEquals(listOf("home", "settings"), screenNames())
+        assertEquals(listOf("home", "settings"), drainScreenNames())
     }
 
     // A destination with route == null but a label set reports the label.
@@ -318,7 +246,7 @@ class S02NavComposeE2ETest {
         val nav = labelOnlyController(label = "S02SettingsLabel")
         Grovs.trackNavigation(nav)          // immediate -> current dest (route null) -> label
 
-        assertEquals(listOf("S02SettingsLabel"), screenNames())
+        assertEquals(listOf("S02SettingsLabel"), drainScreenNames())
     }
 
     // A destination with neither route nor label reports a non-blank displayName.
@@ -330,7 +258,7 @@ class S02NavComposeE2ETest {
         val nav = labelOnlyController(label = null)
         Grovs.trackNavigation(nav)          // immediate -> current dest -> displayName
 
-        val names = screenNames()
+        val names = drainScreenNames()
         assertEquals(1, names.size)
         assertTrue("displayName must be non-blank, was '${names.firstOrNull()}'", names.single().isNotBlank())
     }
@@ -354,7 +282,7 @@ class S02NavComposeE2ETest {
         Grovs.trackNavigation(fresh)        // immediate -> home (deduped against the first home)
         fresh.navigate("detail")            // -> detail
 
-        val names = screenNames()
+        val names = drainScreenNames()
         assertTrue("Fresh controller must still emit after GC of the old one", names.contains("detail"))
         assertFalse("No spurious empties", names.any { it.isBlank() })
     }

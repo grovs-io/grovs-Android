@@ -4,7 +4,6 @@ import android.app.Application
 import android.os.Looper
 import io.grovs.Grovs
 import io.grovs.model.LogLevel
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.settings.GrovsSettings
 
@@ -368,47 +367,6 @@ class SdkLifecycleE2ETest {
         }
     }
 
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `Large batch of events handles correctly without crash`() {
-    // PURCHASE_EVENT_DISABLED:     runBlocking {
-    // PURCHASE_EVENT_DISABLED:         // Arrange
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-    // PURCHASE_EVENT_DISABLED:         repeat(50) {
-    // PURCHASE_EVENT_DISABLED:             E2ETestUtils.enqueueEventResponse(mockWebServer)
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = mockWebServer.url("/").toString())
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         val activityController = Robolectric.buildActivity(TestActivity::class.java)
-    // PURCHASE_EVENT_DISABLED:         activityController.create().start()
-    // PURCHASE_EVENT_DISABLED:         Shadows.shadowOf(Looper.getMainLooper()).idle()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Act
-    // PURCHASE_EVENT_DISABLED:         repeat(20) { i ->
-    // PURCHASE_EVENT_DISABLED:             Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:                 type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:                 priceInCents = 100 + i,
-    // PURCHASE_EVENT_DISABLED:                 currency = "USD",
-    // PURCHASE_EVENT_DISABLED:                 productId = "batch_test_$i"
-    // PURCHASE_EVENT_DISABLED:             )
-    // PURCHASE_EVENT_DISABLED:             if (i % 5 == 0) {
-    // PURCHASE_EVENT_DISABLED:                 Shadows.shadowOf(Looper.getMainLooper()).idle()
-    // PURCHASE_EVENT_DISABLED:             }
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         delay(2000)
-    // PURCHASE_EVENT_DISABLED:         Shadows.shadowOf(Looper.getMainLooper()).idle()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         // Assert
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.assertAuthenticationCompleted()
-    // PURCHASE_EVENT_DISABLED:         val requests = E2ETestUtils.collectAllRequests(mockWebServer)
-    // PURCHASE_EVENT_DISABLED:         E2ETestUtils.verifyPaymentInfrastructureWorks(requests)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:         activityController.stop().destroy()
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
-
     @Test
     fun `SDK handles rapid configuration and reconfiguration`() {
         runBlocking {
@@ -451,32 +409,33 @@ class SdkLifecycleE2ETest {
 
     @Test
     fun `SDK handles authentication failure and retry`() {
-        runBlocking {
-            // Arrange
-            E2ETestUtils.enqueueErrorResponse(mockWebServer, 401, "Unauthorized")
-            E2ETestUtils.enqueueAuthenticationResponse(mockWebServer)
-            E2ETestUtils.enqueueDeviceResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
-            E2ETestUtils.enqueueEventResponse(mockWebServer)
+        fun json(body: String) =
+            MockResponse().setHeader("Content-Type", "application/json").setBody(body)
+        val responses = mapOf(
+            "device_for_vendor_id" to json("""{"last_seen":null}"""),
+            "authenticate" to json("""{"error":"Unauthorized"}""").setResponseCode(401),
+        )
+        E2ETestUtils.setUrlDispatcher(mockWebServer, responses)
 
-            // Act
-            Grovs.configure(application, "test-api-key", useTestEnvironment = true, baseURL = mockWebServer.url("/").toString())
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-
-            val authJob = E2ETestUtils.getAuthenticationJob()
-            withTimeoutOrNull(15_000) { authJob?.join() }
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-
-            delay(2000)
-            Shadows.shadowOf(Looper.getMainLooper()).idle()
-
-            // Assert
-            val requests = E2ETestUtils.collectAllRequests(mockWebServer)
-            assertTrue(
-                "SDK should make authentication requests",
-                requests.isNotEmpty()
-            )
+        fun configureAndAwaitCompletion() {
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true,
+                baseURL = mockWebServer.url("/").toString())
+            E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true, operationName = "authentication") {
+                E2ETestUtils.getAuthenticationJob()!!.join()
+            }
         }
+
+        configureAndAwaitCompletion()
+        assertEquals("UNAUTHENTICATED", E2ETestUtils.getAuthenticationState())
+        E2ETestUtils.assertRequestMade(E2ETestUtils.collectAllRequests(mockWebServer), "authenticate")
+
+        // A caller can retry configuration after correcting the backend credentials.
+        E2ETestUtils.setUrlDispatcher(mockWebServer, responses + (
+            "authenticate" to json("""{"linksquared":"retry-device","uri_scheme":"testapp"}""")
+        ))
+        configureAndAwaitCompletion()
+        E2ETestUtils.assertAuthenticationCompleted()
+        assertEquals("retry-device", E2ETestUtils.getGrovsId())
     }
 
 }

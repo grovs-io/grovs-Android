@@ -6,17 +6,13 @@ import io.grovs.TestAssertions.assertAllowedToSendToBackend
 import io.grovs.TestAssertions.assertEqualsWithContext
 import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertNullWithContext
-import io.grovs.TestAssertions.assertTrueWithContext
 import io.grovs.TestAssertions.assertEventStored
-// PURCHASE_EVENT_DISABLED: import io.grovs.TestAssertions.assertPaymentEventStored
 import io.grovs.model.BatchEventError
 import io.grovs.model.BatchEventsResponse
 import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
 import io.grovs.model.LogLevel
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.service.IGrovsService
 import io.grovs.storage.IEventsStorage
 import io.grovs.storage.ILocalCache
@@ -70,7 +66,6 @@ class EventsManagerTest {
         mockLocalCache = mockk(relaxed = true)
 
         coEvery { mockEventsStorage.getEvents() } returns emptyList()
-        // PURCHASE_EVENT_DISABLED: coEvery { mockEventsStorage.getPaymentEvents() } returns emptyList()
         coEvery { mockEventsStorage.hasEmptyTimeSpentEvent() } returns false
         every { mockLocalCache.numberOfOpens } returns 0
         every { mockLocalCache.resignTimestamp } returns null
@@ -256,62 +251,6 @@ class EventsManagerTest {
     }
 
     // ==================== Purchase Tests ====================
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `EventsManager logInAppPurchase parses originalJson and stores payment event`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     eventsManager.allowedToSendToBackend = true
-    // PURCHASE_EVENT_DISABLED:     eventsManager.firstRequestTime = InstantCompat.now()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     val originalJson = """
-    // PURCHASE_EVENT_DISABLED:         {
-    // PURCHASE_EVENT_DISABLED:             "orderId": "GPA.1234-5678",
-    // PURCHASE_EVENT_DISABLED:             "packageName": "io.grovs.test",
-    // PURCHASE_EVENT_DISABLED:             "productId": "premium_subscription",
-    // PURCHASE_EVENT_DISABLED:             "purchaseTime": 1234567890000,
-    // PURCHASE_EVENT_DISABLED:             "purchaseState": 0,
-    // PURCHASE_EVENT_DISABLED:             "purchaseToken": "token123"
-    // PURCHASE_EVENT_DISABLED:         }
-    // PURCHASE_EVENT_DISABLED:     """.trimIndent()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     eventsManager.logInAppPurchase(originalJson)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     coVerify { mockEventsStorage.addPaymentEvent(any()) }
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `EventsManager logCustomPurchase stores payment event with correct type`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     eventsManager.allowedToSendToBackend = true
-    // PURCHASE_EVENT_DISABLED:     eventsManager.firstRequestTime = InstantCompat.now()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     eventsManager.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:         currency = "USD",
-    // PURCHASE_EVENT_DISABLED:         productId = "premium"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     assertPaymentEventStored(
-    // PURCHASE_EVENT_DISABLED:         eventType = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         mockStorage = mockEventsStorage,
-    // PURCHASE_EVENT_DISABLED:         context = "after logCustomPurchase() with type=BUY"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `EventsManager logCustomPurchase includes linkForFutureActions on payment event`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     eventsManager.linkForFutureActions = "https://test.link"
-    // PURCHASE_EVENT_DISABLED:     eventsManager.allowedToSendToBackend = true
-    // PURCHASE_EVENT_DISABLED:     eventsManager.firstRequestTime = InstantCompat.now()
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     eventsManager.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:         currency = "USD",
-    // PURCHASE_EVENT_DISABLED:         productId = "premium"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     coVerify { mockEventsStorage.addPaymentEvent(match { it.link == "https://test.link" }) }
-    // PURCHASE_EVENT_DISABLED: }
 
     // ==================== Link Association Tests ====================
 

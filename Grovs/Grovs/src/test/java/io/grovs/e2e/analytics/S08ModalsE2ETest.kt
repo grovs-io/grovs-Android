@@ -1,7 +1,6 @@
 package io.grovs.e2e.analytics
 
 import android.os.Bundle
-import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -14,22 +13,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 08 — Dialogs & modals (DialogFragment / BottomSheetDialogFragment) over content.
@@ -42,70 +34,7 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S08ModalsE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
-
-    @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    // harness
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    /** Runs pending main-looper work until every scheduled screen-resolution job has completed. */
-    private fun settle() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /** Settles + flushes, then returns the ordered list of screen_view names posted so far (draining). */
-    private fun collectScreenNames(): List<String> {
-        settle()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
-    }
+class S08ModalsE2ETest : ScreenTrackingTestBase() {
 
     private fun show(dialog: DialogFragment, activity: FragmentActivity, tag: String) {
         dialog.show(activity.supportFragmentManager, tag)
@@ -134,7 +63,7 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         buildPrimary()
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#1(primaryNav host) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -145,7 +74,7 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         buildPlain()
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#1(plain host) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -158,13 +87,13 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPrimary()
-        settle() // content emits first
+        settleAutomaticScreenResolution() // content emits first
         val dialog = S08InfoDialogFragment()
         show(dialog, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(dialog, controller.get())
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#2/#4(primaryNav) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -177,13 +106,13 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle() // content emits first
+        settleAutomaticScreenResolution() // content emits first
         val dialog = S08InfoDialogFragment()
         show(dialog, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(dialog, controller.get())
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#3/#4(plain) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -195,15 +124,15 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPrimary()
-        settle()
+        settleAutomaticScreenResolution()
         val sheet = S08MenuBottomSheetFragment()
         show(sheet, controller.get(), "menu")
-        settle()
+        settleAutomaticScreenResolution()
         E2ETestUtils.processMainLooper() // #7 expand/collapse: no lifecycle callback fires
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(sheet, controller.get())
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#5/#7/#8(primaryNav) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -215,15 +144,15 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val sheet = S08MenuBottomSheetFragment()
         show(sheet, controller.get(), "menu")
-        settle()
+        settleAutomaticScreenResolution()
         E2ETestUtils.processMainLooper() // #7 expand/collapse: no lifecycle callback fires
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(sheet, controller.get())
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#6/#7/#8(plain) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -235,15 +164,15 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val d1 = S08InfoDialogFragment()
         show(d1, controller.get(), "d1")
-        settle()
+        settleAutomaticScreenResolution()
         val d2 = S08SecondDialogFragment()
         show(d2, controller.get(), "d2")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#9(plain, stacked) actual=$actual")
         assertEquals(
             listOf("S08ContentFragment"),
@@ -258,12 +187,12 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08DialogWithChildFragment()
         show(dialog, controller.get(), "childHost")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#10(plain, dialog-with-child) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -275,13 +204,13 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08InfoDialogFragment()
         show(dialog, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
 
         controller.recreate()
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#11(plain, rotation) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -293,16 +222,16 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08InfoDialogFragment()
         show(dialog, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
 
         controller.pause().stop()
-        settle()
+        settleAutomaticScreenResolution()
         controller.start().resume()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#12(plain, bg/fg) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -317,12 +246,12 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08FullScreenDialogFragment()
         show(dialog, controller.get(), "fullscreen")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#14(plain, full-screen dialog) actual=$actual")
         // Even a STYLE_NO_FRAME full-screen dialog is a DialogFragment -> skipped -> not auto-tracked.
         assertEquals(listOf("S08ContentFragment"), actual)
@@ -335,12 +264,12 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPrimary()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08FullScreenDialogFragment()
         show(dialog, controller.get(), "fullscreen")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#14b(primaryNav, full-screen dialog) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -352,20 +281,20 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val activity = controller.get()
         val second = S08SecondContentFragment()
         activity.supportFragmentManager.beginTransaction()
             .replace(activity.contentRootId, second, "content2")
             .commitNow()
         E2ETestUtils.processMainLooper()
-        settle()
+        settleAutomaticScreenResolution()
 
         val dialog = S08InfoDialogFragment()
         show(dialog, activity, "info")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#15(plain, navigate-then-dialog) actual=$actual")
         assertEquals(
             listOf("S08ContentFragment", "S08SecondContentFragment"),
@@ -380,17 +309,17 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val first = S08InfoDialogFragment()
         show(first, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(first, controller.get())
-        settle()
+        settleAutomaticScreenResolution()
         val second = S08InfoDialogFragment()
         show(second, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#16(plain, show/dismiss/show) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -402,15 +331,15 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val dialog = S08InfoDialogFragment()
         show(dialog, controller.get(), "info")
-        settle()
+        settleAutomaticScreenResolution()
         dialog.requireDialog().cancel() // equivalent to the back button -> onCancel -> dismiss
         controller.get().supportFragmentManager.executePendingTransactions()
         E2ETestUtils.processMainLooper()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#17(plain, cancel-via-back) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }
@@ -422,10 +351,10 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         buildPrimary()
-        settle()
+        settleAutomaticScreenResolution()
         Grovs.trackScreenView("InfoDialog")
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#18(manual trackScreenView) actual=$actual")
         assertEquals(listOf("S08ContentFragment", "InfoDialog"), actual)
     }
@@ -437,17 +366,17 @@ class S08ModalsE2ETest {
         E2ETestUtils.getAuthenticationJob()?.join()
 
         val controller = buildPlain()
-        settle()
+        settleAutomaticScreenResolution()
         val menu = S08MenuBottomSheetFragment()
         show(menu, controller.get(), "menu")
-        settle()
+        settleAutomaticScreenResolution()
         dismiss(menu, controller.get())
-        settle()
+        settleAutomaticScreenResolution()
         val share = S08ShareBottomSheetFragment()
         show(share, controller.get(), "share")
-        settle()
+        settleAutomaticScreenResolution()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#19(plain, two sheets) actual=$actual")
         assertEquals(
             listOf("S08ContentFragment"),
@@ -464,7 +393,7 @@ class S08ModalsE2ETest {
 
         Robolectric.buildActivity(S08ModalOnResumeActivity::class.java).create().start().resume()
 
-        val actual = collectScreenNames()
+        val actual = drainScreenNames()
         println("S08#20(modal-in-onResume race) actual=$actual")
         assertEquals(listOf("S08ContentFragment"), actual)
     }

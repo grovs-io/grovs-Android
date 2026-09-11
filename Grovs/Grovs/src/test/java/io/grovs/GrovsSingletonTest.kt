@@ -1,6 +1,5 @@
 package io.grovs
 
-import android.app.Activity
 import android.app.Application
 import android.content.Context
 import android.content.Intent
@@ -26,7 +25,6 @@ import android.net.Uri
 import kotlinx.coroutines.CompletableDeferred
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
 import io.grovs.utils.LSResult
@@ -606,25 +604,6 @@ class GrovsSingletonTest {
     }
 
     // ==================== Purchase Tests ====================
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `Grovs logInAppPurchase does not throw when SDK not configured`() {
-    // PURCHASE_EVENT_DISABLED:     val originalJson = """{"productId":"premium","purchaseToken":"abc123"}"""
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     // Should complete without exception
-    // PURCHASE_EVENT_DISABLED:     Grovs.logInAppPurchase(originalJson)
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `Grovs logCustomPurchase does not throw when SDK not configured`() {
-    // PURCHASE_EVENT_DISABLED:     // Should complete without exception
-    // PURCHASE_EVENT_DISABLED:     Grovs.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:         currency = "USD",
-    // PURCHASE_EVENT_DISABLED:         productId = "premium"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED: }
 
     // ==================== Singleton Reset Tests ====================
 

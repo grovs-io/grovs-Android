@@ -3,7 +3,6 @@ package io.grovs.e2e.analytics
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
-import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,21 +12,14 @@ import androidx.fragment.app.Fragment
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * S06 — Multi-Activity navigation (classic startActivity stack).
@@ -40,73 +32,14 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S06MultiActivityE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
-
-    @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
+class S06MultiActivityE2ETest : ScreenTrackingTestBase() {
 
     // ---- Harness ----
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
 
     /** Settles pending resolution jobs and flushes queued screen_view events to MockWebServer. */
     private fun settleAndFlush() {
         settleAutomaticScreenResolution()
         E2ETestUtils.flushCustomEvents()
-    }
-
-    /** Drains MockWebServer and returns the ordered screen_name values from screen_view POSTs. */
-    private fun drainScreenNames(): List<String> {
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
     }
 
     // ---- SDK lifecycle-observer reflection (for transitions the controller won't drive) ----
@@ -137,7 +70,7 @@ class S06MultiActivityE2ETest {
         launch(S06HomeActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("S06HomeActivity"), drainScreenNames())
+        assertEquals(listOf("S06HomeActivity"), readScreenNames())
     }
 
     /**
@@ -169,7 +102,7 @@ class S06MultiActivityE2ETest {
                 "S06DetailActivity",
                 "S06HomeActivity",
             ),
-            drainScreenNames(),
+            readScreenNames(),
         )
     }
 
@@ -188,7 +121,7 @@ class S06MultiActivityE2ETest {
 
         assertEquals(
             listOf("S06HomeActivity", "S06DetailActivity", "S06CheckoutActivity"),
-            drainScreenNames(),
+            readScreenNames(),
         )
     }
 
@@ -204,7 +137,7 @@ class S06MultiActivityE2ETest {
         settleAndFlush()
 
         // Only the first Detail is reported; the second is suppressed by the 1s dedup window.
-        assertEquals(listOf("S06DetailActivity"), drainScreenNames())
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
     }
 
     /**
@@ -223,7 +156,7 @@ class S06MultiActivityE2ETest {
 
         assertEquals(
             listOf("S06DetailFragment", "S06HomeActivity"),
-            drainScreenNames(),
+            readScreenNames(),
         )
     }
 
@@ -236,7 +169,7 @@ class S06MultiActivityE2ETest {
         launch(S06DetailActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("S06DetailActivity"), drainScreenNames())
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
     }
 
     /**
@@ -254,7 +187,7 @@ class S06MultiActivityE2ETest {
         launch(S06DetailActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("S06DetailActivity"), drainScreenNames())
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
     }
 
     /** Action 12 — Rotation of Detail (recreate) is deduped: same name within 1s. */
@@ -268,7 +201,7 @@ class S06MultiActivityE2ETest {
         controller.recreate() // configuration change -> new Detail instance, same simpleName
         settleAndFlush()
 
-        assertEquals(listOf("S06DetailActivity"), drainScreenNames())
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
     }
 
     /**
@@ -292,7 +225,7 @@ class S06MultiActivityE2ETest {
         settleAndFlush()
 
         // First Home reported; the foreground re-resume is deduped (< 1s, same name).
-        assertEquals(listOf("S06HomeActivity"), drainScreenNames())
+        assertEquals(listOf("S06HomeActivity"), readScreenNames())
     }
 
     /**
@@ -307,7 +240,7 @@ class S06MultiActivityE2ETest {
         launch(S06CheckoutActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("S06CheckoutActivity"), drainScreenNames())
+        assertEquals(listOf("S06CheckoutActivity"), readScreenNames())
     }
 
     /** Action 15 — Task switch A -> B -> A quickly. Different names, so NO false dedup. */
@@ -325,7 +258,7 @@ class S06MultiActivityE2ETest {
 
         assertEquals(
             listOf("S06DetailActivity", "S06HomeActivity", "S06DetailActivity"),
-            drainScreenNames(),
+            readScreenNames(),
         )
     }
 
@@ -343,7 +276,7 @@ class S06MultiActivityE2ETest {
         dispatchResumed(detail) // singleTop onNewIntent -> onResume redelivery
         settleAndFlush()
 
-        assertEquals(listOf("S06DetailActivity"), drainScreenNames())
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
     }
 
     /**
@@ -365,7 +298,7 @@ class S06MultiActivityE2ETest {
 
         assertEquals(
             listOf("S06HomeActivity", "S06TranslucentActivity", "S06HomeActivity"),
-            drainScreenNames(),
+            readScreenNames(),
         )
     }
 
@@ -381,7 +314,7 @@ class S06MultiActivityE2ETest {
         launch(S06NoDisplayActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("S06NoDisplayActivity"), drainScreenNames())
+        assertEquals(listOf("S06NoDisplayActivity"), readScreenNames())
     }
 
     /**
@@ -403,14 +336,14 @@ class S06MultiActivityE2ETest {
         settleAndFlush()
         assertEquals(
             listOf("S06HomeActivity", "S06DetailActivity", "S06CheckoutActivity"),
-            drainScreenNames(),
+            readScreenNames(),
         )
 
         // Phase 2: same instance resumed twice with no settle between -> coalesces to one job.
         val settings = launch(S06SettingsActivity::class.java)
         dispatchResumed(settings) // second resume of the SAME instance before the first job runs
         settleAndFlush()
-        assertEquals(listOf("S06SettingsActivity"), drainScreenNames())
+        assertEquals(listOf("S06SettingsActivity"), readScreenNames())
     }
 
     /** Action 20 — Activity-alias remapping. Aliases rename the reported activity screen. */
@@ -423,7 +356,7 @@ class S06MultiActivityE2ETest {
         launch(S06CheckoutActivity::class.java)
         settleAndFlush()
 
-        assertEquals(listOf("Cart"), drainScreenNames())
+        assertEquals(listOf("Cart"), readScreenNames())
     }
 }
 

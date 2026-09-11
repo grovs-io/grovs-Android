@@ -3,6 +3,7 @@ package io.grovs.handlers
 import android.app.Application
 import android.content.ComponentName
 import android.content.Context
+import io.grovs.TestFixtures
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
@@ -11,7 +12,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
 import com.google.android.finsky.externalreferrer.IGetInstallReferrerService
-import io.grovs.TestAssertions.assertAuthenticated
 import io.grovs.TestAssertions.assertUnauthenticated
 import io.grovs.TestAssertions.assertEqualsWithContext
 import io.grovs.TestAssertions.assertNotNullWithContext
@@ -25,7 +25,6 @@ import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.events.PaymentEventType
 import io.grovs.model.AuthenticationResponse
 import io.grovs.model.GetDeviceResponse
@@ -37,7 +36,6 @@ import io.grovs.FakeClipboard
 import io.grovs.FakeLocalCache
 import io.grovs.storage.EventsStorage
 import io.grovs.storage.ILocalCache
-import io.grovs.utils.ClipDescriptionResult
 import io.mockk.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -116,7 +114,7 @@ class GrovsManagerTest {
         mockEventsManager = mockk(relaxed = true)
         mockAppDetailsHelper = mockk(relaxed = true)
 
-        coEvery { mockAppDetailsHelper.toAppDetails() } returns createMockAppDetails()
+        coEvery { mockAppDetailsHelper.toAppDetails() } returns TestFixtures.createAppDetails()
         every { mockAppDetailsHelper.deviceID } returns "test-device-id"
         every { mockAppDetailsHelper.versionName } returns "1.0.0"
         every { mockAppDetailsHelper.versionCode } returns 1
@@ -137,23 +135,6 @@ class GrovsManagerTest {
             // ClipboardHandler and silently reroute the pre-existing (non-clipboard) tests below into
             // the clipboard flow. Pin this shared manager's install to "not a fresh install" instead.
             localCache = FakeLocalCache(numberOfOpens = 1),
-        )
-    }
-
-    private fun createMockAppDetails(): AppDetails {
-        return AppDetails(
-            version = "1.0.0",
-            build = "1",
-            bundle = "io.grovs.test",
-            device = "Test Device",
-            deviceID = "test-device-id",
-            userAgent = "Test User Agent",
-            screenWidth = "1080",
-            screenHeight = "1920",
-            timezone = "UTC",
-            language = "en-US",
-            webglVendor = "Test Vendor",
-            webglRenderer = "Test Renderer"
         )
     }
 
@@ -1112,41 +1093,6 @@ class GrovsManagerTest {
         coVerify(exactly = 0) { mockEventsManager.logInAppPurchase(any()) }
         coVerify(exactly = 0) { mockEventsManager.logCustomPurchase(any(), any(), any(), any(), any()) }
     }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `GrovsManager logInAppPurchase delegates to eventsManager`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     val originalJson = """{"orderId": "test123", "productId": "premium"}"""
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     coEvery { mockEventsManager.logInAppPurchase(any()) } just Runs
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     grovsManager.logInAppPurchase(originalJson)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     coVerify { mockEventsManager.logInAppPurchase(originalJson) }
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `GrovsManager logCustomPurchase delegates to eventsManager with correct parameters`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     coEvery {
-    // PURCHASE_EVENT_DISABLED:         mockEventsManager.logCustomPurchase(any(), any(), any(), any(), any())
-    // PURCHASE_EVENT_DISABLED:     } just Runs
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     grovsManager.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:         type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:         currency = "USD",
-    // PURCHASE_EVENT_DISABLED:         productId = "premium_feature"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     coVerify {
-    // PURCHASE_EVENT_DISABLED:         mockEventsManager.logCustomPurchase(
-    // PURCHASE_EVENT_DISABLED:             type = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:             priceInCents = 999,
-    // PURCHASE_EVENT_DISABLED:             currency = "USD",
-    // PURCHASE_EVENT_DISABLED:             productId = "premium_feature",
-    // PURCHASE_EVENT_DISABLED:             startDate = any()
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
 
     // ==================== Edge Cases Tests ====================
 

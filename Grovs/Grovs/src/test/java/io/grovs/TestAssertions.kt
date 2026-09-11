@@ -71,15 +71,11 @@ object TestAssertions {
 
     // ==================== State Assertions ====================
 
-    /**
-     * Assert GrovsManager is in AUTHENTICATED state.
-     */
     internal fun assertAuthenticated(manager: io.grovs.handlers.GrovsManager, context: String) {
-        val actual = manager.authenticationState
         assertEquals(
-            "Expected authenticationState to be AUTHENTICATED $context, but was $actual",
+            "Expected authenticationState to be AUTHENTICATED $context",
             io.grovs.handlers.GrovsManager.AuthenticationState.AUTHENTICATED,
-            actual
+            manager.authenticationState
         )
     }
 
@@ -92,26 +88,6 @@ object TestAssertions {
             "Expected authenticationState to be UNAUTHENTICATED $context, but was $actual",
             io.grovs.handlers.GrovsManager.AuthenticationState.UNAUTHENTICATED,
             actual
-        )
-    }
-
-    /**
-     * Assert SDK is enabled.
-     */
-    fun assertSdkEnabled(grovsContext: io.grovs.handlers.GrovsContext, context: String) {
-        assertTrue(
-            "Expected SDK to be enabled $context, but sdkEnabled was false",
-            grovsContext.settings.sdkEnabled
-        )
-    }
-
-    /**
-     * Assert SDK is disabled.
-     */
-    fun assertSdkDisabled(grovsContext: io.grovs.handlers.GrovsContext, context: String) {
-        assertFalse(
-            "Expected SDK to be disabled $context, but sdkEnabled was true",
-            grovsContext.settings.sdkEnabled
         )
     }
 
@@ -158,39 +134,6 @@ object TestAssertions {
     }
 
     /**
-     * Assert callback was invoked with an error containing expected message.
-     */
-    fun assertCallbackInvokedWithError(
-        error: Exception?,
-        expectedMessageContains: String,
-        context: String
-    ) {
-        assertNotNull(
-            "Expected error in callback $context, but error was null",
-            error
-        )
-        assertTrue(
-            "Expected error message to contain '$expectedMessageContains' $context, but was: ${error?.message}",
-            error?.message?.contains(expectedMessageContains) == true
-        )
-    }
-
-    /**
-     * Assert CountDownLatch completed within timeout.
-     */
-    fun assertLatchCompleted(
-        latch: java.util.concurrent.CountDownLatch,
-        timeoutMs: Long,
-        context: String
-    ) {
-        val completed = latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-        assertTrue(
-            "Expected latch to complete within ${timeoutMs}ms $context, but it timed out (count was ${latch.count})",
-            completed
-        )
-    }
-
-    /**
      * Assert a callback was invoked (boolean flag check with timeout context).
      */
     fun assertCallbackInvoked(invoked: Boolean, timeoutMs: Long, context: String) {
@@ -233,55 +176,6 @@ object TestAssertions {
         } catch (e: AssertionError) {
             throw AssertionError(
                 "Expected $eventType event to be stored $context, but it was not. Original: ${e.message}"
-            )
-        }
-    }
-
-    // PURCHASE_EVENT_DISABLED: /**
-    // PURCHASE_EVENT_DISABLED:  * Assert a payment event was stored.
-    // PURCHASE_EVENT_DISABLED:  */
-    // PURCHASE_EVENT_DISABLED: suspend fun assertPaymentEventStored(
-    // PURCHASE_EVENT_DISABLED:     eventType: io.grovs.model.events.PaymentEventType,
-    // PURCHASE_EVENT_DISABLED:     mockStorage: io.grovs.storage.IEventsStorage,
-    // PURCHASE_EVENT_DISABLED:     context: String
-    // PURCHASE_EVENT_DISABLED: ) {
-    // PURCHASE_EVENT_DISABLED:     try {
-    // PURCHASE_EVENT_DISABLED:         coVerify { mockStorage.addPaymentEvent(match { it.eventType == eventType }) }
-    // PURCHASE_EVENT_DISABLED:     } catch (e: AssertionError) {
-    // PURCHASE_EVENT_DISABLED:         throw AssertionError(
-    // PURCHASE_EVENT_DISABLED:             "Expected $eventType payment event to be stored $context, but it was not. Original: ${e.message}"
-    // PURCHASE_EVENT_DISABLED:         )
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
-
-    /**
-     * Assert no events were sent to backend.
-     */
-    suspend fun assertNoEventsSent(
-        mockService: io.grovs.service.IGrovsService,
-        context: String
-    ) {
-        try {
-            coVerify(exactly = 0) { mockService.addEvents(any()) }
-        } catch (e: AssertionError) {
-            throw AssertionError(
-                "Expected no events to be sent to backend $context, but some were sent. Original: ${e.message}"
-            )
-        }
-    }
-
-    /**
-     * Assert event was removed from storage.
-     */
-    suspend fun assertEventRemoved(
-        mockStorage: io.grovs.storage.IEventsStorage,
-        context: String
-    ) {
-        try {
-            coVerify { mockStorage.removeEvent(any()) }
-        } catch (e: AssertionError) {
-            throw AssertionError(
-                "Expected event to be removed from storage $context, but it was not. Original: ${e.message}"
             )
         }
     }

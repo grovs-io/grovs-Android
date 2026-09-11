@@ -13,13 +13,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.viewpager2.adapter.FragmentStateAdapter
 import androidx.viewpager2.widget.ViewPager2
-import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -27,12 +24,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * S05 — ViewPager2 + FragmentStateAdapter (swipeable tabs).
@@ -43,70 +37,20 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S05ViewPager2E2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
+class S05ViewPager2E2ETest : ScreenTrackingTestBase() {
 
     @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        // Reset fixture config to defaults for each test.
+    fun resetPagerFixture() {
         S05HostActivity.initialItem = 0
         S05HostActivity.offscreenLimit = ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT
         S05HostActivity.page2HostsChild = false
         S05HostActivity.pageCount = 3
-
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
     }
 
     // ---- looper / resolution helpers ----
 
     private fun idle() {
         Shadows.shadowOf(Looper.getMainLooper()).idle()
-    }
-
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
     }
 
     /** Force the ViewPager2 / inner RecyclerView to measure + lay out so page fragments bind. */
@@ -150,15 +94,6 @@ class S05ViewPager2E2ETest {
         settleAutomaticScreenResolution()
     }
 
-    /** Drains the mock server and returns the ordered screen_name list from custom-event POSTs. */
-    private fun collectScreenViews(): List<String> {
-        E2ETestUtils.flushCustomEvents()
-        val requests = E2ETestUtils.collectAllRequests(mockWebServer)
-        return E2ETestUtils.eventsFromBatchRequests(requests)
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
-    }
-
     private fun newHost(): ActivityController<S05HostActivity> =
         Robolectric.buildActivity(S05HostActivity::class.java)
 
@@ -175,7 +110,7 @@ class S05ViewPager2E2ETest {
 
         coldStart(newHost())
 
-        assertEquals(listOf("S05Page1Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page1Fragment"), drainScreenNames(settleResolution = false))
     }
 
     @Test
@@ -186,7 +121,7 @@ class S05ViewPager2E2ETest {
 
         coldStart(newHost())
 
-        assertEquals(listOf("S05Page3Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page3Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // Sequential swipes emit each current page (a TabLayout click maps to setCurrentItem).
@@ -203,7 +138,7 @@ class S05ViewPager2E2ETest {
 
         assertEquals(
             listOf("S05Page1Fragment", "S05Page2Fragment", "S05Page3Fragment", "S05Page1Fragment"),
-            collectScreenViews(),
+            drainScreenNames(settleResolution = false),
         )
     }
 
@@ -221,7 +156,7 @@ class S05ViewPager2E2ETest {
 
         assertEquals(
             listOf("S05Page1Fragment", "S05Page2Fragment"),
-            collectScreenViews(),
+            drainScreenNames(settleResolution = false),
         )
     }
 
@@ -238,7 +173,7 @@ class S05ViewPager2E2ETest {
 
         assertEquals(
             listOf("S05Page1Fragment", "S05Page3Fragment", "S05Page1Fragment"),
-            collectScreenViews(),
+            drainScreenNames(settleResolution = false),
         )
     }
 
@@ -259,7 +194,7 @@ class S05ViewPager2E2ETest {
         activity.supportFragmentManager.executePendingTransactions()
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames(settleResolution = false)
         // page1 (cold start) then page3 (final); the intermediate page2 must not appear.
         assertEquals(listOf("S05Page1Fragment", "S05Page3Fragment"), screens)
         assertFalse("page2 must not be emitted in a coalesced jump", screens.contains("S05Page2Fragment"))
@@ -276,7 +211,7 @@ class S05ViewPager2E2ETest {
 
         // Only the current page is RESUMED even though the neighbour page2 is created/STARTED.
         assertEquals(listOf("S05Page1Fragment"), resumedPageFragments(activity))
-        assertEquals(listOf("S05Page1Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page1Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // offscreenPageLimit=3 -> all pages created, still only current RESUMED/tracked.
@@ -294,7 +229,7 @@ class S05ViewPager2E2ETest {
         assertTrue("all pages should be created with offscreenPageLimit=3", all.size >= 3)
         // ...but only the current one is RESUMED and tracked.
         assertEquals(listOf("S05Page1Fragment"), resumedPageFragments(activity))
-        assertEquals(listOf("S05Page1Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page1Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // A page hosting nested child fragments resolves to the visible child leaf.
@@ -310,7 +245,7 @@ class S05ViewPager2E2ETest {
 
         assertEquals(
             listOf("S05Page1Fragment", "S05Page2ChildFragment"),
-            collectScreenViews(),
+            drainScreenNames(settleResolution = false),
         )
     }
 
@@ -347,7 +282,7 @@ class S05ViewPager2E2ETest {
 
         assertEquals(
             listOf("S05Page1Fragment", "S05Page2Fragment", "S05DetailFragment"),
-            collectScreenViews(),
+            drainScreenNames(settleResolution = false),
         )
     }
 
@@ -367,7 +302,7 @@ class S05ViewPager2E2ETest {
         settleAutomaticScreenResolution()
 
         // Same screen within the 1s dedup window -> only the original emit survives.
-        assertEquals(listOf("S05Page2Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page2Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // Background then foreground on page3.
@@ -387,7 +322,7 @@ class S05ViewPager2E2ETest {
         settleAutomaticScreenResolution()
 
         // Foreground re-resolves page3; identical name within 1s dedups -> only one emit.
-        assertEquals(listOf("S05Page3Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page3Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // Process-death restore on page2 (a relaunch straight onto page2).
@@ -399,7 +334,7 @@ class S05ViewPager2E2ETest {
 
         coldStart(newHost())           // relaunched directly on page2
 
-        assertEquals(listOf("S05Page2Fragment"), collectScreenViews())
+        assertEquals(listOf("S05Page2Fragment"), drainScreenNames(settleResolution = false))
     }
 
     // Swapping the adapter must not crash; resolver keeps reporting the current page.
@@ -420,7 +355,7 @@ class S05ViewPager2E2ETest {
 
         // No crash; the first page is present and only one page is RESUMED.
         assertEquals(listOf("S05Page1Fragment"), resumedPageFragments(activity))
-        val screens = collectScreenViews()
+        val screens = drainScreenNames(settleResolution = false)
         assertTrue("cold start page1 must have been emitted", screens.contains("S05Page1Fragment"))
     }
 }

@@ -94,13 +94,11 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create()
 
-
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             receivedDeeplink = details
         }
 
         activityController.start()
-
 
         // Wait for deeplink callback - outside runBlocking so main looper is free
         E2ETestUtils.waitForCondition(description = "deeplink callback") {
@@ -125,7 +123,6 @@ class DeepLinkingE2ETest {
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueEventResponse(mockWebServer)
             E2ETestUtils.enqueueDataForDeviceResponse(mockWebServer)
-
 
             configureAndWaitForAuth()
 
@@ -186,14 +183,12 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create()
 
-
         var receivedData: Map<String, Any>? = null
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             receivedData = details?.data
         }
 
         activityController.start()
-
 
         // Wait for deeplink callback - outside runBlocking so main looper is free
         E2ETestUtils.waitForCondition(description = "deeplink data callback") {
@@ -235,10 +230,8 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start().resume()
 
-
         // Simulate app going to background (warm start = activity stopped but not destroyed)
         activityController.pause().stop()
-
 
         var receivedDeeplink: io.grovs.model.DeeplinkDetails? = null
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
@@ -252,7 +245,6 @@ class DeepLinkingE2ETest {
         activityController.newIntent(newIntent)
 
         activityController.start().resume()
-
 
         // Wait for deeplink callback
         E2ETestUtils.waitForCondition(description = "warm start deeplink callback") {
@@ -291,7 +283,6 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start().resume()
 
-
         var receivedDeeplink: io.grovs.model.DeeplinkDetails? = null
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             receivedDeeplink = details
@@ -302,7 +293,6 @@ class DeepLinkingE2ETest {
             data = Uri.parse("testapp://open?link=hotstart")
         }
         activityController.newIntent(deeplinkIntent)
-
 
         // Wait for deeplink callback
         E2ETestUtils.waitForCondition(description = "hot start deeplink callback") {
@@ -517,17 +507,14 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create()
 
-
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             listenerCalled = true
         }
 
         activityController.start()
 
-
         // Give SDK time to attempt the request (but not enough for the 30s delay)
         Thread.sleep(1000)
-
 
         // Assert - SDK should attempt to resolve but listener should not be called (server too slow)
         E2ETestUtils.assertAuthenticationCompleted()
@@ -571,10 +558,8 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create().start()
 
-
         // Wait for the deeplink to be processed (without a listener set)
         Thread.sleep(1000)
-
 
         // Now set the listener after deeplink was already processed
         var listenerCalled = false
@@ -582,9 +567,7 @@ class DeepLinkingE2ETest {
             listenerCalled = true
         }
 
-
         Thread.sleep(500)
-
 
         // Assert
         E2ETestUtils.assertAuthenticationCompleted()
@@ -636,14 +619,12 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create()
 
-
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             listenerCalled = true
             receivedData = details.data
         }
 
         activityController.start()
-
 
         // Wait for deeplink callback - outside runBlocking so main looper is free
         E2ETestUtils.waitForCondition(description = "deeplink data callback") {
@@ -689,7 +670,6 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start()
 
-
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             callCount++
             receivedLinks.add(details.link)
@@ -711,7 +691,6 @@ class DeepLinkingE2ETest {
         Grovs.onNewIntent(intent2, activityController.get())
 
         Grovs.onNewIntent(intent3, activityController.get())
-
 
         // Wait for at least one callback
         E2ETestUtils.waitForCondition(description = "deeplink callback from rapid intents") {
@@ -758,14 +737,12 @@ class DeepLinkingE2ETest {
         val activityController = Robolectric.buildActivity(TestActivity::class.java, deeplinkIntent)
         activityController.create()
 
-
         Grovs.setOnDeeplinkReceivedListener(activityController.get()) { details ->
             listenerCalled = true
             receivedTracking = details.tracking
         }
 
         activityController.start()
-
 
         // Wait for deeplink callback - outside runBlocking so main looper is free
         E2ETestUtils.waitForCondition(description = "deeplink tracking callback") {

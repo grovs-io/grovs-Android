@@ -2,25 +2,18 @@ package io.grovs.e2e.analytics
 
 import android.content.Intent
 import android.os.Bundle
-import android.os.Looper
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 04 — BottomNavigationView + hide()/show() fragment transactions (LEGACY, the SDK's known gap).
@@ -36,73 +29,9 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S04BottomNavHideShowE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
-
-    @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
+class S04BottomNavHideShowE2ETest : ScreenTrackingTestBase() {
 
     // Harness.
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /**
-     * Drains every screen_view emitted so far, in order. Settles pending resolution jobs and flushes
-     * custom events first, so this is the ACTUAL ordered sequence the backend would receive.
-     */
-    private fun emittedScreenNames(): List<String> {
-        settleAutomaticScreenResolution()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").optString("screen_name") }
-    }
 
     private fun startIntent(startTab: String? = null): Intent {
         val i = Intent(RuntimeEnvironment.getApplication(), S04HostActivity::class.java)
@@ -125,7 +54,7 @@ class S04BottomNavHideShowE2ETest {
 
         Robolectric.buildActivity(S04HostActivity::class.java, startIntent()).create().start().resume()
 
-        assertEquals(listOf(HOME), emittedScreenNames())
+        assertEquals(listOf(HOME), drainScreenNames())
     }
 
     /**
@@ -158,7 +87,7 @@ class S04BottomNavHideShowE2ETest {
         activity.switchTo(S04HostActivity.TAG_SEARCH)
 
         // ONLY the cold-start Home ever emitted. Every hide/show switch above produced nothing.
-        assertEquals(listOf(HOME), emittedScreenNames())
+        assertEquals(listOf(HOME), drainScreenNames())
     }
 
     /** Action 5: reselecting the already-shown tab has no lifecycle change and nothing to emit (not a gap). */
@@ -173,7 +102,7 @@ class S04BottomNavHideShowE2ETest {
         // Reselect Home (already shown).
         activity.switchTo(S04HostActivity.TAG_HOME)
 
-        assertEquals(listOf(HOME), emittedScreenNames())
+        assertEquals(listOf(HOME), drainScreenNames())
     }
 
     /**
@@ -200,7 +129,7 @@ class S04BottomNavHideShowE2ETest {
         // Action 18: a hide/show AFTER the recreate is still a gap.
         controller.get().switchTo(S04HostActivity.TAG_PROFILE)
 
-        assertEquals(listOf(HOME, SEARCH), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH), drainScreenNames())
     }
 
     /**
@@ -222,7 +151,7 @@ class S04BottomNavHideShowE2ETest {
         controller.pause().stop()
         controller.start().resume()
 
-        assertEquals(listOf(HOME, SEARCH), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH), drainScreenNames())
     }
 
     /**
@@ -247,7 +176,7 @@ class S04BottomNavHideShowE2ETest {
         // 10: pop detail — Home is revealed but not re-resumed, so nothing emits.
         activity.popDetail()
 
-        assertEquals(listOf(HOME, DETAIL), emittedScreenNames())
+        assertEquals(listOf(HOME, DETAIL), drainScreenNames())
     }
 
     /**
@@ -272,7 +201,7 @@ class S04BottomNavHideShowE2ETest {
         // 14: Profile -> Home
         activity.switchTo(S04MaxLifecycleHostActivity.TAG_HOME)
 
-        assertEquals(listOf(HOME, SEARCH, PROFILE, HOME), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH, PROFILE, HOME), drainScreenNames())
     }
 
     /**
@@ -293,7 +222,7 @@ class S04BottomNavHideShowE2ETest {
         // ...so the app calls the manual API as a workaround.
         Grovs.trackScreenView(SEARCH)
 
-        assertEquals(listOf(HOME, SEARCH), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH), drainScreenNames())
     }
 
     /**
@@ -308,7 +237,7 @@ class S04BottomNavHideShowE2ETest {
         Robolectric.buildActivity(S04HostActivity::class.java, startIntent(S04HostActivity.TAG_SEARCH))
             .create().start().resume()
 
-        assertEquals(listOf(SEARCH), emittedScreenNames())
+        assertEquals(listOf(SEARCH), drainScreenNames())
     }
 
     /**
@@ -334,7 +263,7 @@ class S04BottomNavHideShowE2ETest {
         Robolectric.buildActivity(S04HostActivity::class.java, startIntent())
             .create(state).start().resume()
 
-        assertEquals(listOf(HOME, SEARCH), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH), drainScreenNames())
     }
 
     /**
@@ -357,6 +286,6 @@ class S04BottomNavHideShowE2ETest {
         // Force a re-resume through the SDK's own lifecycle hook.
         E2ETestUtils.dispatchActivityResumed(activity)
 
-        assertEquals(listOf(HOME, SEARCH), emittedScreenNames())
+        assertEquals(listOf(HOME, SEARCH), drainScreenNames())
     }
 }

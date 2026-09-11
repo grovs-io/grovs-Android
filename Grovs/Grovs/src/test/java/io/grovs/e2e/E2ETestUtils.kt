@@ -14,7 +14,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -220,38 +219,6 @@ object E2ETestUtils {
         )
     }
 
-    fun enqueueDataForDeviceAndUrlResponse(
-        server: MockWebServer,
-        link: String? = null,
-        data: Map<String, Any>? = null,
-        tracking: Map<String, Any>? = null
-    ) {
-        val linkJson = link?.let { "\"$it\"" } ?: "null"
-        val dataJson = data?.let {
-            data.entries.joinToString(",", "{", "}") { (k, v) ->
-                "\"$k\":${if (v is String) "\"$v\"" else v}"
-            }
-        } ?: "null"
-        val trackingJson = tracking?.let {
-            tracking.entries.joinToString(",", "{", "}") { (k, v) ->
-                "\"$k\":${if (v is String) "\"$v\"" else v}"
-            }
-        } ?: "null"
-        val response = """
-            {
-                "link": $linkJson,
-                "data": $dataJson,
-                "tracking": $trackingJson
-            }
-        """.trimIndent()
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(response)
-        )
-    }
-
     fun enqueueGenerateLinkResponse(server: MockWebServer, link: String = "https://test.grovs.io/abc123") {
         val response = """
             {
@@ -297,43 +264,6 @@ object E2ETestUtils {
         )
     }
 
-    fun enqueueNotificationsResponse(server: MockWebServer, notifications: List<Map<String, Any>> = emptyList()) {
-        val notificationsJson = notifications.joinToString(",", "[", "]") { notification ->
-            notification.entries.joinToString(",", "{", "}") { (k, v) ->
-                when (v) {
-                    is String -> "\"$k\":\"$v\""
-                    is Boolean -> "\"$k\":$v"
-                    else -> "\"$k\":$v"
-                }
-            }
-        }
-        val response = """
-            {
-                "notifications": $notificationsJson
-            }
-        """.trimIndent()
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(response)
-        )
-    }
-
-    fun enqueueUnreadCountResponse(server: MockWebServer, count: Int) {
-        val response = """
-            {
-                "number_of_unread_notifications": $count
-            }
-        """.trimIndent()
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(response)
-        )
-    }
-
     fun enqueueVisitorAttributesResponse(server: MockWebServer) {
         server.enqueue(
             MockResponse()
@@ -366,15 +296,6 @@ object E2ETestUtils {
                 .setBodyDelay(delayMs, TimeUnit.MILLISECONDS)
         )
     }
-
-    // PURCHASE_EVENT_DISABLED: fun enqueuePaymentEventResponse(server: MockWebServer) {
-    // PURCHASE_EVENT_DISABLED:     server.enqueue(
-    // PURCHASE_EVENT_DISABLED:         MockResponse()
-    // PURCHASE_EVENT_DISABLED:             .setResponseCode(200)
-    // PURCHASE_EVENT_DISABLED:             .setHeader("Content-Type", "application/json")
-    // PURCHASE_EVENT_DISABLED:             .setBody("{}")
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED: }
 
     fun enqueueAutoDisplayNotificationsResponse(server: MockWebServer, notifications: List<Map<String, Any>> = emptyList()) {
         val notificationsJson = notifications.joinToString(",", "[", "]") { notification ->
@@ -886,17 +807,6 @@ object E2ETestUtils {
     }
 
     /**
-     * Verify request body contains expected content.
-     */
-    fun assertRequestBodyContains(requests: List<Pair<String, String>>, endpoint: String, content: String, message: String? = null) {
-        val matchingRequests = requests.filter { it.first.contains(endpoint) }
-        assertTrue(
-            message ?: "Request body for $endpoint should contain '$content'",
-            matchingRequests.any { it.second.contains(content) }
-        )
-    }
-
-    /**
      * Verify SDK is functional after error/timeout by exercising public API
      * properties and checking internal state is consistent.
      *
@@ -968,14 +878,6 @@ object E2ETestUtils {
         assertRequestMade(requests, "device_for_vendor_id", "SDK should call device_for_vendor_id endpoint")
     }
 
-    /**
-     * Verify payment infrastructure works.
-     */
-    fun verifyPaymentInfrastructureWorks(requests: List<Pair<String, String>>) {
-        assertRequestMade(requests, "authenticate", "SDK should call authenticate endpoint")
-        assertRequestMade(requests, "device_for_vendor_id", "SDK should call device_for_vendor_id endpoint")
-    }
-
     // ==================== Request Value Assertions ====================
     // These mirror the enqueue* functions — verifying the SDK sent expected values.
 
@@ -1012,112 +914,6 @@ object E2ETestUtils {
         val path = deviceRequests.first().first
         assertTrue("Device request should query with vendor_id=$TEST_VENDOR_ID",
             path.contains("vendor_id=$TEST_VENDOR_ID"))
-    }
-
-    /**
-     * Assert event requests contain the expected event type.
-     * Mirrors [enqueueEventResponse].
-     */
-    fun assertEventRequestValues(requests: List<Pair<String, String>>, eventType: String) {
-        val eventRequests = findRequestsByPath(requests, "event")
-        assertTrue("Should have event requests", eventRequests.isNotEmpty())
-        assertTrue("Event requests should contain '$eventType' event",
-            eventRequests.any { it.second.contains(eventType) })
-    }
-
-    /**
-     * Assert a payment event request contains expected values.
-     * Mirrors [enqueuePaymentEventResponse].
-     */
-    // PURCHASE_EVENT_DISABLED: fun assertPaymentEventRequestValues(
-    // PURCHASE_EVENT_DISABLED:     requests: List<Pair<String, String>>,
-    // PURCHASE_EVENT_DISABLED:     priceInCents: Int,
-    // PURCHASE_EVENT_DISABLED:     currency: String,
-    // PURCHASE_EVENT_DISABLED:     productId: String
-    // PURCHASE_EVENT_DISABLED: ) {
-    // PURCHASE_EVENT_DISABLED:     val eventRequests = findRequestsByPath(requests, "event")
-    // PURCHASE_EVENT_DISABLED:     val paymentRequest = eventRequests.find {
-    // PURCHASE_EVENT_DISABLED:         it.second.contains(priceInCents.toString()) || it.second.contains(productId)
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED:     if (paymentRequest != null) {
-    // PURCHASE_EVENT_DISABLED:         assertTrue("Payment request should contain price $priceInCents",
-    // PURCHASE_EVENT_DISABLED:             paymentRequest.second.contains(priceInCents.toString()))
-    // PURCHASE_EVENT_DISABLED:         assertTrue("Payment request should contain currency $currency",
-    // PURCHASE_EVENT_DISABLED:             paymentRequest.second.contains(currency))
-    // PURCHASE_EVENT_DISABLED:         assertTrue("Payment request should contain productId $productId",
-    // PURCHASE_EVENT_DISABLED:             paymentRequest.second.contains(productId))
-    // PURCHASE_EVENT_DISABLED:     }
-    // PURCHASE_EVENT_DISABLED: }
-
-    /**
-     * Assert a visitor_attributes request contains expected field and value.
-     * Mirrors [enqueueVisitorAttributesResponse].
-     */
-    fun assertVisitorAttributesRequestValues(
-        requests: List<Pair<String, String>>,
-        field: String,
-        value: String
-    ) {
-        val attrRequests = findRequestsByPath(requests, "visitor_attributes")
-        if (attrRequests.isNotEmpty()) {
-            assertTrue("visitor_attributes request should contain '$field' with '$value'",
-                attrRequests.any { it.second.contains(field) && it.second.contains(value) })
-        } else {
-            // Async API call may not complete within test timeframe
-            assertAuthenticationCompleted()
-        }
-    }
-
-    /**
-     * Assert the generate_link request contains expected parameters.
-     * Mirrors [enqueueGenerateLinkResponse].
-     */
-    fun assertGenerateLinkRequestValues(
-        requests: List<Pair<String, String>>,
-        expectedTitle: String? = null,
-        expectedSubtitle: String? = null
-    ) {
-        val linkRequests = findRequestsByPath(requests, "generate_link")
-        assertTrue("Should call generate_link endpoint", linkRequests.isNotEmpty())
-        val body = linkRequests.first().second
-        expectedTitle?.let {
-            assertTrue("Generate link request should contain title '$it'", body.contains(it))
-        }
-        expectedSubtitle?.let {
-            assertTrue("Generate link request should contain subtitle '$it'", body.contains(it))
-        }
-    }
-
-    /**
-     * Assert the data_for_device_and_url request was made with the expected deeplink URL.
-     * Mirrors [enqueueDataForDeviceResponse] / [enqueueDataForDeviceAndUrlResponse].
-     */
-    fun assertDataForDeviceAndUrlRequestValues(
-        requests: List<Pair<String, String>>,
-        expectedScheme: String,
-        expectedLinkParam: String
-    ) {
-        val dataRequests = findRequestsByPath(requests, "data_for_device_and_url")
-        assertTrue("SDK should call data_for_device_and_url endpoint", dataRequests.isNotEmpty())
-        val body = dataRequests.first().second
-        assertTrue("Request should contain deeplink scheme '$expectedScheme'",
-            body.contains(expectedScheme))
-        assertTrue("Request should contain deeplink parameter '$expectedLinkParam'",
-            body.contains(expectedLinkParam))
-        assertTrue("Request should contain vendor_id '$TEST_VENDOR_ID'",
-            body.contains(TEST_VENDOR_ID))
-    }
-
-    /**
-     * Assert the data_for_device request was made (no deeplink URL).
-     * Mirrors [enqueueDataForDeviceResponse].
-     */
-    fun assertDataForDeviceRequestValues(requests: List<Pair<String, String>>) {
-        val dataRequests = findRequestsByPath(requests, "data_for_device")
-        assertTrue("SDK should call data_for_device endpoint", dataRequests.isNotEmpty())
-        val body = dataRequests.first().second
-        assertTrue("Request should contain vendor_id '$TEST_VENDOR_ID'",
-            body.contains(TEST_VENDOR_ID))
     }
 
     // ==================== Async Helpers ====================

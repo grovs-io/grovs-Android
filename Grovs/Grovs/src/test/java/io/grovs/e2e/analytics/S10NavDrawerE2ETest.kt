@@ -14,23 +14,17 @@ import androidx.navigation.fragment.NavHostFragment
 import androidx.navigation.fragment.fragment
 import androidx.navigation.navOptions
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 10 — navigation drawer (drawer item -> fragment swap). Two wirings are exercised:
@@ -43,70 +37,12 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S10NavDrawerE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
+class S10NavDrawerE2ETest : ScreenTrackingTestBase() {
 
     @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        // Reset fixture config so tests are order-independent.
+    fun resetDrawerFixture() {
         S10ReplaceHostActivity.initialRoute = S10Routes.HOME
         S10NavHostActivity.startRoute = S10Routes.HOME
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
-    @After
-    fun tearDown() {
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /** Settle resolution, flush the custom-event queue, then read every emitted screen_view in order. */
-    private fun collectScreenViews(): List<String> {
-        settleAutomaticScreenResolution()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
     }
 
     private fun idle() {
@@ -150,7 +86,7 @@ class S10NavDrawerE2ETest {
         activity.selectDrawerItem_NavController(S10Routes.HOME)
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(
             listOf(
                 "S10HomeFragment",
@@ -186,7 +122,7 @@ class S10NavDrawerE2ETest {
         activity.selectDrawerItem_Replace(S10ProfileFragment())
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(
             listOf("S10HomeFragment", "S10FeedFragment", "S10ProfileFragment"),
             screens,
@@ -221,7 +157,7 @@ class S10NavDrawerE2ETest {
         activity.systemBack()
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(
             listOf(
                 "S10HomeFragment",
@@ -252,7 +188,7 @@ class S10NavDrawerE2ETest {
         activity.selectDrawerItem_Replace(S10SettingsFragment())
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(listOf("S10HomeFragment", "S10SettingsFragment"), screens)
     }
 
@@ -270,7 +206,7 @@ class S10NavDrawerE2ETest {
         controller.configurationChange() // rotation: destroy + recreate, restoring Profile.
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(listOf("S10ProfileFragment"), screens)
     }
 
@@ -290,7 +226,7 @@ class S10NavDrawerE2ETest {
         controller.start().resume() // foreground
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         // No session rotation happens on an instantaneous background/foreground in the test, so the
         // dedup window is preserved and the re-resumed Feed is suppressed.
         assertEquals(listOf("S10FeedFragment"), screens)
@@ -308,7 +244,7 @@ class S10NavDrawerE2ETest {
         Robolectric.buildActivity(S10ReplaceHostActivity::class.java)
             .create().start().resume()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(listOf("S10SettingsFragment"), screens)
     }
 
@@ -323,7 +259,7 @@ class S10NavDrawerE2ETest {
         Robolectric.buildActivity(S10NavHostActivity::class.java)
             .create().start().resume()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(listOf("S10ProfileFragment"), screens)
     }
 
@@ -343,7 +279,7 @@ class S10NavDrawerE2ETest {
         Robolectric.buildActivity(S10OtherActivity::class.java).create().start().resume()
         settleAutomaticScreenResolution()
 
-        val screens = collectScreenViews()
+        val screens = drainScreenNames()
         assertEquals(listOf("S10HomeFragment", "S10OtherActivity"), screens)
     }
 }

@@ -1,42 +1,30 @@
 package io.grovs.service
 
-import android.app.Application
 import android.content.Context
+import io.grovs.TestFixtures
 import io.grovs.MockGrovsApi
+import io.grovs.api.GrovsApi
 import io.grovs.TestAssertions.assertEqualsWithContext
 import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
 import io.grovs.TestAssertions.assertResultSuccess
 import io.grovs.TestAssertions.assertResultError
-import io.grovs.api.GrovsApi
 import io.grovs.handlers.GrovsContext
-import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
-import io.grovs.model.CustomEvent
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
-import io.grovs.model.GetDeviceResponse
-import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEvent
-// PURCHASE_EVENT_DISABLED: import io.grovs.model.events.PaymentEventType
 import io.grovs.model.notifications.NotificationsResponse
 import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.GVRetryResult
-import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
-import io.mockk.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
-import org.junit.After
-import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -44,6 +32,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import retrofit2.Response
+import java.io.IOException
 
 /**
  * Core unit tests for GrovsService.
@@ -54,19 +43,15 @@ import retrofit2.Response
 class GrovsServiceTest {
 
     private lateinit var context: Context
-    private lateinit var application: Application
     private lateinit var grovsContext: GrovsContext
     private lateinit var mockGrovsApi: MockGrovsApi
-    private lateinit var grovsService: TestableGrovsService
+    private lateinit var grovsService: GrovsService
 
     private val testApiKey = "test-api-key-123"
 
     @Before
     fun setUp() {
-        MockKAnnotations.init(this, relaxed = true)
-
         context = RuntimeEnvironment.getApplication()
-        application = RuntimeEnvironment.getApplication()
 
         grovsContext = GrovsContext()
         grovsContext.settings.sdkEnabled = true
@@ -75,35 +60,20 @@ class GrovsServiceTest {
 
         DebugLogger.instance.logLevel = LogLevel.INFO
 
-        grovsService = TestableGrovsService(
+        grovsService = GrovsService(
             context = context,
             apiKey = testApiKey,
-            grovsContext = grovsContext,
-            testApi = mockGrovsApi
+            grovsContext = grovsContext
         )
+        installApi(mockGrovsApi)
     }
 
-    @After
-    fun tearDown() {
-        mockGrovsApi.reset()
-        unmockkAll()
-    }
-
-    private fun createTestAppDetails(): AppDetails {
-        return AppDetails(
-            version = "1.0.0",
-            build = "1",
-            bundle = "io.grovs.test",
-            device = "Test Device",
-            deviceID = "test-device-id",
-            userAgent = "Test User Agent",
-            screenWidth = "1080",
-            screenHeight = "1920",
-            timezone = "UTC",
-            language = "en-US",
-            webglVendor = "Test Vendor",
-            webglRenderer = "Test Renderer"
-        )
+    private fun installApi(api: GrovsApi) {
+        // Inject only the transport boundary; all response handling runs in production code.
+        GrovsService::class.java.getDeclaredField("grovsApi").apply {
+            isAccessible = true
+            set(grovsService, api)
+        }
     }
 
     // ==================== authenticate Tests ====================
@@ -118,7 +88,7 @@ class GrovsServiceTest {
         )
         mockGrovsApi.authenticateResponse = Response.success(expectedResponse)
 
-        val appDetails = createTestAppDetails()
+        val appDetails = TestFixtures.createAppDetails()
         val results = grovsService.authenticate(appDetails).take(1).toList()
 
         assertEqualsWithContext(
@@ -144,7 +114,7 @@ class GrovsServiceTest {
     fun `GrovsService authenticate returns GVRetryResult Error on 401 API response`() = runTest {
         mockGrovsApi.authenticateResponse = MockGrovsApi.createErrorResponseTyped(401, "Invalid API key")
 
-        val appDetails = createTestAppDetails()
+        val appDetails = TestFixtures.createAppDetails()
         val results = grovsService.authenticate(appDetails).take(1).toList()
 
         assertEqualsWithContext(
@@ -228,7 +198,7 @@ class GrovsServiceTest {
         )
         mockGrovsApi.payloadResponse = Response.success(expectedDetails)
 
-        val result = grovsService.payloadFor(createTestAppDetails())
+        val result = grovsService.payloadFor(TestFixtures.createAppDetails())
 
         val response = assertResultSuccess(
             result,
@@ -246,7 +216,7 @@ class GrovsServiceTest {
     fun `GrovsService payloadFor returns LSResult Error on 404 API response`() = runTest {
         mockGrovsApi.payloadResponse = MockGrovsApi.createErrorResponseTyped(404, "Not found")
 
-        val result = grovsService.payloadFor(createTestAppDetails())
+        val result = grovsService.payloadFor(TestFixtures.createAppDetails())
 
         assertResultError(
             result,
@@ -286,45 +256,6 @@ class GrovsServiceTest {
         )
     }
 
-    // ==================== addPaymentEvent Tests ====================
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `GrovsService addPaymentEvent passes payment event to API with correct eventType`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     val paymentEvent = PaymentEvent(
-    // PURCHASE_EVENT_DISABLED:         eventType = PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         priceCents = 1999,
-    // PURCHASE_EVENT_DISABLED:         currency = "EUR",
-    // PURCHASE_EVENT_DISABLED:         productId = "pro_plan"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     grovsService.addPaymentEvent(paymentEvent)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     assertTrueWithContext(
-    // PURCHASE_EVENT_DISABLED:         mockGrovsApi.verifyAddPaymentEventCalled(),
-    // PURCHASE_EVENT_DISABLED:         "addPaymentEvent was called on mockApi",
-    // PURCHASE_EVENT_DISABLED:         "after addPaymentEvent() with BUY event"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED:     assertEqualsWithContext(
-    // PURCHASE_EVENT_DISABLED:         PaymentEventType.BUY,
-    // PURCHASE_EVENT_DISABLED:         mockGrovsApi.addPaymentEventCalls[0].eventType,
-    // PURCHASE_EVENT_DISABLED:         "eventType",
-    // PURCHASE_EVENT_DISABLED:         "after addPaymentEvent() with BUY event"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED: }
-
-    // PURCHASE_EVENT_DISABLED: @Test
-    // PURCHASE_EVENT_DISABLED: fun `GrovsService addPaymentEvent returns LSResult Error on 400 API response`() = runTest {
-    // PURCHASE_EVENT_DISABLED:     mockGrovsApi.addPaymentEventResponse = MockGrovsApi.createErrorResponseTyped(400, "Invalid payment")
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     val paymentEvent = PaymentEvent(eventType = PaymentEventType.BUY, priceCents = 100, currency = "USD")
-    // PURCHASE_EVENT_DISABLED:     val result = grovsService.addPaymentEvent(paymentEvent)
-    // PURCHASE_EVENT_DISABLED:
-    // PURCHASE_EVENT_DISABLED:     assertResultError(
-    // PURCHASE_EVENT_DISABLED:         result,
-    // PURCHASE_EVENT_DISABLED:         context = "after addPaymentEvent() with 400 error response"
-    // PURCHASE_EVENT_DISABLED:     )
-    // PURCHASE_EVENT_DISABLED: }
-
     // ==================== notifications Tests ====================
 
     @Test
@@ -349,6 +280,13 @@ class GrovsServiceTest {
         mockGrovsApi.numberOfUnreadNotificationsResponse = Response.success(
             NumberOfUnreadNotificationsResponse(numberOfUnreadNotifications = 5)
         )
+        var attempts = 0
+        installApi(object : GrovsApi by mockGrovsApi {
+            override suspend fun numberOfUnreadNotifications(): Response<NumberOfUnreadNotificationsResponse> {
+                if (attempts++ == 0) throw IOException("Transient connection failure")
+                return mockGrovsApi.numberOfUnreadNotifications()
+            }
+        })
 
         val result = grovsService.numberOfUnreadNotifications()
 
@@ -362,6 +300,7 @@ class GrovsServiceTest {
             "numberOfUnreadNotifications",
             "after numberOfUnreadNotifications() returns success"
         )
+        assertEqualsWithContext(2, attempts, "attempts", "after recovering from a transport failure")
     }
 
     @Test
@@ -374,253 +313,5 @@ class GrovsServiceTest {
             result,
             context = "after markNotificationAsRead(123) with successful mock response"
         )
-    }
-}
-
-/**
- * Testable subclass of GrovsService that allows injecting a mock GrovsApi.
- */
-class TestableGrovsService(
-    context: Context,
-    apiKey: String,
-    grovsContext: GrovsContext,
-    private val testApi: GrovsApi
-) : IGrovsService {
-
-    private val grovsContext = grovsContext
-    private val context = context
-
-    override fun authenticate(appDetails: AppDetails): kotlinx.coroutines.flow.Flow<GVRetryResult<AuthenticationResponse>> = callbackFlow {
-        val response = testApi.authenticate(appDetails)
-        if (response.isSuccessful) {
-            response.body()?.let {
-                trySend(GVRetryResult.Success(it))
-                close()
-                return@callbackFlow
-            }
-        }
-        trySend(GVRetryResult.Error(java.io.IOException("Failed to authenticate")))
-        close()
-        awaitClose { }
-    }
-
-    override fun getDeviceFor(deviceId: String): kotlinx.coroutines.flow.Flow<GVRetryResult<GetDeviceResponse>> = callbackFlow {
-        val response = testApi.getDeviceFor(deviceId)
-        if (response.isSuccessful) {
-            response.body()?.let {
-                trySend(GVRetryResult.Success(it))
-                close()
-                return@callbackFlow
-            }
-        }
-        trySend(GVRetryResult.Error(java.io.IOException("Failed to get device")))
-        close()
-        awaitClose { }
-    }
-
-    override suspend fun payloadFor(appDetails: AppDetails): LSResult<DeeplinkDetails> {
-        return try {
-            val response = testApi.payloadFor(appDetails)
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to get payload"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun payloadWithLinkFor(appDetails: AppDetails): LSResult<DeeplinkDetails> {
-        return try {
-            val response = testApi.payloadWithLinkFor(appDetails)
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to get payload with link"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun clipboardStatus(): LSResult<Boolean> {
-        return try {
-            val response = testApi.clipboardStatus()
-            val active = response.body()?.clipboardActive
-            if (response.isSuccessful && active != null) {
-                LSResult.Success(active)
-            } else {
-                LSResult.Error(java.io.IOException("Failed to fetch clipboard status (${response.code()})."))
-            }
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun generateLink(
-        title: String?,
-        subtitle: String?,
-        imageURL: String?,
-        data: Map<String, java.io.Serializable>?,
-        tags: List<String>?,
-        customRedirects: CustomRedirects?,
-        showPreviewIos: Boolean?,
-        showPreviewAndroid: Boolean?,
-        copyToClipboardIos: Boolean?,
-        copyToClipboardAndroid: Boolean?,
-        tracking: TrackingParams?
-    ): LSResult<GenerateLinkResponse> {
-        return try {
-            val request = io.grovs.model.GenerateLinkRequest(
-                title = title,
-                subtitle = subtitle,
-                imageUrl = imageURL,
-                data = com.google.gson.Gson().toJson(data),
-                tags = com.google.gson.Gson().toJson(tags),
-                iosCustomRedirect = customRedirects?.ios,
-                androidCustomRedirect = customRedirects?.android,
-                desktopCustomRedirect = customRedirects?.desktop,
-                showPreviewIos = showPreviewIos,
-                showPreviewAndroid = showPreviewAndroid,
-                copyToClipboardIos = copyToClipboardIos,
-                copyToClipboardAndroid = copyToClipboardAndroid,
-                trackingCampaign = tracking?.utmCampaign,
-                trackingMedium = tracking?.utmMedium,
-                trackingSource = tracking?.utmSource
-            )
-            val response = testApi.generateLink(request)
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to generate link"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
-        return try {
-            val request = io.grovs.model.LinkDetailsRequest(path = path)
-            val response = testApi.linkDetails(request)
-            if (response.isSuccessful) {
-                response.body()?.string()?.let {
-                    if (it == "null") {
-                        return LSResult.Error(java.io.IOException("Invalid link path"))
-                    }
-                    val map: Map<String, Any> = com.google.gson.Gson().fromJson(it, object : com.google.gson.reflect.TypeToken<Map<String, Any?>>() {}.type)
-                    return LSResult.Success(LinkDetailsResponse(link = map))
-                }
-            }
-            LSResult.Error(java.io.IOException("Failed to get link details"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun updateAttributes(
-        identifier: String?,
-        attributes: Map<String, Any>?,
-        pushToken: String?
-    ): LSResult<Boolean> {
-        return try {
-            val request = io.grovs.model.UpdateAttributesRequest(
-                sdkIdentifier = identifier,
-                sdkAttributes = attributes,
-                pushToken = pushToken
-            )
-            val response = testApi.updateAttributes(request)
-            if (response.isSuccessful) {
-                return LSResult.Success(true)
-            }
-            LSResult.Error(java.io.IOException("Failed to update attributes"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun addEvents(events: List<io.grovs.model.Event>): LSResult<io.grovs.model.BatchEventsResponse> =
-        LSResult.Success(io.grovs.model.BatchEventsResponse(accepted = events.size, rejected = 0))
-
-    override suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<io.grovs.model.BatchEventsResponse> =
-        LSResult.Success(io.grovs.model.BatchEventsResponse(accepted = events.size, rejected = 0))
-
-    override suspend fun addPaymentEvent(event: io.grovs.model.events.PaymentEvent): LSResult<Boolean> {
-        return try {
-            val response = testApi.addPaymentEvent(event)
-            if (response.isSuccessful) {
-                return LSResult.Success(true)
-            }
-            LSResult.Error(java.io.IOException("Failed to add payment event"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
-        return try {
-            val request = io.grovs.model.notifications.NotificationsRequest(page = page)
-            val response = testApi.notifications(request)
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to get notifications"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
-        return try {
-            val response = testApi.notificationsToDisplayAutomatically()
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to get notifications"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
-        return try {
-            val response = testApi.numberOfUnreadNotifications()
-            if (response.isSuccessful) {
-                response.body()?.let { return LSResult.Success(it) }
-            }
-            LSResult.Error(java.io.IOException("Failed to get unread count"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
-        return try {
-            val request = io.grovs.model.notifications.MarkNotificationAsReadRequest(notificationId = notificationId)
-            val response = testApi.markNotificationAsRead(request)
-            if (response.isSuccessful) {
-                return LSResult.Success(true)
-            }
-            LSResult.Error(java.io.IOException("Failed to mark as read"))
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
-    }
-
-    override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
-        // Mirrors GrovsService: an empty map is a clear, so it goes out rather than short-circuiting.
-        return try {
-            val request = io.grovs.model.ScreenAliasesRequest(
-                screenAliases = aliases.map {
-                    io.grovs.model.ScreenAlias(identifier = it.key, alias = it.value)
-                }
-            )
-            val response = testApi.syncScreenAliases(request)
-            if (response.isSuccessful) {
-                LSResult.Success(true)
-            } else {
-                LSResult.Error(java.io.IOException("Failed to sync screen aliases (${response.code()})."))
-            }
-        } catch (e: Exception) {
-            LSResult.Error(e)
-        }
     }
 }

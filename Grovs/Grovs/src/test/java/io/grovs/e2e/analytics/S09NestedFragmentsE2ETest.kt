@@ -1,15 +1,12 @@
 package io.grovs.e2e.analytics
 
 import android.os.Bundle
-import android.os.Looper
 import android.view.View
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.ScreenTrackingTestBase
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.runTest
-import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -18,12 +15,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.Shadows
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 
 /**
  * Setup 09 — nested fragments: a container fragment hosting child fragments in its
@@ -34,69 +27,12 @@ import java.util.concurrent.TimeUnit
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
-class S09NestedFragmentsE2ETest {
-
-    private lateinit var mockWebServer: MockWebServer
+class S09NestedFragmentsE2ETest : ScreenTrackingTestBase() {
 
     @Before
-    fun setUp() {
-        E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupMockGlInfo()
-        E2ETestUtils.setupTestApplication(RuntimeEnvironment.getApplication())
-        E2ETestUtils.setupMockUserAgent(
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
-        )
-        S09HostActivity.autoAddChildA = false
-        mockWebServer = MockWebServer()
-        mockWebServer.start()
-        E2ETestUtils.enqueueAuthenticationSuccess(mockWebServer)
-    }
-
     @After
-    fun tearDown() {
+    fun resetNestedFixture() {
         S09HostActivity.autoAddChildA = false
-        mockWebServer.shutdown()
-        E2ETestUtils.resetGrovsSingleton()
-    }
-
-    private fun configure(autoTrack: Boolean = true) {
-        Grovs.configure(
-            application = RuntimeEnvironment.getApplication(),
-            apiKey = "test-key",
-            useTestEnvironment = true,
-            baseURL = mockWebServer.url("/").toString(),
-            autoTrackScreenViews = autoTrack,
-        )
-    }
-
-    private fun settleAutomaticScreenResolution() {
-        val mainLooper = Shadows.shadowOf(Looper.getMainLooper())
-        mainLooper.idle()
-
-        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(2L)
-        while (pendingScreenResolutionJobs().isNotEmpty()) {
-            mainLooper.idle()
-            if (System.nanoTime() >= deadlineNanos) {
-                throw AssertionError("Timed out waiting for automatic screen resolution")
-            }
-            Thread.sleep(10L)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun pendingScreenResolutionJobs(): Collection<Job> {
-        val jobsField = Grovs::class.java.getDeclaredField("pendingScreenResolutionJobs")
-        jobsField.isAccessible = true
-        return (jobsField.get(E2ETestUtils.getGrovsInstance()) as ConcurrentHashMap<*, Job>).values
-    }
-
-    /** Settles the pending resolution, flushes custom events, and returns any NEW screen_view names. */
-    private fun drainScreens(): List<String> {
-        settleAutomaticScreenResolution()
-        E2ETestUtils.flushCustomEvents()
-        return E2ETestUtils.eventsFromBatchRequests(E2ETestUtils.collectAllRequests(mockWebServer))
-            .filter { it.optString("event_name") == "screen_view" }
-            .map { it.getJSONObject("properties").getString("screen_name") }
     }
 
     /** Builds the host activity to STARTED (not yet resumed), returns controller + container. */
@@ -125,7 +61,7 @@ class S09NestedFragmentsE2ETest {
             .commitNow()
         controller.resume()
 
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
     }
 
     /** Replace the visible child A -> B -> C in the childFragmentManager. */
@@ -141,17 +77,17 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         val seq = mutableListOf<String>()
-        seq += drainScreens() // A
+        seq += drainScreenNames() // A
 
         container.childFm().beginTransaction()
             .replace(S09ContainerFragment.CONTENT_ID, S09ChildBFragment(), "childB")
             .commitNow()
-        seq += drainScreens() // B
+        seq += drainScreenNames() // B
 
         container.childFm().beginTransaction()
             .replace(S09ContainerFragment.CONTENT_ID, S09ChildCFragment(), "childC")
             .commitNow()
-        seq += drainScreens() // C
+        seq += drainScreenNames() // C
 
         assertEquals(listOf("S09ChildAFragment", "S09ChildBFragment", "S09ChildCFragment"), seq)
     }
@@ -171,7 +107,7 @@ class S09NestedFragmentsE2ETest {
             .commitNow()
         controller.resume()
 
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
     }
 
     /** All children hidden -> resolver falls back to the container fragment. */
@@ -192,7 +128,7 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         // No eligible child -> findVisibleLeaf(childFM) == null -> the container becomes the leaf.
-        assertEquals(listOf("S09ContainerFragment"), drainScreens())
+        assertEquals(listOf("S09ContainerFragment"), drainScreenNames())
     }
 
     /** userVisibleHint=false excludes an otherwise-eligible child -> next eligible chosen. */
@@ -210,7 +146,7 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         // Reversed scan hits ChildA (uvh=false, skipped) then ChildB (eligible).
-        assertEquals(listOf("S09ChildBFragment"), drainScreens())
+        assertEquals(listOf("S09ChildBFragment"), drainScreenNames())
     }
 
     /** child.view visibility GONE excludes it -> next eligible chosen. */
@@ -228,7 +164,7 @@ class S09NestedFragmentsE2ETest {
         goneChild.requireView().visibility = View.GONE
         controller.resume()
 
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
     }
 
     /** Two levels deep: ChildA hosts GrandchildX -> the grandchild is the leaf. */
@@ -247,7 +183,7 @@ class S09NestedFragmentsE2ETest {
             .commitNow()
         controller.resume()
 
-        assertEquals(listOf("S09GrandchildXFragment"), drainScreens())
+        assertEquals(listOf("S09GrandchildXFragment"), drainScreenNames())
     }
 
     /** Swap grandchild X -> Y inside the leaf child's childFragmentManager. */
@@ -267,30 +203,14 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         val seq = mutableListOf<String>()
-        seq += drainScreens() // GX
+        seq += drainScreenNames() // GX
 
         childA.childFragmentManager.beginTransaction()
             .replace(childA.contentId, S09GrandchildYFragment(), "gy")
             .commitNow()
-        seq += drainScreens() // GY
+        seq += drainScreenNames() // GY
 
         assertEquals(listOf("S09GrandchildXFragment", "S09GrandchildYFragment"), seq)
-    }
-
-    /** primaryNavigationFragment on the container but NOT on the child -> reversed scan. */
-    @Test
-    fun `action10 no child primary nav uses reversed scan`() = runTest {
-        configure()
-        E2ETestUtils.getAuthenticationJob()?.join()
-
-        val (controller, container) = startHost()
-        // childFragmentManager gets no primaryNavigationFragment; only the activity set one (the container).
-        container.childFm().beginTransaction()
-            .add(S09ContainerFragment.CONTENT_ID, S09ChildAFragment(), "childA")
-            .commitNow()
-        controller.resume()
-
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
     }
 
     /** primaryNavigationFragment points at a hidden child -> reversed scan picks the visible one. */
@@ -310,7 +230,7 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         // primary (B) is hidden -> not eligible -> reversed scan finds the visible ChildA.
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
     }
 
     /** Rapid A->B->C child swaps within one looper tick coalesce to the last leaf (C). */
@@ -324,7 +244,7 @@ class S09NestedFragmentsE2ETest {
             .add(S09ContainerFragment.CONTENT_ID, S09ChildAFragment(), "childA")
             .commitNow()
         controller.resume()
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
 
         // Three swaps with no settle in between -> only the most recent resolution job survives.
         container.childFm().beginTransaction()
@@ -335,7 +255,7 @@ class S09NestedFragmentsE2ETest {
             .replace(S09ContainerFragment.CONTENT_ID, S09ChildCFragment(), "childC3").commitNow()
 
         // Last two are the same class; coalesced resolution emits it once.
-        assertEquals(listOf("S09ChildCFragment"), drainScreens())
+        assertEquals(listOf("S09ChildCFragment"), drainScreenNames())
     }
 
     /** Rotation recreates the container + children; the re-resolved leaf is deduped. */
@@ -346,11 +266,11 @@ class S09NestedFragmentsE2ETest {
 
         S09HostActivity.autoAddChildA = true
         val controller = Robolectric.buildActivity(S09HostActivity::class.java).create().start().resume()
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
 
         controller.recreate()
         // Same leaf name within the 1s dedup window -> suppressed.
-        assertEquals(emptyList<String>(), drainScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     /** Process-death restore rebuilds the tree; the visible leaf is restored. */
@@ -362,13 +282,13 @@ class S09NestedFragmentsE2ETest {
         S09HostActivity.autoAddChildA = true
         val bundle = Bundle()
         val c1 = Robolectric.buildActivity(S09HostActivity::class.java).create().start().resume()
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
         c1.saveInstanceState(bundle)
         c1.pause().stop().destroy()
 
         // "Process death": a brand-new activity restored from the saved bundle.
         val c2 = Robolectric.buildActivity(S09HostActivity::class.java).create(bundle).start().resume()
-        val restored = drainScreens() // deduped (same name within 1s)
+        val restored = drainScreenNames() // deduped (same name within 1s)
 
         val container2 = c2.get().supportFragmentManager
             .findFragmentByTag(S09HostActivity.S09_CONTAINER_TAG) as? S09ContainerFragment
@@ -392,20 +312,20 @@ class S09NestedFragmentsE2ETest {
             .add(S09ContainerFragment.CONTENT_ID, S09ChildAFragment(), "childA")
             .commitNow()
         controller.resume()
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
 
         // Add ChildB on top of ChildA (both eligible) -> reversed scan picks the last-added (B).
         val top = S09ChildBFragment()
         container.childFm().beginTransaction()
             .add(S09ContainerFragment.CONTENT_ID, top, "childB")
             .commitNow()
-        assertEquals(listOf("S09ChildBFragment"), drainScreens())
+        assertEquals(listOf("S09ChildBFragment"), drainScreenNames())
 
         // Remove the top child. ChildA was never re-resumed -> no callback -> nothing emitted.
         container.childFm().beginTransaction()
             .remove(top)
             .commitNow()
-        assertEquals(emptyList<String>(), drainScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 
     /** Swap the container at the activity level: A-container -> B-container. */
@@ -419,7 +339,7 @@ class S09NestedFragmentsE2ETest {
             .add(S09ContainerFragment.CONTENT_ID, S09ChildAFragment(), "childA")
             .commitNow()
         controller.resume()
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
 
         val activity = controller.get()
         val containerB = S09ContainerBFragment()
@@ -428,7 +348,7 @@ class S09NestedFragmentsE2ETest {
             .setPrimaryNavigationFragment(containerB)
             .commitNow()
 
-        assertEquals(listOf("S09ChildOfBFragment"), drainScreens())
+        assertEquals(listOf("S09ChildOfBFragment"), drainScreenNames())
     }
 
     /** A resumed child with no view (onCreateView returned null) is skipped. */
@@ -445,7 +365,7 @@ class S09NestedFragmentsE2ETest {
         controller.resume()
 
         // Reversed scan hits the view-less fragment first (skipped) then ChildA.
-        assertEquals(listOf("S09ChildAFragment"), drainScreens())
+        assertEquals(listOf("S09ChildAFragment"), drainScreenNames())
     }
 
     /** Navigate the grandchild to the same class again -> leaf then dedup. */
@@ -463,12 +383,12 @@ class S09NestedFragmentsE2ETest {
             .add(childA.contentId, S09GrandchildXFragment(), "gx")
             .commitNow()
         controller.resume()
-        assertEquals(listOf("S09GrandchildXFragment"), drainScreens())
+        assertEquals(listOf("S09GrandchildXFragment"), drainScreenNames())
 
         // Replace with a new instance of the SAME class -> resolves the same name -> deduped.
         childA.childFragmentManager.beginTransaction()
             .replace(childA.contentId, S09GrandchildXFragment(), "gx2")
             .commitNow()
-        assertEquals(emptyList<String>(), drainScreens())
+        assertEquals(emptyList<String>(), drainScreenNames())
     }
 }
