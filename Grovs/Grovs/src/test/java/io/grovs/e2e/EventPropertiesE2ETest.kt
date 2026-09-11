@@ -39,24 +39,37 @@ class EventPropertiesE2ETest : ScreenTrackingTestBase() {
             cycle.add(cycle)
             var tooDeep: Any = "leaf"
             repeat(17) { tooDeep = listOf(tooDeep) }
-            val invalid = mapOf(
-                "nonFinite" to mapOf("values" to listOf(Double.NaN)),
+            // Unrepresentable as a whole, so each property is removed.
+            val dropped = mapOf(
+                "nonFinite" to Double.NaN,
                 "hugeNumber" to BigDecimal("1E+1000"),
+                "unsupported" to Any(),
+                "nonStringKeys" to mapOf(1 to "one"),
+            )
+            // Each property stays; only the unrepresentable part inside it is removed.
+            val trimmed = mapOf(
+                "values" to listOf(1, Double.NaN, 2),
                 "cycle" to cycle,
                 "tooDeep" to tooDeep,
-                "unsupported" to arrayOf(Any()),
+                "objects" to arrayOf(Any(), "kept"),
             )
             val valid = mapOf("order" to mapOf("sku" to "abc", "quantities" to listOf(1, 2)))
 
-            val mixed = sendAndRead("mixed_properties", invalid + valid, send)
+            val mixed = sendAndRead("mixed_properties", dropped + trimmed + valid, send)
             assertName(mixed, "mixed_properties", screen)
             val properties = mixed.getJSONObject("properties")
-            invalid.keys.forEach { assertFalse("Invalid property $it was sent", properties.has(it)) }
+            dropped.keys.forEach { assertFalse("Invalid property $it was sent", properties.has(it)) }
+            assertEquals("[1,2]", properties.getJSONArray("values").toString())
+            assertEquals("[]", properties.getJSONArray("cycle").toString())
+            assertEquals("[\"kept\"]", properties.getJSONArray("objects").toString())
+            var deepest = properties.getJSONArray("tooDeep")
+            repeat(15) { deepest = deepest.getJSONArray(0) }
+            assertEquals("The seventeenth nested list must be removed", 0, deepest.length())
             val order = properties.getJSONObject("order")
             assertEquals("abc", order.getString("sku"))
             assertEquals("[1,2]", order.getJSONArray("quantities").toString())
 
-            val empty = sendAndRead("invalid_properties", invalid, send)
+            val empty = sendAndRead("invalid_properties", dropped, send)
             assertName(empty, "invalid_properties", screen)
             if (screen) {
                 assertEquals(setOf("screen_name"), empty.getJSONObject("properties").keys().asSequence().toSet())

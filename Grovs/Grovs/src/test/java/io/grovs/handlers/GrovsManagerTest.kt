@@ -123,19 +123,29 @@ class GrovsManagerTest {
 
         DebugLogger.instance.logLevel = LogLevel.INFO
 
-        grovsManager = GrovsManager(
-            context = context,
-            application = application,
-            grovsContext = grovsContext,
-            apiKey = testApiKey,
-            grovsService = mockGrovsService,
-            eventsManager = mockEventsManager,
-            appDetailsHelper = mockAppDetailsHelper,
-            // A real LocalCache on fresh Robolectric prefs reads numberOfOpens == 0, which would arm
-            // ClipboardHandler and silently reroute the pre-existing (non-clipboard) tests below into
-            // the clipboard flow. Pin this shared manager's install to "not a fresh install" instead.
-            localCache = FakeLocalCache(numberOfOpens = 1),
-        )
+        grovsManager = newManager()
+    }
+
+    /** The shared manager. Pass [attributesSyncScope] to run its attribute sync in a scope the test drives. */
+    private fun newManager(attributesSyncScope: CoroutineScope? = null) = GrovsManager(
+        context = context,
+        application = application,
+        grovsContext = grovsContext,
+        apiKey = testApiKey,
+        grovsService = mockGrovsService,
+        eventsManager = mockEventsManager,
+        appDetailsHelper = mockAppDetailsHelper,
+        // A real LocalCache on fresh Robolectric prefs reads numberOfOpens == 0, which would arm
+        // ClipboardHandler and silently reroute the pre-existing (non-clipboard) tests below into
+        // the clipboard flow. Pin this shared manager's install to "not a fresh install" instead.
+        localCache = FakeLocalCache(numberOfOpens = 1),
+        attributesSyncScope = attributesSyncScope,
+    )
+
+    /** Replaces [grovsManager] with one whose attribute sync runs in [scope]. */
+    private fun useAttributeSyncScope(scope: CoroutineScope) {
+        grovsManager.close()
+        grovsManager = newManager(attributesSyncScope = scope)
     }
 
     @After
@@ -486,7 +496,7 @@ class GrovsManagerTest {
 
     @Test
     fun `a newer attribute update cancels the one in flight`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         val probe = stubParkingFirstUpdate()
 
@@ -508,7 +518,7 @@ class GrovsManagerTest {
 
     @Test
     fun `the last attribute value written is the one the service ends up with`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         val probe = stubParkingFirstUpdate()
 
@@ -527,7 +537,7 @@ class GrovsManagerTest {
 
     @Test
     fun `an attribute update that throws is contained and the next value still goes out`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         // The real service converts failures into LSResult.Error; an injected one may not. Either
         // way nothing may escape the sync, and a failure must not stop the next value going out.
@@ -608,7 +618,7 @@ class GrovsManagerTest {
 
     @Test
     fun `the superseded update is fully stopped before the new request goes out`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
 
         val order = mutableListOf<String>()
@@ -659,7 +669,7 @@ class GrovsManagerTest {
         // throw would surface as an uncaught exception charged to whichever test runs next.
         val silence = CoroutineExceptionHandler { _, _ -> }
         val scope = CoroutineScope(pool.asCoroutineDispatcher() + SupervisorJob() + silence)
-        grovsManager.attributesUpdateScope = scope
+        useAttributeSyncScope(scope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
 
         val park = CompletableDeferred<Unit>()
@@ -739,7 +749,7 @@ class GrovsManagerTest {
 
     @Test
     fun `attributes set while unauthenticated are sent once authentication succeeds`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         assertUnauthenticated(grovsManager, context = "before setting the identifier")
 
         grovsManager.identifier = "queued-while-offline"
@@ -760,7 +770,7 @@ class GrovsManagerTest {
 
     @Test
     fun `attribute changes while disabled are held and sent on enable`() = runTest {
-        grovsManager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED
         coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
         grovsContext.settings.sdkEnabled = false

@@ -607,10 +607,9 @@ class GrovsSingletonTest {
 
     // ==================== Singleton Reset Tests ====================
 
-    // Regression test: openedLinkDetails is backed by a FlowDelegate (Grovs.kt ~line 415), so
-    // resetGrovsSingleton() previously left a deep link delivered by one test visible to the
-    // next test class via Grovs.openedLinkDetails, even though the field was never a raw
-    // reflectable field named "openedLinkDetails".
+    // openedLinkDetails is backed by a FlowDelegate rather than a reflectable field, so
+    // resetGrovsSingleton() must clear it explicitly; otherwise a deep link delivered by one test
+    // stays visible to the next test class via Grovs.openedLinkDetails.
     @Test
     fun `resetGrovsSingleton clears openedLinkDetails leaked by a previous test`() {
         val leaked = DeeplinkDetails("https://demo.sqd.link/leaked", null, null)

@@ -167,10 +167,10 @@ internal class CustomEventsManager(
             DebugLogger.instance.log(LogLevel.INFO, "Skipping custom events flush: link lookup pending")
             return
         }
-        if (grovsContext.grovsId == null ||
-            (grovsContext.requiresAuthentication && grovsContext.authenticatedConfiguration !== configuration)) {
+        if (grovsContext.grovsId == null || grovsContext.authenticatedConfiguration !== configuration) {
             // Without a device id the backend rejects the send as terminal, which would drop the
-            // events for good. Leave them queued; a later tick retries once authenticated.
+            // events for good. Leave them queued; a later tick retries once authenticated. A device
+            // id from another configuration (a late commit of a replaced one) does not count.
             DebugLogger.instance.log(
                 LogLevel.INFO,
                 "Skipping custom events flush: not yet authenticated"

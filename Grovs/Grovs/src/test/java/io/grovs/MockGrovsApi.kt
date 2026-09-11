@@ -1,6 +1,7 @@
 package io.grovs
 
 import io.grovs.api.GrovsApi
+import io.grovs.handlers.ConsentToken
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
@@ -26,16 +27,16 @@ import retrofit2.Response
 
 /**
  * Mock implementation of GrovsApi for testing purposes.
- * 
+ *
  * This mock allows configuring responses for each API endpoint to test
  * different scenarios like success, errors, and edge cases.
  */
-class MockGrovsApi : GrovsApi {
+internal class MockGrovsApi : GrovsApi {
 
     // =====================================================================
     // Configuration for mock responses
     // =====================================================================
-    
+
     var authenticateResponse: Response<AuthenticationResponse>? = null
     var generateLinkResponse: Response<GenerateLinkResponse>? = null
     var payloadResponse: Response<DeeplinkDetails>? = null
@@ -68,73 +69,73 @@ class MockGrovsApi : GrovsApi {
     // GrovsApi Implementation
     // =====================================================================
 
-    override suspend fun payloadFor(request: AppDetails): Response<DeeplinkDetails> {
+    override suspend fun payloadFor(request: AppDetails, token: ConsentToken): Response<DeeplinkDetails> {
         payloadCalls.add(request)
         return payloadResponse ?: createSuccessDeeplinkResponse()
     }
 
-    override suspend fun payloadWithLinkFor(request: AppDetails): Response<DeeplinkDetails> {
+    override suspend fun payloadWithLinkFor(request: AppDetails, token: ConsentToken): Response<DeeplinkDetails> {
         payloadWithLinkCalls.add(request)
         return payloadWithLinkResponse ?: createSuccessDeeplinkResponse()
     }
 
-    override suspend fun clipboardStatus(): Response<ClipboardStatusResponse> {
+    override suspend fun clipboardStatus(token: ConsentToken): Response<ClipboardStatusResponse> {
         clipboardStatusCalls++
         return clipboardStatusResponse ?: Response.success(ClipboardStatusResponse(clipboardActive = false))
     }
 
-    override suspend fun authenticate(request: AppDetails): Response<AuthenticationResponse> {
+    override suspend fun authenticate(request: AppDetails, token: ConsentToken): Response<AuthenticationResponse> {
         authenticateCalls.add(request)
         return authenticateResponse ?: createSuccessAuthResponse()
     }
 
-    override suspend fun generateLink(request: GenerateLinkRequest): Response<GenerateLinkResponse> {
+    override suspend fun generateLink(request: GenerateLinkRequest, token: ConsentToken): Response<GenerateLinkResponse> {
         generateLinkCalls.add(request)
         return generateLinkResponse ?: createSuccessGenerateLinkResponse()
     }
 
-    override suspend fun linkDetails(request: LinkDetailsRequest): Response<ResponseBody> {
+    override suspend fun linkDetails(request: LinkDetailsRequest, token: ConsentToken): Response<ResponseBody> {
         linkDetailsCalls.add(request)
         return linkDetailsResponse ?: createSuccessLinkDetailsResponse()
     }
 
-    override suspend fun addEventsBatch(request: BatchEventsRequest): Response<BatchEventsResponse> {
+    override suspend fun addEventsBatch(request: BatchEventsRequest, token: ConsentToken): Response<BatchEventsResponse> {
         addEventsBatchCalls.add(request)
         return addEventsBatchResponse
             ?: Response.success(BatchEventsResponse(accepted = request.events.size, rejected = 0))
     }
 
-    override suspend fun addPaymentEvent(request: PaymentEvent): Response<Unit> {
+    override suspend fun addPaymentEvent(request: PaymentEvent, token: ConsentToken): Response<Unit> {
         addPaymentEventCalls.add(request)
         return addPaymentEventResponse ?: Response.success(Unit)
     }
 
-    override suspend fun updateAttributes(request: UpdateAttributesRequest): Response<Unit> {
+    override suspend fun updateAttributes(request: UpdateAttributesRequest, token: ConsentToken): Response<Unit> {
         updateAttributesCalls.add(request)
         return updateAttributesResponse ?: Response.success(Unit)
     }
 
-    override suspend fun getDeviceFor(page: String): Response<GetDeviceResponse> {
+    override suspend fun getDeviceFor(page: String, token: ConsentToken): Response<GetDeviceResponse> {
         return getDeviceResponse ?: createSuccessGetDeviceResponse()
     }
 
-    override suspend fun notifications(request: NotificationsRequest): Response<NotificationsResponse> {
+    override suspend fun notifications(request: NotificationsRequest, token: ConsentToken): Response<NotificationsResponse> {
         return notificationsResponse ?: createSuccessNotificationsResponse()
     }
 
-    override suspend fun numberOfUnreadNotifications(): Response<NumberOfUnreadNotificationsResponse> {
+    override suspend fun numberOfUnreadNotifications(token: ConsentToken): Response<NumberOfUnreadNotificationsResponse> {
         return numberOfUnreadNotificationsResponse ?: createSuccessUnreadNotificationsResponse()
     }
 
-    override suspend fun markNotificationAsRead(request: MarkNotificationAsReadRequest): Response<Unit> {
+    override suspend fun markNotificationAsRead(request: MarkNotificationAsReadRequest, token: ConsentToken): Response<Unit> {
         return markNotificationAsReadResponse ?: Response.success(Unit)
     }
 
-    override suspend fun notificationsToDisplayAutomatically(): Response<NotificationsResponse> {
+    override suspend fun notificationsToDisplayAutomatically(token: ConsentToken): Response<NotificationsResponse> {
         return notificationsToDisplayAutomaticallyResponse ?: createSuccessNotificationsResponse()
     }
 
-    override suspend fun syncScreenAliases(request: ScreenAliasesRequest): Response<Unit> {
+    override suspend fun syncScreenAliases(request: ScreenAliasesRequest, token: ConsentToken): Response<Unit> {
         lastScreenAliases = request
         return syncScreenAliasesResponse ?: Response.success(Unit)
     }

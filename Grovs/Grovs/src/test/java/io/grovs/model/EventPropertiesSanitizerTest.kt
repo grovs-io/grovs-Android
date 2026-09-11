@@ -7,6 +7,7 @@ import org.junit.Test
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.net.URL
+import java.time.DayOfWeek
 import java.util.Date
 import java.util.UUID
 
@@ -48,63 +49,93 @@ class EventPropertiesSanitizerTest {
     }
 
     @Test
-    fun `non-finite nested numbers drop their top-level property without shifting lists`() {
-        val invalid = listOf<Any>(
-            mapOf("value" to Double.NaN),
-            listOf("before", Float.POSITIVE_INFINITY, "after"),
-            arrayOf(mapOf("value" to Double.NEGATIVE_INFINITY)),
-            doubleArrayOf(1.0, Double.NaN),
-        )
-        for (value in invalid) {
-            assertEquals(mapOf("good" to "kept"), CustomEventRules.sanitizeProperties(
-                mapOf("bad" to value, "good" to "kept")
-            ))
-        }
+    fun `non-finite numbers are dropped individually at every depth`() {
+        val clean = CustomEventRules.sanitizeProperties(mapOf(
+            "top" to Double.NaN,
+            "map" to mapOf("value" to Double.NaN, "kept" to 1),
+            "list" to listOf("before", Float.POSITIVE_INFINITY, "after"),
+            "array" to arrayOf(mapOf("value" to Double.NEGATIVE_INFINITY)),
+            "doubles" to doubleArrayOf(1.0, Double.NaN),
+            "good" to "kept",
+        ))
+
+        assertEquals(mapOf(
+            "map" to mapOf("kept" to 1),
+            "list" to listOf("before", "after"),
+            "array" to listOf(emptyMap<String, Any>()),
+            "doubles" to listOf(1.0),
+            "good" to "kept",
+        ), clean)
     }
 
     @Test
-    fun `large numbers that become infinity after storage are discarded per property`() {
-        assertEquals(mapOf("good" to 1), CustomEventRules.sanitizeProperties(mapOf(
+    fun `large numbers that become infinity after storage are dropped individually`() {
+        assertEquals(mapOf(
+            "integer" to emptyList<Any>(),
+            "decimal" to mapOf("kept" to 1),
+            "good" to 1,
+        ), CustomEventRules.sanitizeProperties(mapOf(
+            "top" to BigDecimal("1E+1000"),
             "integer" to listOf(BigInteger.TEN.pow(1000)),
-            "decimal" to mapOf("amount" to BigDecimal("1E+1000")),
+            "decimal" to mapOf("amount" to BigDecimal("1E+1000"), "kept" to 1),
             "good" to 1,
         )))
     }
 
     @Test
-    fun `unsupported objects and non-string map keys drop only the containing property`() {
+    fun `unsupported values are dropped individually and a map with a non-string key is dropped whole`() {
         val unsupported = object {
             override fun toString(): String = error("Must not stringify arbitrary objects")
         }
-        assertEquals(mapOf("good" to 7), CustomEventRules.sanitizeProperties(mapOf(
-            "object" to listOf(unsupported),
+        assertEquals(mapOf(
+            "objects" to listOf("kept"),
+            "nested" to mapOf("kept" to 2),
+            "good" to 7,
+        ), CustomEventRules.sanitizeProperties(mapOf(
+            "object" to unsupported,
+            "enum" to DayOfWeek.MONDAY,
+            "set" to setOf("a"),
+            "objects" to listOf(unsupported, "kept"),
             "keys" to mapOf(123 to "value"),
+            "nested" to mapOf("keys" to mapOf("ok" to 1, 2 to "two"), "kept" to 2),
             "good" to 7,
         )))
     }
 
     @Test
-    fun `self-referencing maps lists and arrays are discarded`() {
+    fun `a reference back to an enclosing collection is dropped from its parent`() {
         val map = mutableMapOf<String, Any>()
         map["self"] = map
+        map["kept"] = 1
         val list = mutableListOf<Any>()
         list.add(list)
-        val array = arrayOfNulls<Any>(1)
+        list.add("kept")
+        val array = arrayOfNulls<Any>(2)
         array[0] = array
+        array[1] = "kept"
 
-        assertEquals(mapOf("good" to true), CustomEventRules.sanitizeProperties(mapOf(
+        assertEquals(mapOf(
+            "map" to mapOf("kept" to 1),
+            "list" to listOf("kept"),
+            "array" to listOf("kept"),
+            "good" to true,
+        ), CustomEventRules.sanitizeProperties(mapOf(
             "map" to map, "list" to list, "array" to array, "good" to true
         )))
     }
 
     @Test
-    fun `mutual cycles do not prevent later properties from being sanitized`() {
+    fun `mutual cycles are cut where they close`() {
         val first = mutableMapOf<String, Any>()
         val second = mutableListOf<Any>()
         first["second"] = second
         second.add(first)
 
-        assertEquals(mapOf("good" to listOf(1)), CustomEventRules.sanitizeProperties(
+        assertEquals(mapOf(
+            "first" to mapOf("second" to emptyList<Any>()),
+            "second" to listOf(emptyMap<String, Any>()),
+            "good" to listOf(1),
+        ), CustomEventRules.sanitizeProperties(
             mapOf("first" to first, "second" to second, "good" to listOf(1))
         ))
     }
@@ -121,16 +152,19 @@ class EventPropertiesSanitizerTest {
     }
 
     @Test
-    fun `sixteen nested containers are accepted and a seventeenth drops the property`() {
-        fun nested(depth: Int): Any {
-            var value: Any = "leaf"
+    fun `sixteen nested containers are accepted and a seventeenth is dropped from its parent`() {
+        fun nested(depth: Int, leaf: Any): Any {
+            var value = leaf
             repeat(depth) { value = listOf(value) }
             return value
         }
-        val valid = nested(16)
+        val valid = nested(16, "leaf")
 
-        assertEquals(mapOf("valid" to valid), CustomEventRules.sanitizeProperties(
-            mapOf("tooDeep" to nested(17), "valid" to valid)
+        assertEquals(mapOf(
+            "tooDeep" to nested(15, emptyList<Any>()),
+            "valid" to valid,
+        ), CustomEventRules.sanitizeProperties(
+            mapOf("tooDeep" to nested(17, "leaf"), "valid" to valid)
         ))
     }
 
@@ -188,13 +222,13 @@ class EventPropertiesSanitizerTest {
     }
 
     @Test
-    fun `a failing nested collection drops its property`() {
+    fun `a collection that fails while being read is dropped from its parent`() {
         val broken = object : AbstractList<Any>() {
             override val size = 1
             override fun get(index: Int): Any = throw IllegalStateException("Collection changed")
         }
-        assertEquals(mapOf("good" to 1), CustomEventRules.sanitizeProperties(
-            mapOf("broken" to broken, "good" to 1)
+        assertEquals(mapOf("wrapper" to listOf(1), "good" to 1), CustomEventRules.sanitizeProperties(
+            mapOf("broken" to broken, "wrapper" to listOf(broken, 1), "good" to 1)
         ))
         assertNull(CustomEventRules.sanitizeProperties(mapOf("broken" to broken)))
         assertNull(CustomEventRules.sanitizeProperties(emptyMap()))

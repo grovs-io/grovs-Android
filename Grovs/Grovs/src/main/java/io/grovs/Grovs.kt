@@ -40,9 +40,10 @@ import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -648,9 +649,7 @@ public class Grovs: ActivityProvider {
         enabled: Boolean,
     ) {
         this.grovsContext.consent.retireConfiguration(enabled = enabled)
-        this.grovsContext.requiresAuthentication = true
-        this.grovsContext.authenticatedConfiguration = null
-        this.grovsContext.grovsId = null
+        this.grovsContext.clearAuthentication()
         this.apiKey = apiKey
         this.application = application
         this.grovsContext.settings.useTestEnvironment = useTestEnvironment
@@ -682,6 +681,7 @@ public class Grovs: ActivityProvider {
         application.registerActivityLifecycleCallbacks(applicationLifecycleObserver)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class) // CoroutineStart.ATOMIC
     fun setSDK(enabled: Boolean) {
         val consent = grovsContext.consent
         // One atomic transition: a repeated value changes nothing and schedules nothing. Revocation
@@ -704,7 +704,10 @@ public class Grovs: ActivityProvider {
         if (!enabled) {
             if (endingSegment != null && manager != null) {
                 val authentication = authenticationJob
-                manager.configuration.scope.launch(NonCancellable + grovsContext.serialDispatcher) {
+                // ATOMIC so the body starts even if the configuration is retired before dispatch: the
+                // permit always closes and the next enable never waits on it. finish runs the body
+                // NonCancellable.
+                manager.configuration.scope.launch(grovsContext.serialDispatcher, start = CoroutineStart.ATOMIC) {
                     endingSegment.finish {
                         authentication?.join()
                         manager.onDisabled(cutoff)
@@ -1084,8 +1087,7 @@ public class Grovs: ActivityProvider {
         }
         val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
         scope.launch {
-            // Answered on the main thread like every other outcome, never inline on the caller's
-            // thread: an unconfigured or unconsented SDK keeps the callback's existing contract.
+            // Answered on the main thread like every other outcome, never inline on the caller's thread.
             if (token == null) {
                 withContext(Dispatchers.Main) { onResult?.invoke(null) }
                 return@launch
@@ -1105,8 +1107,8 @@ public class Grovs: ActivityProvider {
 
     /**
      * The message an explicit request fails with when consent does not admit it, or was withdrawn
-     * before its result could be handed back. It is the method's existing error shape, not a new
-     * one: suspend callers get a [GrovsException], listener callers get one error completion.
+     * before its result could be handed back. Suspend callers get it in a [GrovsException] with the
+     * method's error code; listener callers get it in one error completion.
      */
     private val CONSENT_REJECTED: String
         get() = "The SDK is not enabled. Grant consent with Grovs.setSDK(true) and try again."
@@ -1128,8 +1130,7 @@ public class Grovs: ActivityProvider {
      *
      * The worker is a registered child of the caller: revocation cancels that child, never this
      * function and never the caller's own job, so the completion mapping below it always runs and
-     * an active caller gets exactly one answer instead of a silently dropped listener. Ordinary
-     * host cancellation still propagates as cancellation.
+     * an active caller gets exactly one answer. Host cancellation still propagates as cancellation.
      */
     private suspend fun <T : Any> explicitRequest(token: ConsentToken, block: suspend () -> T): T? =
         try {

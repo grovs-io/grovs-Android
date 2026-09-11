@@ -2,10 +2,8 @@ package io.grovs.service
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.Call
 import okhttp3.EventListener
@@ -17,7 +15,6 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -32,7 +29,6 @@ import java.net.SocketException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicReference
 import javax.net.SocketFactory
 
 /**
@@ -200,19 +196,5 @@ class RetrofitCancellationPrototypeTest {
         assertTrue("OkHttp closed the connecting socket", closed.await(5, TimeUnit.SECONDS))
         awaitEvent("failed /fast")
         assertEquals("nothing reached the server", 0, server.requestCount)
-    }
-
-    @Test
-    fun `the call factory runs on the calling coroutine so a thread context element reaches it`() = runBlocking {
-        val tag = ThreadLocal<String?>()
-        val seen = AtomicReference<String?>("unset")
-        val client = client()
-        val api = api(Call.Factory { request -> seen.set(tag.get()); client.newCall(request) })
-
-        withContext(Dispatchers.IO + tag.asContextElement("token-1")) { api.fast() }
-        assertEquals("token-1", seen.get())
-
-        withContext(Dispatchers.IO) { api.fast() }
-        assertNull(seen.get())
     }
 }

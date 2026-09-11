@@ -24,6 +24,7 @@ import io.mockk.mockk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
@@ -46,7 +47,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * A — authentication under consent operation ownership (plan §5, pruned matrix §10).
+ * Authentication under consent operation ownership.
  *
  * The manager runs against a controllable service so each test can park authentication at an exact
  * point and drive consent around it. Assertions inspect requests, launch records and published
@@ -86,8 +87,11 @@ class GrovsManagerConsentTest {
         buildManager()
     }
 
-    /** Constructs the manager against whatever controller [grovsContext] currently holds. */
-    private fun buildManager() {
+    /**
+     * Constructs the manager against whatever controller [grovsContext] currently holds. Pass
+     * [attributesSyncScope] to run its attribute sync in a scope the test drives.
+     */
+    private fun buildManager(attributesSyncScope: CoroutineScope? = null) {
         manager = GrovsManager(
             context = context,
             application = application,
@@ -97,7 +101,14 @@ class GrovsManagerConsentTest {
             eventsManager = eventsManager,
             appDetailsHelper = appDetailsHelper,
             localCache = FakeLocalCache(numberOfOpens = 1),
+            attributesSyncScope = attributesSyncScope,
         )
+    }
+
+    /** Replaces [manager] with one whose attribute sync runs in [scope]. */
+    private fun useAttributeSyncScope(scope: CoroutineScope) {
+        manager.close()
+        buildManager(attributesSyncScope = scope)
     }
 
     /**
@@ -250,7 +261,7 @@ class GrovsManagerConsentTest {
     /** A05 */
     @Test
     fun `A05 identifier, push token and attributes set while disabled are sent as one latest snapshot on enable`() = runTest {
-        manager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         authenticateSuccessfully()
 
         grovsContext.settings.sdkEnabled = false
@@ -277,7 +288,7 @@ class GrovsManagerConsentTest {
     @Test
     fun `A06 a stale attribute success cannot clear the dirty state a newer value established`() = runTest {
         holdCleanup()
-        manager.attributesUpdateScope = backgroundScope
+        useAttributeSyncScope(backgroundScope)
         authenticateSuccessfully()
 
         val oldSent = CompletableDeferred<Unit>()

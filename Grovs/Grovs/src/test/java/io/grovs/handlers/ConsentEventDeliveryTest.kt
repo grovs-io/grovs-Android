@@ -39,7 +39,7 @@ import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * Q — event collection and delivery under consent (plan §5, pruned matrix §10).
+ * Event collection and delivery under consent.
  *
  * Backed by a real in-memory queue, so every assertion is about what is actually stored, sent and
  * retired rather than about mock call counts alone.
@@ -68,7 +68,7 @@ class ConsentEventDeliveryTest {
         service = mockk(relaxed = true)
         storage = mockk(relaxed = true)
         grovsContext = GrovsContext()
-        grovsContext.grovsId = "test-grovs-id"
+        grovsContext.markAuthenticated("test-grovs-id", grovsContext.consent.currentConfiguration)
 
         stored.clear()
         coEvery { storage.addEvent(any()) } answers { stored.add(firstArg()); Unit }
@@ -106,6 +106,8 @@ class ConsentEventDeliveryTest {
         gate = GatedExecutor().also {
             grovsContext.useConsentController(ConsentController(cleanupExecutor = it))
         }
+        // The swap starts a new configuration; authentication belongs to the one the manager will own.
+        grovsContext.markAuthenticated("test-grovs-id", grovsContext.consent.currentConfiguration)
         buildManager()
     }
 
@@ -263,11 +265,13 @@ class ConsentEventDeliveryTest {
 
     @Test
     fun periodicDeliverySurvivesRevocationDuringSend() = runTest {
-        val context = GrovsContext(StandardTestDispatcher(testScheduler)).also { it.grovsId = "device" }
+        val context = GrovsContext(StandardTestDispatcher(testScheduler))
         context.useConsentController(ConsentController(cleanupExecutor = Executor { it.run() }))
+        // After the swap, so it belongs to the configuration the manager below will own.
+        context.markAuthenticated("device", context.consent.currentConfiguration)
         val api = mockk<GrovsApi>()
         var sends = 0
-        coEvery { api.addEventsBatch(any()) } coAnswers {
+        coEvery { api.addEventsBatch(any(), any()) } coAnswers {
             sends++
             if (sends == 1) awaitCancellation()
             Response.success(BatchEventsResponse(1, 0))

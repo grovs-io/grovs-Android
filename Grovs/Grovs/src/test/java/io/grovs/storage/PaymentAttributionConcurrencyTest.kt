@@ -95,7 +95,7 @@ class PaymentAttributionConcurrencyTest(private val injected: Boolean) {
         }
     }
 
-    /** Implements only the existing public interface, including a genuine suspension after reading. */
+    /** Implements only the public [IEventsStorage] interface, with a genuine suspension after reading. */
     private class LegacyStorage(private val backing: EventsStorage) : IEventsStorage by backing {
         var pauseRead: Gate? = null
         var mutationCalls = 0
@@ -257,7 +257,7 @@ class PaymentAttributionConcurrencyTest(private val injected: Boolean) {
         val storage = EventsStorage(context)
         val injectedStorage = if (injected) LegacyStorage(storage) else storage
         val service = mockk<IGrovsService>(relaxed = true)
-        val grovsContext = GrovsContext().also { it.grovsId = "device" }
+        val grovsContext = GrovsContext().also { it.markAuthenticated("device", it.consent.currentConfiguration) }
         val sent = CopyOnWriteArrayList<String>()
         Gate().use { response ->
             coEvery { service.addPaymentEvent(any()) } coAnswers {

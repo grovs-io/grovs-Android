@@ -70,15 +70,18 @@ object CustomEventRules {
     fun isValidName(name: String): Boolean = name.isNotBlank() && !isReserved(name)
 
     /**
-     * Copies JSON-compatible properties, converting Date/URL/UUID values at every depth.
-     * An invalid subtree drops its whole top-level property, preserving valid siblings.
-     * Oversized input or exhausted traversal budgets drop all properties, never the event.
+     * Copies JSON-compatible properties, converting Date/URL/UUID values at every depth. A value
+     * JSON cannot represent is dropped on its own - its list element, its map entry or its
+     * top-level property - and everything else is kept. Dropped top-level properties are logged.
+     * Oversized input or an exhausted traversal budget drops all properties, never the event.
      */
     fun sanitizeProperties(properties: Map<String, Any>?): Map<String, Any>? =
         PropertySanitizer().sanitize(properties)
 
-    private class InvalidProperty : RuntimeException()
     private class PropertiesTooLarge : RuntimeException()
+
+    /** Marks a value JSON cannot represent. Distinct from null, which is a valid JSON value. */
+    private object Dropped
 
     private class PropertySanitizer {
         private var remainingNodes = MAX_PROPERTY_NODES
@@ -86,36 +89,45 @@ object CustomEventRules {
 
         fun sanitize(properties: Map<String, Any>?): Map<String, Any>? {
             if (properties == null) return null
-            return try {
-                val clean = linkedMapOf<String, Any>()
+            val clean = linkedMapOf<String, Any>()
+            val dropped = mutableListOf<String>()
+            try {
                 for ((key, value) in properties) {
-                    try {
-                        checkLength(key)
-                        normalize(value, depth = 0)?.let { clean[key] = it }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: PropertiesTooLarge) {
-                        throw e
-                    } catch (e: Exception) {
-                        // Unsupported values or a failing caller-owned collection drop this key.
+                    checkLength(key)
+                    when (val safe = normalize(value, depth = 0)) {
+                        null -> Unit
+                        Dropped -> dropped += key
+                        else -> clean[key] = safe
                     }
                 }
-                if (clean.isEmpty()) return null
-
                 // Count the actual Gson JSON bytes, including escapes, without allocating an
                 // unbounded JSON string/byte array before discovering that it exceeds 8KB.
-                OutputStreamWriter(LimitedOutputStream(), Charsets.UTF_8).use {
-                    gson.toJson(clean, it)
+                if (clean.isNotEmpty()) {
+                    OutputStreamWriter(LimitedOutputStream(), Charsets.UTF_8).use { gson.toJson(clean, it) }
                 }
-                clean
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: PropertiesTooLarge) {
+                DebugLogger.instance.log(
+                    LogLevel.ERROR,
+                    "Custom event properties exceed $MAX_PROPERTIES_BYTES bytes; dropping properties.",
+                )
+                return null
             } catch (e: Exception) {
-                // This includes input iteration and serialization failures. No partial map escapes.
-                null
+                // The caller's map failed while it was being read. No partial map escapes.
+                DebugLogger.instance.log(LogLevel.ERROR, "Custom event properties could not be read; dropping properties.")
+                return null
             }
+            if (dropped.isNotEmpty()) {
+                DebugLogger.instance.log(
+                    LogLevel.ERROR,
+                    "Dropped non-serializable custom event property value(s) for key(s): ${dropped.sorted().joinToString(", ")}",
+                )
+            }
+            return clean.ifEmpty { null }
         }
 
+        /** A JSON-safe copy of [value], null for a JSON null, or [Dropped] when JSON cannot represent it. */
         private fun normalize(value: Any?, depth: Int): Any? {
             if (--remainingNodes < 0) throw PropertiesTooLarge()
             return when (value) {
@@ -123,20 +135,21 @@ object CustomEventRules {
                 is String -> value.also(::checkLength)
                 is Char -> value.toString()
                 is Boolean, is Byte, is Short, is Int, is Long -> value
-                is Double -> value.takeIf { it.isFinite() } ?: throw InvalidProperty()
-                is Float -> value.takeIf { it.isFinite() } ?: throw InvalidProperty()
-                is BigInteger -> {
-                    if (value.javaClass != BigInteger::class.java) throw InvalidProperty()
-                    if (value.bitLength() > MAX_PROPERTIES_BYTES * 4) throw PropertiesTooLarge()
-                    // Stored Map<String, Any> numbers are read back as doubles by Gson.
-                    if (!value.toDouble().isFinite()) throw InvalidProperty()
-                    value
+                is Double -> if (value.isFinite()) value else Dropped
+                is Float -> if (value.isFinite()) value else Dropped
+                // Stored Map<String, Any> numbers are read back as doubles by Gson, so a big number
+                // must stay finite as a double.
+                is BigInteger -> when {
+                    value.javaClass != BigInteger::class.java -> Dropped
+                    value.bitLength() > MAX_PROPERTIES_BYTES * 4 -> throw PropertiesTooLarge()
+                    value.toDouble().isFinite() -> value
+                    else -> Dropped
                 }
-                is BigDecimal -> {
-                    if (value.javaClass != BigDecimal::class.java) throw InvalidProperty()
-                    if (value.unscaledValue().bitLength() > MAX_PROPERTIES_BYTES * 4) throw PropertiesTooLarge()
-                    if (!value.toDouble().isFinite()) throw InvalidProperty()
-                    value
+                is BigDecimal -> when {
+                    value.javaClass != BigDecimal::class.java -> Dropped
+                    value.unscaledValue().bitLength() > MAX_PROPERTIES_BYTES * 4 -> throw PropertiesTooLarge()
+                    value.toDouble().isFinite() -> value
+                    else -> Dropped
                 }
                 is Date -> InstantCompat.ofEpochMilli(value.time).toIsoString().also(::checkLength)
                 is URL -> value.toString().also(::checkLength)
@@ -144,35 +157,46 @@ object CustomEventRules {
                 is Map<*, *> -> container(value, depth) {
                     val copy = linkedMapOf<String, Any?>()
                     for ((key, child) in value) {
-                        if (key !is String) throw InvalidProperty()
+                        // Only string keys make a JSON object; any other key drops the whole map.
+                        if (key !is String) return@container Dropped
                         checkLength(key)
-                        copy[key] = normalize(child, depth + 1)
+                        val safe = normalize(child, depth + 1)
+                        if (safe !== Dropped) copy[key] = safe
                     }
                     copy
                 }
                 is List<*> -> container(value, depth) {
                     val copy = mutableListOf<Any?>()
-                    for (child in value) copy.add(normalize(child, depth + 1))
+                    for (child in value) {
+                        val safe = normalize(child, depth + 1)
+                        if (safe !== Dropped) copy.add(safe)
+                    }
                     copy
                 }
-                else -> {
-                    if (!value.javaClass.isArray) throw InvalidProperty()
-                    container(value, depth) {
-                        val copy = mutableListOf<Any?>()
-                        for (index in 0 until JavaArray.getLength(value)) {
-                            copy.add(normalize(JavaArray.get(value, index), depth + 1))
-                        }
-                        copy
+                else -> if (!value.javaClass.isArray) Dropped else container(value, depth) {
+                    val copy = mutableListOf<Any?>()
+                    for (index in 0 until JavaArray.getLength(value)) {
+                        val safe = normalize(JavaArray.get(value, index), depth + 1)
+                        if (safe !== Dropped) copy.add(safe)
                     }
+                    copy
                 }
             }
         }
 
+        /** Copies one list, map or array, or drops it when it is too deep, cyclic or fails to read. */
         private fun container(value: Any, depth: Int, copy: () -> Any): Any {
-            if (depth >= MAX_PROPERTY_DEPTH || ancestors.containsKey(value)) throw InvalidProperty()
+            if (depth >= MAX_PROPERTY_DEPTH || ancestors.containsKey(value)) return Dropped
             ancestors[value] = true
             return try {
                 copy()
+            } catch (e: PropertiesTooLarge) {
+                throw e
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A caller-owned collection that fails while being read is dropped, not half-copied.
+                Dropped
             } finally {
                 ancestors.remove(value)
             }

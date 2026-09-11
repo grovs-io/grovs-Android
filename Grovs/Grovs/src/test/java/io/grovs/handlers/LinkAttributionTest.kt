@@ -52,7 +52,7 @@ class LinkAttributionTest {
         // Keep deadline time explicit while SharedPreferences work uses real IO threads.
         val deadlineClock = TestScope()
         val service = mockk<IGrovsService>(relaxed = true)
-        val context = GrovsContext().also { it.grovsId = "device" }
+        val context = GrovsContext().also { it.markAuthenticated("device", it.consent.currentConfiguration) }
         val clipboard = FakeClipboard(text = clipboardUrl)
         val storage = EventsStorage(app)
         val customStorage = CustomEventsStorage(app)

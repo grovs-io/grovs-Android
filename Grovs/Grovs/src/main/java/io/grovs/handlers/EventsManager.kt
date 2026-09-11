@@ -19,6 +19,8 @@ import io.grovs.utils.DurationCompat
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.utils.isValidUrl
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.NonCancellable
@@ -69,13 +71,18 @@ class EventsManager(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class) // CoroutineStart.ATOMIC
     override fun onAppBackgrounded() {
+        // The committed link ends with the session even when consent does not admit the storage
+        // write below, so it cannot leak into the next session's events.
+        linkForFutureActions = null
         val consent = grovsContext.consent
         val token = consent.tryAcquire(configuration) ?: return
         val permit = consent.tryAdmitCommit(token, CommitKind.STORAGE_TRANSACTION) ?: return
         val timestamp = InstantCompat.now()
-        linkForFutureActions = null
-        configuration.scope.launch(NonCancellable + grovsContext.serialDispatcher) {
+        // ATOMIC so the body starts even if the configuration is retired before dispatch, and the
+        // permit always closes. finish runs the body NonCancellable.
+        configuration.scope.launch(grovsContext.serialDispatcher, start = CoroutineStart.ATOMIC) {
             permit.finish {
                 localCache.resignTimestamp = timestamp
                 closeEngagementAt(timestamp)

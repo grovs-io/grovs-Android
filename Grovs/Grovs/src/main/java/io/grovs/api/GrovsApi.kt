@@ -1,6 +1,7 @@
 package io.grovs.api
 
 import android.os.Parcelable
+import io.grovs.handlers.ConsentToken
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
@@ -24,52 +25,57 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
+import retrofit2.http.Tag
 
-interface GrovsApi {
+/**
+ * Every call carries the consent token of the attempt making it as its request tag; the consent
+ * gate interceptor refuses a request whose token is missing or no longer current.
+ */
+internal interface GrovsApi {
 
     @POST("data_for_device")
-    suspend fun payloadFor(@Body request: AppDetails): Response<DeeplinkDetails>
+    suspend fun payloadFor(@Body request: AppDetails, @Tag token: ConsentToken): Response<DeeplinkDetails>
 
     @POST("data_for_device_and_url")
-    suspend fun payloadWithLinkFor(@Body request: AppDetails): Response<DeeplinkDetails>
+    suspend fun payloadWithLinkFor(@Body request: AppDetails, @Tag token: ConsentToken): Response<DeeplinkDetails>
 
     /** Whether the project had clipboard-enabled link clicks recently. Retrofit sends an empty body for a bodiless POST. */
     @POST("clipboard_status")
-    suspend fun clipboardStatus(): Response<ClipboardStatusResponse>
+    suspend fun clipboardStatus(@Tag token: ConsentToken): Response<ClipboardStatusResponse>
 
     @POST("authenticate")
-    suspend fun authenticate(@Body request: AppDetails): Response<AuthenticationResponse>
+    suspend fun authenticate(@Body request: AppDetails, @Tag token: ConsentToken): Response<AuthenticationResponse>
 
     @POST("create_link")
-    suspend fun generateLink(@Body request: GenerateLinkRequest): Response<GenerateLinkResponse>
+    suspend fun generateLink(@Body request: GenerateLinkRequest, @Tag token: ConsentToken): Response<GenerateLinkResponse>
 
     @POST("link_details")
-    suspend fun linkDetails(@Body request: LinkDetailsRequest): Response<ResponseBody>
+    suspend fun linkDetails(@Body request: LinkDetailsRequest, @Tag token: ConsentToken): Response<ResponseBody>
 
     @POST("events/batch")
-    suspend fun addEventsBatch(@Body request: BatchEventsRequest): Response<BatchEventsResponse>
+    suspend fun addEventsBatch(@Body request: BatchEventsRequest, @Tag token: ConsentToken): Response<BatchEventsResponse>
 
     @POST("add_payment_event")
-    suspend fun addPaymentEvent(@Body request: PaymentEvent): Response<Unit>
+    suspend fun addPaymentEvent(@Body request: PaymentEvent, @Tag token: ConsentToken): Response<Unit>
 
     @POST("visitor_attributes")
-    suspend fun updateAttributes(@Body request: UpdateAttributesRequest): Response<Unit>
+    suspend fun updateAttributes(@Body request: UpdateAttributesRequest, @Tag token: ConsentToken): Response<Unit>
 
     @GET("device_for_vendor_id")
-    suspend fun getDeviceFor(@Query("vendor_id") page: String): Response<GetDeviceResponse>
+    suspend fun getDeviceFor(@Query("vendor_id") page: String, @Tag token: ConsentToken): Response<GetDeviceResponse>
 
     @POST("notifications_for_device")
-    suspend fun notifications(@Body request: NotificationsRequest): Response<NotificationsResponse>
+    suspend fun notifications(@Body request: NotificationsRequest, @Tag token: ConsentToken): Response<NotificationsResponse>
 
     @GET("number_of_unread_notifications")
-    suspend fun numberOfUnreadNotifications(): Response<NumberOfUnreadNotificationsResponse>
+    suspend fun numberOfUnreadNotifications(@Tag token: ConsentToken): Response<NumberOfUnreadNotificationsResponse>
 
     @POST("mark_notification_as_read")
-    suspend fun markNotificationAsRead(@Body request: MarkNotificationAsReadRequest): Response<Unit>
+    suspend fun markNotificationAsRead(@Body request: MarkNotificationAsReadRequest, @Tag token: ConsentToken): Response<Unit>
 
     @GET("notifications_to_display_automatically")
-    suspend fun notificationsToDisplayAutomatically(): Response<NotificationsResponse>
+    suspend fun notificationsToDisplayAutomatically(@Tag token: ConsentToken): Response<NotificationsResponse>
 
     @POST("screen_aliases")
-    suspend fun syncScreenAliases(@Body request: ScreenAliasesRequest): Response<Unit>
+    suspend fun syncScreenAliases(@Body request: ScreenAliasesRequest, @Tag token: ConsentToken): Response<Unit>
 }

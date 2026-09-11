@@ -50,9 +50,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * P — the public API under consent (plan §5, pruned matrix §10).
+ * The public API under consent.
  *
- * Explicit requests must answer exactly once with their existing error shape; collection calls must
+ * Explicit requests must answer exactly once with the method's public error; collection calls must
  * be rejected at public-call time; desired-configuration setters must keep working while disabled.
  * Assertions inspect callbacks, thrown errors and manager calls, never the enabled flag.
  */

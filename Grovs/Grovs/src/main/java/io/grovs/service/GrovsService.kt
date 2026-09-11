@@ -7,6 +7,7 @@ import com.google.gson.GsonBuilder
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import io.grovs.api.GrovsApi
+import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.GrovsContext
 import io.grovs.model.ScreenAlias
 import io.grovs.model.ScreenAliasesRequest
@@ -144,9 +145,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         grovsApi = getRetrofit().create(GrovsApi::class.java)
     }
 
-    /// One admitted attempt whose unexpected failure is reported as an Error, as before. A consent
-    /// rejection or a cancellation is never turned into an Error: it ends the call.
-    private suspend fun <T : Any> singleResult(block: suspend () -> LSResult<T>): LSResult<T> =
+    /// One admitted attempt. An unexpected failure is returned as an Error; a consent rejection or a
+    /// cancellation is rethrown and ends the call.
+    private suspend fun <T : Any> singleResult(block: suspend (ConsentToken) -> LSResult<T>): LSResult<T> =
         try {
             requestExecutor.single(block)
         } catch (e: CancellationException) {
@@ -158,8 +159,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun payloadFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
 
-        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") {
-            val response = grovsApi.payloadFor(request)
+        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") { token ->
+            val response = grovsApi.payloadFor(request, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -180,8 +181,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun payloadWithLinkFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
 
-        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") {
-            val response = grovsApi.payloadWithLinkFor(request)
+        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") { token ->
+            val response = grovsApi.payloadWithLinkFor(request, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -202,8 +203,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun clipboardStatus(): LSResult<Boolean> {
         DebugLogger.instance.log(LogLevel.INFO, "Clipboard status")
 
-        return singleResult {
-            val response = grovsApi.clipboardStatus()
+        return singleResult { token ->
+            val response = grovsApi.clipboardStatus(token)
             val active = response.body()?.clipboardActive
             if (response.isSuccessful && active != null) {
                 DebugLogger.instance.log(LogLevel.INFO, "Clipboard status - Active: $active")
@@ -220,10 +221,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     /// - Parameters:
     ///   - appDetails: Details of the app.
     override fun authenticate(appDetails: AppDetails): Flow<GVRetryResult<AuthenticationResponse>> =
-        requestExecutor.retryingFlow<AuthenticationResponse>("Authenticate") {
+        requestExecutor.retryingFlow<AuthenticationResponse>("Authenticate") { token ->
             DebugLogger.instance.log(LogLevel.INFO, "Authenticate")
 
-            val response = grovsApi.authenticate(appDetails)
+            val response = grovsApi.authenticate(appDetails, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -250,7 +251,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                              showPreviewAndroid: Boolean?,
                              copyToClipboardIos: Boolean?,
                              copyToClipboardAndroid: Boolean?,
-                             tracking: TrackingParams?): LSResult<GenerateLinkResponse> = singleResult {
+                             tracking: TrackingParams?): LSResult<GenerateLinkResponse> = singleResult { token ->
         val stringData = gson.toJson(data)
         val stringTags = gson.toJson(tags)
         val request = GenerateLinkRequest(title = title,
@@ -268,7 +269,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             trackingCampaign = tracking?.utmCampaign,
             trackingMedium = tracking?.utmMedium,
             trackingSource = tracking?.utmSource)
-        val response = grovsApi.generateLink(request)
+        val response = grovsApi.generateLink(request, token)
         if (response.isSuccessful) {
             val body = response.body()
             body?.let {
@@ -283,9 +284,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         LSResult.Error(java.io.IOException("Failed to generate link. ${error.error}"))
     }
 
-    override suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> = singleResult {
+    override suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> = singleResult { token ->
         val request = LinkDetailsRequest(path = path)
-        val response = grovsApi.linkDetails(request)
+        val response = grovsApi.linkDetails(request, token)
         if (response.isSuccessful) {
             val body = response.body()
             body?.string()?.let {
@@ -323,9 +324,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             return LSResult.Error(IllegalArgumentException("$label - batch of ${events.size} exceeds $MAX_BATCH_SIZE"))
         }
         return try {
-            requestExecutor.single<LSResult<BatchEventsResponse>> {
+            requestExecutor.single<LSResult<BatchEventsResponse>> { token ->
                 DebugLogger.instance.log(LogLevel.INFO, "$label batch - ${events.size} events")
-                val response = grovsApi.addEventsBatch(BatchEventsRequest(events))
+                val response = grovsApi.addEventsBatch(BatchEventsRequest(events), token)
                 if (!response.isSuccessful) {
                     val body = response.errorBody()?.string()
                     DebugLogger.instance.log(LogLevel.INFO, "$label batch - Failed (${response.code()}) $body")
@@ -352,9 +353,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     /// - Parameters:
     ///   - event: The payment event to add.
     ///   return: A closure indicating the success or failure of the operation.
-    override suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean> = singleResult {
+    override suspend fun addPaymentEvent(event: PaymentEvent): LSResult<Boolean> = singleResult { token ->
         DebugLogger.instance.log(LogLevel.INFO, "Add payment event - $event")
-        val response = grovsApi.addPaymentEvent(event)
+        val response = grovsApi.addPaymentEvent(event, token)
         if (response.isSuccessful) {
             val body = response.body()
             body?.let {
@@ -376,11 +377,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
         // A newer attribute update supersedes this one by cancelling it; the executor never
         // swallows that cancellation, so the retry loop stays cancellable.
-        return requestExecutor.retrying<LSResult<Boolean>>("Set attributes") {
+        return requestExecutor.retrying<LSResult<Boolean>>("Set attributes") { token ->
             val request = UpdateAttributesRequest( sdkIdentifier = identifier,
                 sdkAttributes = attributes,
                 pushToken = pushToken)
-            val response = grovsApi.updateAttributes(request)
+            val response = grovsApi.updateAttributes(request, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -400,10 +401,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     }
 
     override fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> =
-        requestExecutor.retryingFlow<GetDeviceResponse>("Getting device last seen") {
+        requestExecutor.retryingFlow<GetDeviceResponse>("Getting device last seen") { token ->
             DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen")
 
-            val response = grovsApi.getDeviceFor(vendorId)
+            val response = grovsApi.getDeviceFor(vendorId, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -424,9 +425,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications")
 
-        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Getting all the notifications") {
+        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Getting all the notifications") { token ->
             val request = NotificationsRequest(page = page)
-            val response = grovsApi.notifications(request)
+            val response = grovsApi.notifications(request, token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -448,8 +449,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Get unread messages")
 
-        return requestExecutor.retrying<LSResult<NumberOfUnreadNotificationsResponse>>("Get unread messages") {
-            val response = grovsApi.numberOfUnreadNotifications()
+        return requestExecutor.retrying<LSResult<NumberOfUnreadNotificationsResponse>>("Get unread messages") { token ->
+            val response = grovsApi.numberOfUnreadNotifications(token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -471,9 +472,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
         DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read")
 
-        return requestExecutor.retrying<LSResult<Boolean>>("Mark notification as read") {
+        return requestExecutor.retrying<LSResult<Boolean>>("Mark notification as read") { token ->
             val request = MarkNotificationAsReadRequest(notificationId = notificationId)
-            val response = grovsApi.markNotificationAsRead(request = request)
+            val response = grovsApi.markNotificationAsRead(request = request, token = token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -495,8 +496,8 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Notifications to display automatically")
 
-        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Notifications to display automatically") {
-            val response = grovsApi.notificationsToDisplayAutomatically()
+        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Notifications to display automatically") { token ->
+            val response = grovsApi.notificationsToDisplayAutomatically(token)
             if (response.isSuccessful) {
                 val body = response.body()
                 body?.let {
@@ -518,11 +519,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
         // An empty map is not a no-op: it is how a caller clears the aliases the backend holds, so
         // it has to go out on the wire rather than being answered locally.
-        return singleResult {
+        return singleResult { token ->
             val request = ScreenAliasesRequest(
                 screenAliases = aliases.map { ScreenAlias(identifier = it.key, alias = it.value) }
             )
-            val response = grovsApi.syncScreenAliases(request)
+            val response = grovsApi.syncScreenAliases(request, token)
 
             if (response.isSuccessful) {
                 LSResult.Success(true)
@@ -561,8 +562,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             .baseUrl(baseUrl)
             .addConverterFactory(nullOnEmptyConverterFactory)
             .addConverterFactory(GsonConverterFactory.create(gson))
-            // Tags every request with its attempt's consent token for the gate interceptor.
-            .callFactory(requestExecutor.callFactory(getOkhttpClient()))
+            .client(getOkhttpClient())
             .build()
     }
 

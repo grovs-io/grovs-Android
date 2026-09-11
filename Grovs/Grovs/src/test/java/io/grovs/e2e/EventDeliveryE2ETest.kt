@@ -43,7 +43,7 @@ class EventDeliveryE2ETest {
         E2ETestUtils.setupMockUserAgent("Grovs SDK flow tests")
         server = MockWebServer().apply { start() }
         context = GrovsContext().also {
-            it.grovsId = "flow-test-device"
+            it.markAuthenticated("flow-test-device", it.consent.currentConfiguration)
             it.settings.baseURL = server.url("/").toString()
         }
         // Bind the real public enable/disable API to the context used by this delivery fixture.

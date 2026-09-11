@@ -77,6 +77,8 @@ internal class GrovsManager(
     activityProvider: ActivityProvider? = null,
     localCache: ILocalCache? = null,
     clipboardHandler: ClipboardHandler? = null,
+    /// Where the attribute sync runs. Defaults to the configuration's scope; tests pass one they drive.
+    attributesSyncScope: CoroutineScope? = null,
 ) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
@@ -158,18 +160,11 @@ internal class GrovsManager(
     /// authentication and on every new consent grant.
     private val attributesResyncRequests = MutableStateFlow(0)
 
-    /// Scope the attribute sync runs in. Its dispatcher governs ordering, so tests can swap in
-    /// `runTest`'s `backgroundScope`; assigning a scope moves the sync there.
-    internal var attributesUpdateScope: CoroutineScope =
-        CoroutineScope(grovsContext.serialDispatcher + SupervisorJob())
-        set(value) {
-            field = value
-            attributesSync.cancel()
-            attributesSync = launchAttributesSync(value)
-        }
-
-    @Volatile
-    private var attributesSync: Job = launchAttributesSync(attributesUpdateScope)
+    /// The one long-lived attribute sync. By default it runs in the configuration's scope, so
+    /// retiring the configuration stops it as well as [close].
+    private val attributesSync: Job = launchAttributesSync(
+        attributesSyncScope ?: CoroutineScope(configuration.scope.coroutineContext + grovsContext.serialDispatcher)
+    )
 
     private val prefs = context.getSharedPreferences(GROVS_PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -203,9 +198,10 @@ internal class GrovsManager(
 
     fun onAppBackgrounded() {
         grovsContext.isForeground = false
-        // Campaigns belong to a session; a brief background does not end that session.
-        if (!grovsContext.settings.sdkEnabled) {
-            // Disabled: no storage writes, but the committed link still ends with the session,
+        // Custom-event campaigns last the whole session, brief backgrounds included; only the
+        // system-event link ends here.
+        if (grovsContext.consent.tryAcquire(configuration) == null) {
+            // Not admitted: no storage writes, but the committed link still ends with the session,
             // exactly as when enabled, so it cannot leak into the next session's events.
             eventsManager.setLinkForFutureEvents(null)
             return
@@ -371,8 +367,7 @@ internal class GrovsManager(
     /**
      * Authenticates the device under a consent operation. Returns false without sending anything
      * when consent is not granted, and false when consent is withdrawn before the response is
-     * committed - the caller's contract is unchanged, so a revoked attempt simply did not
-     * authenticate. Re-enabling authenticates again under a new token; this one never revives.
+     * committed. A revoked attempt never resumes; re-enabling authenticates again under a new token.
      */
     suspend fun authenticate(): Boolean = try {
         grovsContext.consent.runOperation(configuration) { authenticateUnderConsent() }
@@ -439,11 +434,10 @@ internal class GrovsManager(
                     // visible together. A revocation racing this waits for the permit to close, so
                     // the next grant resumes after it rather than recording a second launch.
                     permit.finish {
-                        grovsContext.grovsId = result.data.grovsId
+                        grovsContext.markAuthenticated(result.data.grovsId, configuration)
                         adoptBackendAttributes(result.data.sdkIdentifier, result.data.sdkAttributes)
                         clipboardHandler.armIfNeeded()
                         eventsManager.logAppLaunchEvents()
-                        grovsContext.authenticatedConfiguration = configuration
                         authenticationState = AuthenticationState.AUTHENTICATED
                     }
                     if (!consent.isCurrent(token)) return@collect
@@ -479,7 +473,7 @@ internal class GrovsManager(
                              copyToClipboardIos: Boolean? = null,
                              copyToClipboardAndroid: Boolean? = null,
                              tracking: TrackingParams?): LSResult<GenerateLinkResponse> {
-        if (!grovsContext.settings.sdkEnabled) {
+        if (grovsContext.consent.workToken(configuration) == null) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Links cannot be generated."))
         }
@@ -502,7 +496,7 @@ internal class GrovsManager(
     }
 
     suspend fun linkDetails(path: String): LSResult<LinkDetailsResponse> {
-        if (!grovsContext.settings.sdkEnabled) {
+        if (grovsContext.consent.workToken(configuration) == null) {
             DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Link details cannot be used.")
             return LSResult.Error(java.io.IOException("The SDK is not enabled. Link details cannot be used."))
         }
@@ -537,10 +531,8 @@ internal class GrovsManager(
     }
 
     private suspend fun handleIntentUnderConsent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean, token: ConsentToken): DeeplinkDetails? {
-        if (!grovsContext.settings.sdkEnabled) {
-            DebugLogger.instance.log(LogLevel.ERROR, "The SDK is not enabled. Links cannot be generated.")
-            return null
-        }
+        // Consent was admitted by handleIntent and is current here: runOperation checks [token]
+        // before this body runs.
         if (authenticationState != AuthenticationState.AUTHENTICATED) {
             DebugLogger.instance.log(LogLevel.ERROR, "SDK is not ready for usage yet.")
             return null

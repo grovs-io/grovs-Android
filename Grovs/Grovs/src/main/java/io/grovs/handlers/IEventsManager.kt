@@ -35,8 +35,10 @@ interface IEventsManager {
      * Queues a [flush] and returns without waiting for it, so it is safe to call under another
      * lock. Requests made before the queued delivery starts share it. Nothing is queued when
      * consent does not admit the work.
+     *
+     * The default runs [flush] and waits for it; override to queue instead.
      */
-    suspend fun requestFlush()
+    suspend fun requestFlush() = flush()
 
     /**
      * Logs app launch events including install/reactivation and open events.

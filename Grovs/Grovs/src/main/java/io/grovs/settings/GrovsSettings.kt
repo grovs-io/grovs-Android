@@ -17,10 +17,10 @@ class GrovsSettings {
     var useTestEnvironment: Boolean = false
 
     /// Consent gate. In memory only: every process starts from the value passed to configure().
-    /// While false no new collection or request is admitted. Previously admitted local commits may finish.
-    /// Reads the consent controller. Writing false revokes consent (every operation admitted so far
-    /// stays invalid, even after a later enable); writing true starts a new consent generation.
-    /// Writing the current value does nothing.
+    /// While false no new collection or request is admitted; local commits admitted earlier may
+    /// finish. Writing false revokes consent (operations admitted so far stay invalid, even after a
+    /// later enable); writing true starts a new consent generation. Writing the current value does
+    /// nothing.
     var sdkEnabled: Boolean
         get() = consent.isEnabled
         set(value) {

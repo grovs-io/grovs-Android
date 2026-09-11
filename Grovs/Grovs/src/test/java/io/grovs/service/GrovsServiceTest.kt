@@ -4,6 +4,7 @@ import android.content.Context
 import io.grovs.TestFixtures
 import io.grovs.MockGrovsApi
 import io.grovs.api.GrovsApi
+import io.grovs.handlers.ConsentToken
 import io.grovs.TestAssertions.assertEqualsWithContext
 import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
@@ -282,9 +283,9 @@ class GrovsServiceTest {
         )
         var attempts = 0
         installApi(object : GrovsApi by mockGrovsApi {
-            override suspend fun numberOfUnreadNotifications(): Response<NumberOfUnreadNotificationsResponse> {
+            override suspend fun numberOfUnreadNotifications(token: ConsentToken): Response<NumberOfUnreadNotificationsResponse> {
                 if (attempts++ == 0) throw IOException("Transient connection failure")
-                return mockGrovsApi.numberOfUnreadNotifications()
+                return mockGrovsApi.numberOfUnreadNotifications(token)
             }
         })
 

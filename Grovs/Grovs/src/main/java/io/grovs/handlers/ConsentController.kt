@@ -69,7 +69,7 @@ internal enum class RevocationReason {
 /**
  * The distinguishable cancellation cause for consent. A [CancellationException], so an operation
  * ended by it never fails its parent or reaches an uncaught-exception handler. Explicit public API
- * boundaries catch exactly this type to map it to their existing error; ordinary cancellation
+ * boundaries catch exactly this type to map it to the method's public error; ordinary cancellation
  * propagates untouched.
  */
 internal class ConsentRevokedException(
@@ -99,8 +99,31 @@ internal class ConsentRegistration internal constructor(
     }
 }
 
-/** The three local finalizations that may finish after revocation once admitted (plan §3.4). */
-internal enum class CommitKind { STORAGE_TRANSACTION, ACKNOWLEDGEMENT, AUTHENTICATION }
+/**
+ * The local finalizations that may finish after revocation once admitted. Each is storage-only and
+ * sends nothing, and abandoning one halfway would leave storage inconsistent; the next enable waits
+ * for admitted ones to close, so it never races them.
+ */
+internal enum class CommitKind {
+    /**
+     * A local write accepted before revocation: queueing an event, closing an engagement interval
+     * or committing a resolved link. Finishing it means storage is never left half-applied.
+     */
+    STORAGE_TRANSACTION,
+
+    /**
+     * Removing records the backend accepted. Abandoned, storage would still believe it owes them
+     * and send them again. Not admitted, the records stay queued: a cancelled response is not proof
+     * the backend consumed them.
+     */
+    ACKNOWLEDGEMENT,
+
+    /**
+     * Applying an accepted authentication: the launch record, the opens counters and the
+     * authenticated state become visible together, so a later grant never records a second launch.
+     */
+    AUTHENTICATION,
+}
 
 /**
  * Ownership of one admitted commit. Admission and revocation are ordered by the controller lock:

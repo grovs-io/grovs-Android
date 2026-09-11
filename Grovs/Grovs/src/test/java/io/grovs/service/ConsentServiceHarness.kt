@@ -60,7 +60,7 @@ import kotlin.coroutines.CoroutineContext
 
 const val SDK_PATH = "/api/v1/sdk/"
 
-/** One row of the endpoint inventory (plan §3.3). [invoke] returns the terminal result of one call. */
+/** One row of the endpoint inventory. [invoke] returns the terminal result of one call. */
 class EndpointCase(
     val name: String,
     val method: String,

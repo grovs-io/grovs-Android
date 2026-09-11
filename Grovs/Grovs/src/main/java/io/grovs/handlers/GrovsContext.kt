@@ -39,10 +39,24 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
         set(value) = userAttributes.update { it.copy(attributes = value) }
     @Volatile
     internal var isForeground: Boolean = false
-    @Volatile
-    internal var requiresAuthentication: Boolean = false
+
+    /// The configuration whose authentication produced [grovsId]. Changed only by
+    /// [markAuthenticated] and [clearAuthentication], so the two always move together.
     @Volatile
     internal var authenticatedConfiguration: ConsentConfiguration? = null
+        private set
+
+    /// Records a successful authentication of [configuration] and the device id it returned.
+    internal fun markAuthenticated(grovsId: String?, configuration: ConsentConfiguration) {
+        this.grovsId = grovsId
+        authenticatedConfiguration = configuration
+    }
+
+    /// Forgets the device id and the configuration it belongs to; the next one authenticates again.
+    internal fun clearAuthentication() {
+        authenticatedConfiguration = null
+        grovsId = null
+    }
 
     var lastSeen: InstantCompat? = null
 

@@ -55,7 +55,7 @@ class CustomEventsManagerTest {
         grovsContext = GrovsContext()
         // Most flush() tests exercise the authenticated path; the unauthenticated case has its own
         // dedicated test below.
-        grovsContext.grovsId = "test-grovs-id"
+        grovsContext.markAuthenticated("test-grovs-id", grovsContext.consent.currentConfiguration)
 
         stored.clear()
         coEvery { storage.addEvent(any()) } answers { stored.add(firstArg()); Unit }

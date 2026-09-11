@@ -125,8 +125,10 @@ class ConsentLifecycleTest {
     private suspend fun TestScope.verifyEngagement(resumeInForeground: Boolean) {
         E2ETestUtils.resetGrovsSingleton()
         E2ETestUtils.setupTestApplication(app)
-        val context = GrovsContext(StandardTestDispatcher(testScheduler)).also { it.grovsId = "device" }
+        val context = GrovsContext(StandardTestDispatcher(testScheduler))
         context.useConsentController(ConsentController(cleanupExecutor = Executor { it.run() }))
+        // After the swap, so it belongs to the configuration the managers below will own.
+        context.markAuthenticated("device", context.consent.currentConfiguration)
         E2ETestUtils.installGrovsContext(context)
         val service = mockk<IGrovsService>(relaxed = true)
         coEvery { service.addEvents(any()) } returns LSResult.Error(Exception("retain for inspection"))
