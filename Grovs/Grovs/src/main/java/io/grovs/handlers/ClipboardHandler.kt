@@ -23,6 +23,9 @@ internal sealed class ClipboardFlowOutcome {
     /** Terminal for this run only: a transient failure kept the flag armed. */
     object Retry : ClipboardFlowOutcome()
 
+    /** Focus can return without another lifecycle callback, so the caller should wait and retry. */
+    object AwaitingFocus : ClipboardFlowOutcome()
+
     /** A newer link lookup owns attribution; this run must not change clipboard state. */
     object Superseded : ClipboardFlowOutcome()
 
@@ -117,12 +120,12 @@ internal class ClipboardHandler(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                false
+                return ClipboardFlowOutcome.Retry
             }
             if (!isCurrent()) return ClipboardFlowOutcome.Superseded
             if (!accessGranted) {
                 DebugLogger.instance.log(LogLevel.INFO, "Clipboard flow - no window focus, will retry")
-                return ClipboardFlowOutcome.Retry
+                return ClipboardFlowOutcome.AwaitingFocus
             }
 
             val description = try {

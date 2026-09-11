@@ -289,7 +289,17 @@ internal class GrovsManager(
                     // and no later grant lets this run continue.
                     val token = grovsContext.consent.workToken(configuration)
                     val stillAllowed = { isCurrent(lookup) && token != null && grovsContext.consent.isCurrent(token) }
-                    when (val outcome = clipboardHandler.runFlow(request, stillAllowed)) {
+                    var outcome = clipboardHandler.runFlow(request, stillAllowed)
+                    // A startup dialog can outlive one focus wait without another onStart.
+                    // Retry only this condition, under the original consent token and hold deadline.
+                    while (outcome == ClipboardFlowOutcome.AwaitingFocus &&
+                        holdDeadline?.isActive == true && stillAllowed()
+                    ) {
+                        delay(250)
+                        if (holdDeadline?.isActive != true || !stillAllowed()) break
+                        outcome = clipboardHandler.runFlow(request, stillAllowed)
+                    }
+                    when (outcome) {
                         // INSTALL carries the clipboard string verbatim; the host gets the resolved details.
                         is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
                         else -> null

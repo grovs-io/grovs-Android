@@ -182,7 +182,7 @@ class ClipboardHandlerTest {
 
         val outcome = h.runFlow(appDetails)
 
-        assertEquals(ClipboardFlowOutcome.Retry, outcome)
+        assertEquals(ClipboardFlowOutcome.AwaitingFocus, outcome)
         assertTrue(h.isPending)
         assertEquals(0, clipboard.describeCount)
         assertEquals(0, clipboard.readCount)

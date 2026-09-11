@@ -1219,6 +1219,76 @@ class GrovsManagerTest {
     }
 
     @Test
+    fun `clipboard focus recovery retries without another intent`() = runTest {
+        stubEmptyFingerprint()
+        val rig = ClipboardRig(clipboard = FakeClipboard(accessGranted = false, text = clipboardLink))
+        coEvery { mockGrovsService.payloadWithLinkFor(any()) } returns
+            LSResult.Success(DeeplinkDetails(clipboardLink, null, null))
+        val manager = clipboardManager(rig)
+        manager.attributionScope = backgroundScope
+        try {
+            val pending = async { manager.handleIntent(Intent(), delayEvents = true) }
+            runCurrent()
+            assertFalse(pending.isCompleted)
+            assertEquals(0, rig.clipboard.readCount)
+
+            rig.clipboard.accessGranted = true
+            advanceTimeBy(250)
+            runCurrent()
+
+            assertEquals(clipboardLink, pending.await()?.link)
+            assertEquals(2, rig.clipboard.awaitAccessCount)
+            assertEquals(1, rig.clipboard.readCount)
+            assertEquals(1, rig.clipboard.clearCount)
+            coVerify(exactly = 1) { mockGrovsService.payloadWithLinkFor(any()) }
+        } finally { manager.close() }
+    }
+
+    @Test
+    fun `clipboard focus retry cannot cross revoke and regrant`() = runTest {
+        stubEmptyFingerprint()
+        val rig = ClipboardRig(clipboard = FakeClipboard(accessGranted = false, text = clipboardLink))
+        val manager = clipboardManager(rig)
+        manager.attributionScope = backgroundScope
+        try {
+            val pending = async { manager.handleIntent(Intent(), delayEvents = true) }
+            runCurrent()
+            grovsContext.settings.sdkEnabled = false
+            grovsContext.settings.sdkEnabled = true
+            rig.clipboard.accessGranted = true
+            advanceTimeBy(250)
+            runCurrent()
+
+            assertNull(pending.await())
+            assertEquals(1, rig.clipboard.awaitAccessCount)
+            assertEquals(0, rig.clipboard.readCount)
+            assertEquals(0, rig.clipboard.clearCount)
+            coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(any()) }
+        } finally { manager.close() }
+    }
+
+    @Test
+    fun `clipboard focus retries stop at the attribution deadline`() = runTest {
+        stubEmptyFingerprint()
+        val rig = ClipboardRig(clipboard = FakeClipboard(accessGranted = false, text = clipboardLink))
+        val manager = clipboardManager(rig)
+        manager.attributionScope = backgroundScope
+        manager.attributionTimeoutMs = 500
+        try {
+            val pending = async { manager.handleIntent(Intent(), delayEvents = true) }
+            advanceTimeBy(1_000)
+            runCurrent()
+
+            assertTrue(pending.isCompleted)
+            assertNull(pending.await())
+            assertEquals(0, rig.clipboard.readCount)
+            assertTrue(rig.cache.clipboardFlowPending)
+            coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(delayEvents = false) }
+            coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(any()) }
+        } finally { manager.close() }
+    }
+
+    @Test
     fun `authentication never arms the events hold on its own`() = runTest {
         // Only a lookup may hold events: a host that never reaches handleIntent must not have
         // every launch's events held for the whole attribution deadline.
