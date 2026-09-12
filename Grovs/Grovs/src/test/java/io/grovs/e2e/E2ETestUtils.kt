@@ -639,6 +639,24 @@ object E2ETestUtils {
     fun getGrovsManager(): Any? = grovsField("grovsManager")
 
     /**
+     * Reads the Grovs singleton's parked-intent slot via reflection. Tests use this to capture a
+     * link parked under the current consent grant, so it can be forced back into the slot later to
+     * stand in for a write that raced a revocation and landed after the slot was cleared.
+     */
+    fun getParkedIntent(): Any? = grovsField("parkedIntent")
+
+    /**
+     * Overwrites the Grovs singleton's parked-intent slot via reflection. See [getParkedIntent].
+     */
+    fun setParkedIntent(value: Any?) {
+        val instance = getGrovsInstance() ?: return
+        Grovs::class.java.getDeclaredField("parkedIntent").apply {
+            isAccessible = true
+            set(instance, value)
+        }
+    }
+
+    /**
      * Get the Grovs singleton instance via reflection.
      */
     /**

@@ -475,8 +475,15 @@ public class Grovs: ActivityProvider {
     /// An intent that arrived before the SDK was authenticated. One slot, last tap wins. Replayed
     /// once authentication succeeds, and dropped if consent goes away first. Never marked handled
     /// while parked, so a host forwarding the same intent again still resolves it.
-    private data class ParkedIntent(val intent: Intent, val delayEvents: Boolean, val cacheIntent: Boolean)
+    ///
+    /// [token] is the consent under which the intent was parked. The park write and the clear in
+    /// setEnabled(false) run on different threads with no shared suspension point between them, so
+    /// the write can, in principle, land after the clear. Re-checking [token] at replay time closes
+    /// that window regardless of write ordering: revoking bumps the consent generation, so a token
+    /// captured before the withdrawal never matches again, even under a later grant.
+    private data class ParkedIntent(val intent: Intent, val delayEvents: Boolean, val cacheIntent: Boolean, val token: ConsentToken)
 
+    @Volatile
     private var parkedIntent: ParkedIntent? = null
 
     private var grovsContext = GrovsContext()
@@ -1244,8 +1251,14 @@ public class Grovs: ActivityProvider {
             // successful authentication replay it; resolving now would be refused by the manager
             // and the link would be lost for the rest of the process.
             if (manager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED) {
+                // Re-checked immediately before the write: consent may have been withdrawn after
+                // this operation was admitted, and a parked link must never survive that withdrawal.
+                if (!isConsented(token)) {
+                    DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not parking the intent")
+                    return@launchOperation
+                }
                 DebugLogger.instance.log(LogLevel.INFO, "SDK not authenticated yet - parking the intent")
-                parkedIntent = ParkedIntent(intent, delayEvents, cacheIntent)
+                parkedIntent = ParkedIntent(intent, delayEvents, cacheIntent, token)
                 return@launchOperation
             }
             val result = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
@@ -1281,6 +1294,11 @@ public class Grovs: ActivityProvider {
      * Re-enters the normal intent path so a parked link gets the same delivery, duplicate guard and
      * lastLinkMatched bookkeeping as a live one. Cleared first, so a failure cannot loop.
      *
+     * The parked token is re-checked before replaying: a link parked under one consent grant must
+     * never be resolved or delivered under a later one, and this is what catches it even if the
+     * park write itself raced past a withdrawal - revoking bumps the consent generation, so a stale
+     * token never matches again.
+     *
      * This runs inside the authentication job, and the intent path it starts joins that same job.
      * That is not a self-join deadlock: [handleIntent] only launches the work, and the join
      * suspends rather than blocks, so this job completes and the launched one then resumes.
@@ -1288,6 +1306,10 @@ public class Grovs: ActivityProvider {
     private fun replayParkedIntent() {
         val parked = parkedIntent ?: return
         parkedIntent = null
+        if (!isConsented(parked.token)) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn while parked - dropping the intent")
+            return
+        }
         DebugLogger.instance.log(LogLevel.INFO, "Replaying the parked intent after authentication")
         handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent)
     }

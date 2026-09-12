@@ -5,6 +5,7 @@ import android.net.Uri
 import io.grovs.Grovs
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -63,5 +64,40 @@ class ParkedIntentE2ETest : DrivenBackendTestBase() {
         foreground(Intent())
 
         assertEquals("a withdrawn link is never resolved", 0, backend.count(payload, "re-enabled"))
+    }
+
+    @Test
+    fun `a parked link captured under a since-revoked token is never resolved by a later grant`() {
+        backend.failWithStatus(authenticate, code = 500, body = """{"error":"down"}""")
+        backend.respond(payload, """{"link":"campaign-link","data":{"k":"v"}}""")
+        configure()
+        pumpUntil("the launch attempt to fail") { backend.count(authenticate) >= 1 }
+        advance(60_000)
+
+        // Tap the link so it parks normally, capturing this consent grant's token.
+        foreground(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
+        val staleParkedIntent = E2ETestUtils.getParkedIntent()
+        assertNotNull("the link should have parked before withdrawal", staleParkedIntent)
+
+        // The park write and this clear run on different threads with no suspension point between
+        // the authentication join and the write, so in production a write that already passed its
+        // own consent check can still race a revoke and land after this clear. Force the slot back
+        // to the value captured under the OLD token to stand in for that outcome: the guarantee
+        // under test is that replay must reject it regardless of how it ended up there.
+        Grovs.setSDK(false)
+        backend.phase = "disabled"
+        pump()
+        E2ETestUtils.setParkedIntent(staleParkedIntent)
+
+        backend.respond(authenticate, authOk)
+        Grovs.setSDK(true)
+        backend.phase = "re-enabled"
+        advance(300_000)
+        foreground(Intent())
+
+        assertEquals(
+            "a link parked under a revoked token is never resolved by a later grant",
+            0, backend.count(payload, "re-enabled"),
+        )
     }
 }
