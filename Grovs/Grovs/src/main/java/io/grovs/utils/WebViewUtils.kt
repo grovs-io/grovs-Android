@@ -4,7 +4,8 @@ import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
+import android.os.Looper
+import android.os.SystemClock
 import android.webkit.WebSettings
 import android.webkit.WebView
 import kotlinx.coroutines.Dispatchers
@@ -13,53 +14,54 @@ import kotlinx.coroutines.runBlocking
 class WebViewUtils {
     companion object {
         private val defaultUserAgent = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36"
+
+        /// Set by reflection in both test suites (E2ETestUtils, SdkTestHelpers). Keep the name.
+        @Volatile
         private var cachedUserAgent: String? = null
 
+        /// When building the WebView last failed, or null. Each try runs on the main thread, so a
+        /// failure is not retried for [RETRY_AFTER_FAILURE_MS]; the fallback is used meanwhile.
+        @Volatile
+        private var failedAt: Long? = null
+        private const val RETRY_AFTER_FAILURE_MS = 300_000L
+
+        internal val defaultElapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
+        internal var elapsedMs: () -> Long = defaultElapsedMs
+
+        /// Builds the real user agent. Must run on the main thread: WebView requires it.
+        internal val defaultBuildUserAgent: (Context) -> String = { context ->
+            parseUserAgent(
+                userAgent = WebView(context).settings.userAgentString,
+                browserVersion = getChromeVersion(context = context),
+            )
+        }
+        internal var buildUserAgent: (Context) -> String = defaultBuildUserAgent
+
         /**
-         * Returns the user agent string of a WebView.
-         *
-         * @param context The context to use for creating a WebView instance.
-         * @return The user agent string of the WebView.
+         * Returns the user agent string of a WebView, or a fixed fallback when the WebView cannot
+         * be built. At most one WebView build per [RETRY_AFTER_FAILURE_MS] after a failure.
          */
         fun getUserAgent(context: Context): String {
             cachedUserAgent?.let { return it }
-
-            try {
-                // Perform a thread check before using runBlocking
-                if (Thread.currentThread().name.contains("main", ignoreCase = true)) {
-                    val webView = WebView(context)
-
-                    // Get WebSettings from the WebView
-                    val webSettings: WebSettings = webView.settings
-
-                    // Retrieve and return the user agent string
-                    val userAgent = webSettings.userAgentString
-                    val processedUserAgent = parseUserAgent(userAgent = userAgent, browserVersion = getChromeVersion(context = context))
-
-                    cachedUserAgent = processedUserAgent
-
-                    return processedUserAgent
+            failedAt?.let { if (elapsedMs() - it < RETRY_AFTER_FAILURE_MS) return defaultUserAgent }
+            return try {
+                val userAgent = if (Looper.myLooper() === Looper.getMainLooper()) {
+                    buildUserAgent(context)
                 } else {
-                    val result = runBlocking(Dispatchers.Main) {
-                        // Create a WebView instance
-                        val webView = WebView(context)
-
-                        // Get WebSettings from the WebView
-                        val webSettings: WebSettings = webView.settings
-
-                        // Retrieve and return the user agent string
-                        val userAgent = webSettings.userAgentString
-                        val processedUserAgent = parseUserAgent(userAgent = userAgent, browserVersion = getChromeVersion(context = context))
-
-                        processedUserAgent
-                    }
-                    cachedUserAgent = result
-
-                    return result
+                    runBlocking(Dispatchers.Main) { buildUserAgent(context) }
                 }
+                cachedUserAgent = userAgent
+                failedAt = null
+                userAgent
             } catch (e: Exception) {
-                return defaultUserAgent
+                failedAt = elapsedMs()
+                defaultUserAgent
             }
+        }
+
+        internal fun resetForTests() {
+            cachedUserAgent = null
+            failedAt = null
         }
 
         fun parseUserAgent(userAgent: String, browserVersion: String?): String {
