@@ -472,6 +472,13 @@ public class Grovs: ActivityProvider {
     private var lastLinkMatched: String? = null
     private val defaultIntent = Intent()
 
+    /// An intent that arrived before the SDK was authenticated. One slot, last tap wins. Replayed
+    /// once authentication succeeds, and dropped if consent goes away first. Never marked handled
+    /// while parked, so a host forwarding the same intent again still resolves it.
+    private data class ParkedIntent(val intent: Intent, val delayEvents: Boolean, val cacheIntent: Boolean)
+
+    private var parkedIntent: ParkedIntent? = null
+
     private var grovsContext = GrovsContext()
 
     private var authenticationJob: Job? = null
@@ -673,6 +680,9 @@ public class Grovs: ActivityProvider {
         // authenticates the new one, so joining returns immediately instead of waiting out retries.
         authenticationJob?.cancel()
 
+        // A new configuration never inherits the previous one's unresolved link.
+        parkedIntent = null
+
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,
             grovsContext = grovsContext,
@@ -724,6 +734,8 @@ public class Grovs: ActivityProvider {
                     }
                 }
             }
+            // Consent withdrawn: the link must not be resolved or delivered by a later grant.
+            parkedIntent = null
             return
         }
 
@@ -1199,6 +1211,7 @@ public class Grovs: ActivityProvider {
                     }
                     if (response) {
                         manager.start()
+                        replayParkedIntent()
                         notificationsManager?.displayAutomaticNotificationsIfNeeded()
                     }
                 }
@@ -1227,6 +1240,14 @@ public class Grovs: ActivityProvider {
         // cancel a lookup mid-flight, or the link is lost and the intent is already marked handled.
         grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
             authenticationJob?.join()
+            // Authentication failed or has not happened yet. Keeping the intent lets a later
+            // successful authentication replay it; resolving now would be refused by the manager
+            // and the link would be lost for the rest of the process.
+            if (manager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED) {
+                DebugLogger.instance.log(LogLevel.INFO, "SDK not authenticated yet - parking the intent")
+                parkedIntent = ParkedIntent(intent, delayEvents, cacheIntent)
+                return@launchOperation
+            }
             val result = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
             result?.let { deeplinkDetails ->
                 deeplinkDetails.link?.let { link ->
@@ -1254,6 +1275,21 @@ public class Grovs: ActivityProvider {
             // was just delivered, or the 2-second duplicate-intent guard above stops working.
             result?.let { lastLinkMatched = it.link }
         }
+    }
+
+    /**
+     * Re-enters the normal intent path so a parked link gets the same delivery, duplicate guard and
+     * lastLinkMatched bookkeeping as a live one. Cleared first, so a failure cannot loop.
+     *
+     * This runs inside the authentication job, and the intent path it starts joins that same job.
+     * That is not a self-join deadlock: [handleIntent] only launches the work, and the join
+     * suspends rather than blocks, so this job completes and the launched one then resumes.
+     */
+    private fun replayParkedIntent() {
+        val parked = parkedIntent ?: return
+        parkedIntent = null
+        DebugLogger.instance.log(LogLevel.INFO, "Replaying the parked intent after authentication")
+        handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent)
     }
 
     override fun requireActivity(): Activity? {

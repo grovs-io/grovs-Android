@@ -427,6 +427,7 @@ class GrovsSingletonTest {
         val details = DeeplinkDetails(link, null, null)
         val gate = CompletableDeferred<Unit>()
         val mockManager = mockk<GrovsManager>(relaxed = true)
+        every { mockManager.authenticationState } returns GrovsManager.AuthenticationState.AUTHENTICATED
         coEvery { mockManager.handleIntent(any(), any(), any()) } coAnswers {
             gate.await()
             details
