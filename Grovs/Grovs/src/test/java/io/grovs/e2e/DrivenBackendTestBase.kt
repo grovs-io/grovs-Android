@@ -9,6 +9,7 @@ import io.grovs.handlers.GrovsManager
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 import io.grovs.service.ConsentBackend
+import io.grovs.service.ConsentRequestExecutor
 import io.grovs.service.DrivenDispatcher
 import org.junit.After
 import org.junit.Assert.fail
@@ -49,6 +50,8 @@ abstract class DrivenBackendTestBase {
         E2ETestUtils.setupMockUserAgent("Grovs SDK recovery tests")
         E2ETestUtils.setupMockScreenResolution()
         DebugLogger.instance.logLevel = LogLevel.INFO
+        // Deterministic retry timing. It is a global seam, so teardown restores it.
+        ConsentRequestExecutor.retryJitterMs = { 0 }
         backend = ConsentBackend().apply {
             phase = "enabled"
             respond(device, """{"last_seen":null}""")
@@ -70,6 +73,7 @@ abstract class DrivenBackendTestBase {
         }
         E2ETestUtils.resetGrovsSingleton()
         DebugLogger.instance.logLevel = LogLevel.ERROR
+        ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
         backend.close()
     }
 

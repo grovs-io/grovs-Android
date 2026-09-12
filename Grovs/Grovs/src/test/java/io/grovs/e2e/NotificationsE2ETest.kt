@@ -3,6 +3,7 @@ package io.grovs.e2e
 import android.app.Application
 import android.os.Looper
 import io.grovs.Grovs
+import io.grovs.service.ConsentRequestExecutor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -42,10 +43,14 @@ class NotificationsE2ETest {
         mockWebServer = E2ETestUtils.createMockWebServer()
         application = RuntimeEnvironment.getApplication()
         E2ETestUtils.setupTestApplication(application)
+        // Deterministic retry timing for the server-error test below, which waits out the bounded
+        // retry schedule in real time. It is a global seam, so teardown restores it.
+        ConsentRequestExecutor.retryJitterMs = { 0 }
     }
 
     @After
     fun tearDown() {
+        ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
         E2ETestUtils.cleanupMockWebServer(mockWebServer)
     }
 
@@ -181,7 +186,9 @@ class NotificationsE2ETest {
     fun `numberOfUnreadMessages handles server error gracefully`() = runBlocking {
         configureWithUnreadResponse(json("""{"error":"Server Error"}""").setResponseCode(500))
 
-        val count = E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
+        // A 500 is now retried on the bounded schedule (2s + 4s + 8s, jitter pinned to 0 above)
+        // before the executor gives up, so this needs real time past that whole budget.
+        val count = E2ETestUtils.runWithLooperPumping(16_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
 
         assertNull("A backend error should return null", count)
         E2ETestUtils.assertRequestMade(

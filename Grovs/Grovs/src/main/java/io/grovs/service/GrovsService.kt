@@ -133,9 +133,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
 
     companion object {
-        val EAGER_RETRY_COUNT: Long = 15
-        val EAGER_RETRY_FALLBACK_TIME: Long = 5000
-        val RETRY_FALLBACK_TIME: Long = 10000
+        /** One attempt plus three retries. Past this, a retryable failure becomes terminal. */
+        val MAX_ATTEMPTS: Long = 4
+        /** First retry wait. Doubles per retry: 2s, 4s, 8s, plus jitter. */
+        val RETRY_BASE_DELAY_MS: Long = 2000
 
         /** Backend limit for POST events/batch (events_controller.rb MAX_BATCH_SIZE). */
         const val MAX_BATCH_SIZE = 50
@@ -158,45 +159,15 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
     override suspend fun payloadFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
-
-        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") { token ->
-            val response = grovsApi.payloadFor(request, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device - Received payload")
-                    return@retrying LSResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Fetching payload - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed to fetch the payload. Reason: $response"))
-            }
+        return requestExecutor.retrying("Fetching payload") { token ->
+            grovsApi.payloadFor(request, token).toResult("Fetching payload", gson)
         }
     }
 
     override suspend fun payloadWithLinkFor(@Body request: AppDetails): LSResult<DeeplinkDetails> {
         DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device")
-
-        return requestExecutor.retrying<LSResult<DeeplinkDetails>>("Fetching payload") { token ->
-            val response = grovsApi.payloadWithLinkFor(request, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Fetching payload for device - Received payload")
-                    return@retrying LSResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Fetching payload - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed to fetch the payload. ${error.error}"))
-            }
+        return requestExecutor.retrying("Fetching payload") { token ->
+            grovsApi.payloadWithLinkFor(request, token).toResult("Fetching payload", gson)
         }
     }
 
@@ -223,22 +194,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override fun authenticate(appDetails: AppDetails): Flow<GVRetryResult<AuthenticationResponse>> =
         requestExecutor.retryingFlow<AuthenticationResponse>("Authenticate") { token ->
             DebugLogger.instance.log(LogLevel.INFO, "Authenticate")
-
-            val response = grovsApi.authenticate(appDetails, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Authenticate - Success")
-                    return@retryingFlow GVRetryResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Authenticate - Failed. ${error.error}")
-
-                GVRetryResult.Error(java.io.IOException("Failed to authenticate. ${error.error}"))
-            }
+            grovsApi.authenticate(appDetails, token).toRetryResult("Authenticate", gson)
         }
 
     override suspend fun generateLink(title: String?,
@@ -371,142 +327,50 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
         // A newer attribute update supersedes this one by cancelling it; the executor never
         // swallows that cancellation, so the retry loop stays cancellable.
-        return requestExecutor.retrying<LSResult<Boolean>>("Set attributes") { token ->
-            val request = UpdateAttributesRequest( sdkIdentifier = identifier,
+        return requestExecutor.retrying("Set attributes") { token ->
+            val request = UpdateAttributesRequest(
+                sdkIdentifier = identifier,
                 sdkAttributes = attributes,
-                pushToken = pushToken)
-            val response = grovsApi.updateAttributes(request, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Set attributes - Successful - $identifier $attributes")
-
-                    return@retrying LSResult.Success(true)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Set attributes - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed to set attributes. ${error.error}"))
-            }
+                pushToken = pushToken,
+            )
+            grovsApi.updateAttributes(request, token).toStatusResult("Set attributes", gson)
         }
     }
 
     override fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> =
         requestExecutor.retryingFlow<GetDeviceResponse>("Getting device last seen") { token ->
             DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen")
-
-            val response = grovsApi.getDeviceFor(vendorId, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Successful")
-
-                    return@retryingFlow GVRetryResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen - Failed. ${error.error}")
-
-                GVRetryResult.Error(java.io.IOException("Failed to get device last seen. ${error.error}"))
-            }
+            grovsApi.getDeviceFor(vendorId, token).toRetryResult("Getting device last seen", gson)
         }
 
     override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications")
-
-        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Getting all the notifications") { token ->
-            val request = NotificationsRequest(page = page)
-            val response = grovsApi.notifications(request, token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications - Successful")
-
-                    return@retrying LSResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed getting all the notifications. ${error.error}"))
-            }
+        return requestExecutor.retrying("Getting all the notifications") { token ->
+            grovsApi.notifications(NotificationsRequest(page = page), token)
+                .toResult("Getting all the notifications", gson)
         }
     }
 
     override suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Get unread messages")
-
-        return requestExecutor.retrying<LSResult<NumberOfUnreadNotificationsResponse>>("Get unread messages") { token ->
-            val response = grovsApi.numberOfUnreadNotifications(token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Get unread messages - Successful")
-
-                    return@retrying LSResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Get unread messages - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed get unread messages. ${error.error}"))
-            }
+        return requestExecutor.retrying("Get unread messages") { token ->
+            grovsApi.numberOfUnreadNotifications(token).toResult("Get unread messages", gson)
         }
     }
 
     override suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
         DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read")
-
-        return requestExecutor.retrying<LSResult<Boolean>>("Mark notification as read") { token ->
-            val request = MarkNotificationAsReadRequest(notificationId = notificationId)
-            val response = grovsApi.markNotificationAsRead(request = request, token = token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read - Successful")
-
-                    return@retrying LSResult.Success(true)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed to mark notification as read. ${error.error}"))
-            }
+        return requestExecutor.retrying("Mark notification as read") { token ->
+            grovsApi.markNotificationAsRead(MarkNotificationAsReadRequest(notificationId = notificationId), token)
+                .toStatusResult("Mark notification as read", gson)
         }
     }
 
     override suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
         DebugLogger.instance.log(LogLevel.INFO, "Notifications to display automatically")
-
-        return requestExecutor.retrying<LSResult<NotificationsResponse>>("Notifications to display automatically") { token ->
-            val response = grovsApi.notificationsToDisplayAutomatically(token)
-            if (response.isSuccessful) {
-                val body = response.body()
-                body?.let {
-                    DebugLogger.instance.log(LogLevel.INFO, "Getting notifications to display automatically - Successful")
-
-                    return@retrying LSResult.Success(it)
-                }
-            }
-
-            response.errorBody()?.string()?.let { responseString ->
-                val error = gson.fromJson(responseString, ErrorMessage::class.java)
-                DebugLogger.instance.log(LogLevel.INFO, "Getting notifications to display automatically - Failed. ${error.error}")
-
-                LSResult.Error(java.io.IOException("Failed getting notifications to display automatically. ${error.error}"))
-            }
+        return requestExecutor.retrying("Notifications to display automatically") { token ->
+            grovsApi.notificationsToDisplayAutomatically(token)
+                .toResult("Notifications to display automatically", gson)
         }
     }
 

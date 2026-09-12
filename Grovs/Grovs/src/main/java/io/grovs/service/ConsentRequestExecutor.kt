@@ -10,9 +10,11 @@ import io.grovs.handlers.runOperation
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 import io.grovs.utils.GVRetryResult
+import io.grovs.utils.LSResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.retryWhen
@@ -90,24 +92,31 @@ internal class ConsentRequestExecutor(
     suspend fun <T> single(block: suspend (ConsentToken) -> T): T = attempt(admit(), block)
 
     /**
-     * An admitted request retried on the standard schedule: [block] returns the result, or null
-     * (or throws a non-cancellation exception) to retry after the wait for that retry count.
+     * An admitted request, retried on the standard schedule. [block] returns its result, or throws
+     * a retryable failure to spend one attempt.
+     *
+     * A spent budget returns [LSResult.Error]. It must never throw: callers such as
+     * `GrovsManager.getDataForDevice`, `ClipboardHandler.sendMatch` and the notification view
+     * models have no handler for a network failure, because this helper could not produce one
+     * before. Consent rejection and every other cancellation still propagate untouched.
      */
-    suspend fun <T : Any> retrying(label: String, block: suspend (ConsentToken) -> T?): T {
+    suspend fun <T : Any> retrying(label: String, block: suspend (ConsentToken) -> LSResult<T>): LSResult<T> {
         val token = admit()
         var retryCount = 0L
         while (true) {
-            val result = try {
-                attempt(token, block)
+            try {
+                return attempt(token, block)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 DebugLogger.instance.log(LogLevel.INFO, "$label - Failed. ${e.message}")
-                null
+                if (retryCount >= GrovsService.MAX_ATTEMPTS - 1) {
+                    DebugLogger.instance.log(LogLevel.ERROR, "$label - Giving up after ${GrovsService.MAX_ATTEMPTS} attempts.")
+                    return LSResult.Error(e)
+                }
+                awaitRetry(token, retryCount)
+                retryCount++
             }
-            if (result != null) return result
-            awaitRetry(token, retryCount)
-            retryCount++
         }
     }
 
@@ -128,9 +137,19 @@ internal class ConsentRequestExecutor(
             if (cause is CancellationException) return@retryWhen false
             if (!consent.isCurrent(token)) throw consent.revocationFor(token).also { it.initCause(cause) }
             DebugLogger.instance.log(LogLevel.INFO, "$label - Failed. Exception: ${cause.message}")
+            // attempt is zero-based, so this allows MAX_ATTEMPTS requests. Returning false rethrows
+            // the cause, which the catch below turns into a terminal Error.
+            if (attempt >= GrovsService.MAX_ATTEMPTS - 1) return@retryWhen false
             emit(GVRetryResult.Retrying(attempt.toInt()))
             awaitRetry(token, attempt)
             true
+        }.catch { cause ->
+            // A consent rejection is a CancellationException and must end the flow, never become a
+            // result. Anything else becomes the terminal Error the collector expects, so the caller
+            // records a failure instead of being left at Retrying forever.
+            if (cause is CancellationException) throw cause
+            DebugLogger.instance.log(LogLevel.ERROR, "$label - Giving up after ${GrovsService.MAX_ATTEMPTS} attempts.")
+            emit(GVRetryResult.Error(cause as? Exception ?: IOException(cause.message)))
         }
         emitAll(attempts)
     }
@@ -156,7 +175,14 @@ internal class ConsentRequestExecutor(
     }
 
     internal companion object {
+        /** Jitter keeps recovering clients from syncing up. Overridden in tests for exact timing. */
+        val defaultJitterMs: () -> Long = { (0L..1000L).random() }
+
+        @Volatile
+        internal var retryJitterMs: () -> Long = defaultJitterMs
+
+        /** 2s, 4s, 8s, plus jitter. */
         fun retryDelayMs(retryCount: Long): Long =
-            if (retryCount < GrovsService.EAGER_RETRY_COUNT) GrovsService.EAGER_RETRY_FALLBACK_TIME else GrovsService.RETRY_FALLBACK_TIME
+            (GrovsService.RETRY_BASE_DELAY_MS shl retryCount.toInt()) + retryJitterMs()
     }
 }

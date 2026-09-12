@@ -59,8 +59,8 @@ class ConsentRetryE2ETest {
     private lateinit var context: GrovsContext
     private var gate: GatedExecutor? = null
 
-    /** Several retry intervals: the eager interval is 5 s, the later one 10 s. */
-    private val intervals = 4 * GrovsService.RETRY_FALLBACK_TIME
+    /** Comfortably past the whole retry budget: 2s + 4s + 8s of waits. */
+    private val intervals = 60_000L
 
     private val device = "device_for_vendor_id"
     private val authenticate = "authenticate"
