@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.DeadObjectException
+import android.os.SystemClock
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
 import io.grovs.model.AppDetails
@@ -87,6 +88,12 @@ internal class GrovsManager(
     companion object {
         private const val GROVS_PREFS_NAME = "grovs_prefs"
         private const val KEY_LAST_REFERRER = "last_referrer"
+
+        /// First backoff window after a failed authentication; doubles per consecutive failure.
+        private const val AUTHENTICATION_BACKOFF_BASE_MS = 10_000L
+        private const val AUTHENTICATION_BACKOFF_MAX_MS = 300_000L
+        /// Keeps the doubling from overflowing once the ceiling is reached anyway.
+        private const val AUTHENTICATION_BACKOFF_MAX_SHIFT = 16
     }
 
     internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
@@ -150,6 +157,37 @@ internal class GrovsManager(
     /// A flag indicating whether the user is authenticated with the Grovs backend.
     @Volatile
     var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
+
+    /// Consecutive failed authentication attempts. Widens the window below.
+    private var authenticationFailureCount = 0
+
+    /// Elapsed-time source the window is measured against. A seam so tests can move time.
+    internal var authenticationBackoffElapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
+
+    /// When the next authentication attempt is allowed. Null means "now".
+    private var authenticationRetryAt: Long? = null
+
+    /**
+     * Whether a foreground may spend a request on authentication. A bad API key fails on every
+     * attempt and each one costs a request plus a user agent fetch, so repeated failures widen the
+     * window to a 300s ceiling.
+     */
+    internal fun canAttemptAuthentication(): Boolean {
+        val retryAt = authenticationRetryAt ?: return true
+        return authenticationBackoffElapsedMs() >= retryAt
+    }
+
+    internal fun recordAuthenticationOutcome(success: Boolean) {
+        if (success) {
+            authenticationFailureCount = 0
+            authenticationRetryAt = null
+            return
+        }
+        authenticationFailureCount++
+        val shift = (authenticationFailureCount - 1).coerceAtMost(AUTHENTICATION_BACKOFF_MAX_SHIFT)
+        val delay = minOf(AUTHENTICATION_BACKOFF_BASE_MS shl shift, AUTHENTICATION_BACKOFF_MAX_MS)
+        authenticationRetryAt = authenticationBackoffElapsedMs() + delay
+    }
 
     /// The user attributes the backend last confirmed, or that were adopted from it at
     /// authentication. The attribute sync sends whenever [GrovsContext.userAttributes] differs.
@@ -439,6 +477,7 @@ internal class GrovsManager(
                         clipboardHandler.armIfNeeded()
                         eventsManager.logAppLaunchEvents()
                         authenticationState = AuthenticationState.AUTHENTICATED
+                        recordAuthenticationOutcome(true)
                     }
                     if (!consent.isCurrent(token)) return@collect
                     // Values set while unauthenticated can go out now. The send is network work, so
@@ -454,6 +493,7 @@ internal class GrovsManager(
                 }
                 is GVRetryResult.Error -> {
                     authenticationState = AuthenticationState.UNAUTHENTICATED
+                    recordAuthenticationOutcome(false)
                     DebugLogger.instance.log(LogLevel.ERROR, "Failed to authenticate the app.")
                 }
             }

@@ -572,6 +572,16 @@ public class Grovs: ActivityProvider {
             grovsContext.rotateSessionIfNeeded()
             val sessionRotated = grovsContext.sessionId != previousSession
 
+            // A launch whose authentication failed leaves the SDK unusable for the whole process:
+            // nothing else retries it, because every other path is gated on being authenticated.
+            val currentManager = grovsManager
+            if (currentManager != null &&
+                currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED &&
+                currentManager.canAttemptAuthentication()
+            ) {
+                checkConfiguration()
+            }
+
             collect { manager ->
                 // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
                 // than on the caller's thread. Must precede any screen tracking on this dispatcher.
