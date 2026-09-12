@@ -333,73 +333,79 @@ class GrovsServiceConsentLifecycleTest {
     @Test
     fun `N06 enabled transport failures retry on the bounded schedule`() {
         for (case in listOf(named("payloadFor"), named("getDeviceFor"))) {
-            val f = fixture()
-            // Three failures then a success: the last attempt inside the budget succeeds.
-            val failures = GrovsService.MAX_ATTEMPTS.toInt() - 1
-            f.backend.failThenRespond(case.path, failures, case.successBody)
-            val driver = DrivenDispatcher()
-            ConsentRequestExecutor.retryJitterMs = { 0 }
-            val service = f.service()
-            val emissions = CopyOnWriteArrayList<Any?>()
-            val outcome = AtomicReference<Result<Any?>?>()
-            val logged = loggedCount(case.failureLog)
-            f.scope(driver).launch { outcome.set(runCatching { case.invoke(service, emissions) }) }
-            driver.runCurrent()
+            try {
+                val f = fixture()
+                // Three failures then a success: the last attempt inside the budget succeeds.
+                val failures = GrovsService.MAX_ATTEMPTS.toInt() - 1
+                f.backend.failThenRespond(case.path, failures, case.successBody)
+                val driver = DrivenDispatcher()
+                ConsentRequestExecutor.retryJitterMs = { 0 }
+                val service = f.service()
+                val emissions = CopyOnWriteArrayList<Any?>()
+                val outcome = AtomicReference<Result<Any?>?>()
+                val logged = loggedCount(case.failureLog)
+                f.scope(driver).launch { outcome.set(runCatching { case.invoke(service, emissions) }) }
+                driver.runCurrent()
 
-            val sentAt = mutableListOf<Long>()
-            for (attempt in 0..failures) {
-                f.backend.awaitCount(case.path, attempt + 1)
-                sentAt += driver.currentTime
-                if (attempt == failures) break
-                driver.runUntil("${case.name}: failure of attempt $attempt") {
-                    loggedCount(case.failureLog) > logged + attempt
+                val sentAt = mutableListOf<Long>()
+                for (attempt in 0..failures) {
+                    f.backend.awaitCount(case.path, attempt + 1)
+                    sentAt += driver.currentTime
+                    if (attempt == failures) break
+                    driver.runUntil("${case.name}: failure of attempt $attempt") {
+                        loggedCount(case.failureLog) > logged + attempt
+                    }
+                    val wait = GrovsService.RETRY_BASE_DELAY_MS shl attempt
+                    driver.advanceTimeBy(wait - 1)
+                    f.backend.assertQuiet(case.path, attempt + 1, windowMs = 20)
+                    driver.advanceTimeBy(1)
                 }
-                val wait = GrovsService.RETRY_BASE_DELAY_MS shl attempt
-                driver.advanceTimeBy(wait - 1)
-                f.backend.assertQuiet(case.path, attempt + 1, windowMs = 20)
-                driver.advanceTimeBy(1)
-            }
-            driver.runUntil("${case.name}: the success after the failures") { outcome.get() != null }
+                driver.runUntil("${case.name}: the success after the failures") { outcome.get() != null }
 
-            case.checkSuccess(outcome.get()!!.getOrThrow())
-            val expected = (0 until failures).runningFold(0L) { at, attempt ->
-                at + (GrovsService.RETRY_BASE_DELAY_MS shl attempt)
+                case.checkSuccess(outcome.get()!!.getOrThrow())
+                val expected = (0 until failures).runningFold(0L) { at, attempt ->
+                    at + (GrovsService.RETRY_BASE_DELAY_MS shl attempt)
+                }
+                assertEquals("${case.name}: attempts sent on the bounded schedule", expected, sentAt)
+                if (case.name in FLOW_CASES) {
+                    assertEquals((0 until failures).toList(), emissions.filterIsInstance<GVRetryResult.Retrying>().map { it.count })
+                }
+            } finally {
+                ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
             }
-            assertEquals("${case.name}: attempts sent on the bounded schedule", expected, sentAt)
-            if (case.name in FLOW_CASES) {
-                assertEquals((0 until failures).toList(), emissions.filterIsInstance<GVRetryResult.Retrying>().map { it.count })
-            }
-            ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
         }
     }
 
     @Test
     fun `N06b a failure past the budget is a terminal result, not a thrown exception`() {
         for (case in listOf(named("payloadFor"), named("getDeviceFor"))) {
-            val f = fixture()
-            f.backend.fail(case.path)
-            val driver = DrivenDispatcher()
-            ConsentRequestExecutor.retryJitterMs = { 0 }
-            val service = f.service()
-            val emissions = CopyOnWriteArrayList<Any?>()
-            val outcome = AtomicReference<Result<Any?>?>()
-            f.scope(driver).launch { outcome.set(runCatching { case.invoke(service, emissions) }) }
+            try {
+                val f = fixture()
+                f.backend.fail(case.path)
+                val driver = DrivenDispatcher()
+                ConsentRequestExecutor.retryJitterMs = { 0 }
+                val service = f.service()
+                val emissions = CopyOnWriteArrayList<Any?>()
+                val outcome = AtomicReference<Result<Any?>?>()
+                f.scope(driver).launch { outcome.set(runCatching { case.invoke(service, emissions) }) }
 
-            driver.runUntil("${case.name}: the call to give up") {
-                driver.advanceTimeBy(1_000)
-                outcome.get() != null
+                driver.runUntil("${case.name}: the call to give up") {
+                    driver.advanceTimeBy(1_000)
+                    outcome.get() != null
+                }
+
+                assertEquals(
+                    "${case.name}: stopped at the budget",
+                    GrovsService.MAX_ATTEMPTS.toInt(),
+                    f.backend.count(case.path),
+                )
+                assertTrue(
+                    "${case.name}: gave up with a result rather than an exception",
+                    outcome.get()!!.isSuccess,
+                )
+            } finally {
+                ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
             }
-
-            assertEquals(
-                "${case.name}: stopped at the budget",
-                GrovsService.MAX_ATTEMPTS.toInt(),
-                f.backend.count(case.path),
-            )
-            assertTrue(
-                "${case.name}: gave up with a result rather than an exception",
-                outcome.get()!!.isSuccess,
-            )
-            ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
         }
     }
 

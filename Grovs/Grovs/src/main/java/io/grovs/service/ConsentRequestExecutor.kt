@@ -35,7 +35,8 @@ import java.io.IOException
  *   generation check in [runOperation].
  * - **Retries.** One token per call. A retry is decided against that token, and the wait before it
  *   is itself a registered operation that revocation cancels. Consent rejection and cancellation
- *   are terminal; transport failures are retried on the standard schedule while consent holds.
+ *   are terminal; transport failures are retried on the standard schedule, now a bounded budget,
+ *   while consent holds.
  * - **Transport gate.** Every [io.grovs.api.GrovsApi] method takes the attempt's token as its
  *   Retrofit `@Tag`, and [gateInterceptor] refuses the request, before any header or device detail
  *   is built, if the call was cancelled or the token is no longer current. Cancellation is per

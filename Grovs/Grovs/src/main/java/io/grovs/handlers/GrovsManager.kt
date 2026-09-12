@@ -812,9 +812,10 @@ internal class GrovsManager(
 
     /**
      * The one long-lived attribute sync. Each change to the desired values, and each resync
-     * request, cancels the send in flight and waits for it to stop before the next one starts. The
-     * service retries forever, so this is what keeps two updates from ever being at the backend at
-     * once and guarantees the last value written lands last.
+     * request, cancels the send in flight and waits for it to stop before the next one starts.
+     * Each send now runs a bounded retry budget rather than retrying forever, so this is what keeps
+     * two updates from ever being at the backend at once and guarantees the last value written
+     * lands last.
      */
     private fun launchAttributesSync(scope: CoroutineScope): Job = scope.launch {
         combine(grovsContext.userAttributes, attributesResyncRequests) { desired, _ -> desired }

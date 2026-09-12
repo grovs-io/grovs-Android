@@ -590,6 +590,7 @@ public class Grovs: ActivityProvider {
             // nothing else retries it, because every other path is gated on being authenticated.
             val currentManager = grovsManager
             if (currentManager != null &&
+                authenticationJob?.isActive != true &&
                 currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED &&
                 currentManager.canAttemptAuthentication()
             ) {

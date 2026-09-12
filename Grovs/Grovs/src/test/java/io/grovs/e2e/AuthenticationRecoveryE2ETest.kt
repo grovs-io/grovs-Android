@@ -1,6 +1,7 @@
 package io.grovs.e2e
 
 import io.grovs.handlers.GrovsManager
+import io.grovs.service.GrovsService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,5 +46,25 @@ class AuthenticationRecoveryE2ETest : DrivenBackendTestBase() {
         pump()
 
         assertEquals("the backoff window suppressed the attempt", afterLaunch, backend.count(authenticate))
+    }
+
+    @Test
+    fun `a foreground while the launch authentication is still in flight does not run a second retry budget`() {
+        backend.failWithStatus(authenticate, code = 500, body = """{"error":"down"}""")
+        configure()
+        // The launch authentication (job A) has started but is still retrying against the down
+        // backend; a real cold start's first activity onStart lands in exactly this window.
+        pumpUntil("the launch to send its first authenticate attempt") { backend.count(authenticate) >= 1 }
+
+        foreground()
+
+        // Comfortably past the whole 2s + 4s + 8s budget, whether it runs once or (the bug) twice.
+        advance(60_000)
+
+        assertEquals(
+            "one retry budget, not two",
+            GrovsService.MAX_ATTEMPTS.toInt(),
+            backend.count(authenticate),
+        )
     }
 }

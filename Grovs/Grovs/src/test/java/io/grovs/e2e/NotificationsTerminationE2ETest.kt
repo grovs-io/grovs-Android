@@ -47,7 +47,10 @@ class NotificationsTerminationE2ETest : DrivenBackendTestBase() {
             waited += 1_000
         }
 
-        assertFalse("the spinner stops", viewModel.isLoading.value)
+        assertFalse(
+            "the spinner stops (requests so far: ${backend.count(notifications)})",
+            viewModel.isLoading.value,
+        )
         assertEquals(
             "the request stops after the budget rather than spinning forever",
             GrovsService.MAX_ATTEMPTS.toInt(),
