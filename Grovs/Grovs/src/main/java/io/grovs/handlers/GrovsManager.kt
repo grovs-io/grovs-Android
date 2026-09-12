@@ -18,6 +18,7 @@ import io.grovs.model.events.PaymentEvent
 import io.grovs.model.events.PaymentEventType
 import io.grovs.service.CustomRedirects
 import io.grovs.service.GrovsService
+import io.grovs.service.HttpStatusException
 import io.grovs.service.IGrovsService
 import io.grovs.service.TrackingParams
 import io.grovs.storage.ILocalCache
@@ -83,6 +84,16 @@ internal class GrovsManager(
 ) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
+    }
+
+    /// Why the last authentication failed. Decides which triggers may retry it on their own.
+    internal enum class AuthenticationFailure {
+        /// The phone had no network. Not the backend's fault, so the window does not grow.
+        OFFLINE,
+        /// A timeout, a dropped connection, a 429 or a 5xx. Worth trying again later.
+        RETRYABLE,
+        /// Any other 4xx, for example a bad API key. Only a foreground tries again.
+        REJECTED,
     }
 
     companion object {
@@ -161,6 +172,11 @@ internal class GrovsManager(
     /// Consecutive failed authentication attempts. Widens the window below.
     private var authenticationFailureCount = 0
 
+    /// Why the last authentication failed, or null after a success or before any attempt.
+    @Volatile
+    internal var lastAuthenticationFailure: AuthenticationFailure? = null
+        private set
+
     /// Elapsed-time source the window is measured against. A seam so tests can move time.
     internal var authenticationBackoffElapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
 
@@ -177,10 +193,17 @@ internal class GrovsManager(
         return authenticationBackoffElapsedMs() >= retryAt
     }
 
-    internal fun recordAuthenticationOutcome(success: Boolean) {
-        if (success) {
+    /// Records an attempt's result. Null means it succeeded.
+    internal fun recordAuthenticationOutcome(failure: AuthenticationFailure?) {
+        lastAuthenticationFailure = failure
+        if (failure == null) {
             authenticationFailureCount = 0
             authenticationRetryAt = null
+            return
+        }
+        if (failure == AuthenticationFailure.OFFLINE) {
+            // Being offline says nothing about the backend or the key, so the window stays at its base.
+            authenticationRetryAt = authenticationBackoffElapsedMs() + AUTHENTICATION_BACKOFF_BASE_MS
             return
         }
         authenticationFailureCount++
@@ -188,6 +211,21 @@ internal class GrovsManager(
         val delay = minOf(AUTHENTICATION_BACKOFF_BASE_MS shl shift, AUTHENTICATION_BACKOFF_MAX_MS)
         authenticationRetryAt = authenticationBackoffElapsedMs() + delay
     }
+
+    /**
+     * How long an automatic retry waits, or null when nothing should retry on its own: the last
+     * attempt succeeded, or the backend refused the request (a bad key never heals by waiting).
+     */
+    internal fun automaticRetryDelayMs(): Long? {
+        val failure = lastAuthenticationFailure ?: return null
+        if (failure == AuthenticationFailure.REJECTED) return null
+        val retryAt = authenticationRetryAt ?: return 0L
+        return (retryAt - authenticationBackoffElapsedMs()).coerceAtLeast(0L)
+    }
+
+    /// A response the backend refused is final. Anything else may heal.
+    private fun failureKind(exception: Exception): AuthenticationFailure =
+        if (exception is HttpStatusException) AuthenticationFailure.REJECTED else AuthenticationFailure.RETRYABLE
 
     /// The user attributes the backend last confirmed, or that were adopted from it at
     /// authentication. The attribute sync sends whenever [GrovsContext.userAttributes] differs.
@@ -480,7 +518,7 @@ internal class GrovsManager(
                         clipboardHandler.armIfNeeded()
                         eventsManager.logAppLaunchEvents()
                         authenticationState = AuthenticationState.AUTHENTICATED
-                        recordAuthenticationOutcome(true)
+                        recordAuthenticationOutcome(null)
                     }
                     if (!consent.isCurrent(token)) return@collect
                     // Values set while unauthenticated can go out now. The send is network work, so
@@ -496,7 +534,7 @@ internal class GrovsManager(
                 }
                 is GVRetryResult.Error -> {
                     authenticationState = AuthenticationState.UNAUTHENTICATED
-                    recordAuthenticationOutcome(false)
+                    recordAuthenticationOutcome(failureKind(result.exception))
                     DebugLogger.instance.log(LogLevel.ERROR, "Failed to authenticate the app.")
                 }
             }
