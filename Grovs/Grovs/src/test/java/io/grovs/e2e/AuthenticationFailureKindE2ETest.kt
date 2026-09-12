@@ -29,7 +29,7 @@ class AuthenticationFailureKindE2ETest : DrivenBackendTestBase() {
         backend.failWithStatus(authenticate, code = 500, body = """{"error":"down"}""")
         configure()
         pumpUntil("the launch to send its first attempt") { backend.count(authenticate) >= 1 }
-        advance(20_000)
+        advanceUntil("the launch budget to be spent") { manager().lastAuthenticationFailure != null }
 
         assertEquals(AuthenticationFailure.RETRYABLE, manager().lastAuthenticationFailure)
         assertNotNull(manager().automaticRetryDelayMs())
