@@ -142,4 +142,13 @@ abstract class DrivenBackendTestBase {
         hostStarted = true
         pump()
     }
+
+    /** Home button: the started-activity count drops to zero, so the SDK sees a background. */
+    protected fun background() {
+        if (hostStarted) {
+            host?.stop()
+            hostStarted = false
+        }
+        pump()
+    }
 }

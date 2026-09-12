@@ -58,8 +58,8 @@ class AuthenticationRecoveryE2ETest : DrivenBackendTestBase() {
 
         foreground()
 
-        // Comfortably past the whole 2s + 4s + 8s budget, whether it runs once or (the bug) twice.
-        advance(60_000)
+        // The automatic retry is 10s after the failure, so a doubled budget would already show here.
+        advanceUntil("the launch budget to be spent") { manager().lastAuthenticationFailure != null }
 
         assertEquals(
             "one retry budget, not two",

@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.Application
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Parcelable
 import android.os.SystemClock
 import androidx.fragment.app.Fragment
@@ -33,6 +35,7 @@ import io.grovs.model.LogLevel
 import io.grovs.model.events.PaymentEventType
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
+import io.grovs.service.ConsentRequestExecutor
 import io.grovs.service.CustomRedirects
 import io.grovs.service.TrackingParams
 import io.grovs.utils.FlowObservable
@@ -46,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.Serializable
@@ -488,7 +492,19 @@ public class Grovs: ActivityProvider {
 
     private var grovsContext = GrovsContext()
 
+    /// Written by checkConfiguration() on whatever thread calls it (setSDK and configure can run
+    /// anywhere); read on the main thread by the retry guard. Volatile so that read is never stale.
+    @Volatile
     private var authenticationJob: Job? = null
+
+    /// Waits out the backoff window after a failed authentication, then tries again.
+    ///
+    /// Read and written ONLY on the main thread, so replacing it always cancels the old one: there
+    /// is never a second timer that nobody holds. Separate from [authenticationJob] on purpose:
+    /// link handling joins that job, and must never wait out a timer.
+    private var authenticationRetryTimer: Job? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The pending screen resolution per Activity, so pause/destroy and re-resumes can cancel it. */
     private val pendingScreenResolutionJobs = ConcurrentHashMap<Activity, Job>()
@@ -586,15 +602,19 @@ public class Grovs: ActivityProvider {
             grovsContext.rotateSessionIfNeeded()
             val sessionRotated = grovsContext.sessionId != previousSession
 
-            // A launch whose authentication failed leaves the SDK unusable for the whole process:
-            // nothing else retries it, because every other path is gated on being authenticated.
+            // A launch whose authentication failed leaves the SDK unusable until something retries
+            // it, because every other path is gated on being authenticated.
             val currentManager = grovsManager
             if (currentManager != null &&
                 authenticationJob?.isActive != true &&
-                currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED &&
-                currentManager.canAttemptAuthentication()
+                currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED
             ) {
-                checkConfiguration()
+                if (currentManager.canAttemptAuthentication()) {
+                    checkConfiguration()
+                } else {
+                    // Still inside the window: wait it out now, not until the next foreground.
+                    scheduleAuthenticationRetry(currentManager)
+                }
             }
 
             collect { manager ->
@@ -614,6 +634,8 @@ public class Grovs: ActivityProvider {
             DebugLogger.instance.log(LogLevel.INFO, "App is in the background")
             grovsContext.isForeground = false
             grovsContext.markBackgrounded()
+            // No automatic retries from the background.
+            cancelAuthenticationRetry()
             grovsManager?.onAppBackgrounded()
         }
     }
@@ -687,6 +709,9 @@ public class Grovs: ActivityProvider {
         // about to be replaced: checkConfiguration() joins this (now cancelled) job before it
         // authenticates the new one, so joining returns immediately instead of waiting out retries.
         authenticationJob?.cancel()
+
+        // The automatic retry timer needs no cancel here: retiring the configuration cancels it,
+        // and it is main-thread only, while configure() can run on any thread.
 
         // A new configuration never inherits the previous one's unresolved link.
         parkedIntent = null
@@ -1191,6 +1216,62 @@ public class Grovs: ActivityProvider {
         }
     }
 
+    /**
+     * Arms the automatic retry for [manager]'s last failure, replacing any pending one.
+     *
+     * The timer rules, all at once:
+     * - Main thread only. A call from another thread is posted there. So cancel-and-replace can
+     *   never interleave with another schedule or with the background cancel, and no timer can
+     *   lose its handle.
+     * - A consent operation in the configuration's scope, so setSDK(false) and configure() cancel it.
+     * - One shot. It fires once and ends. Only a new failure arms the next one.
+     * - When it fires, it acts only if it is still the current timer, then re-checks everything.
+     *
+     * The wait is a coroutine delay, not a SystemClock check, so the timer itself is the window.
+     * Jitter keeps phones that failed together from retrying together.
+     */
+    private fun scheduleAuthenticationRetry(manager: GrovsManager) {
+        if (Looper.myLooper() !== Looper.getMainLooper()) {
+            mainHandler.post { scheduleAuthenticationRetry(manager) }
+            return
+        }
+        cancelAuthenticationRetry()
+        if (grovsManager !== manager || !grovsContext.isForeground) return
+        val waitMs = manager.automaticRetryDelayMs() ?: return
+        authenticationRetryTimer = grovsContext.consent.launchOperation(
+            manager.configuration,
+            context = grovsContext.serialDispatcher,
+        ) {
+            val self = coroutineContext[Job]
+            delay(waitMs + ConsentRequestExecutor.retryJitterMs())
+            withContext(Dispatchers.Main) {
+                // A replaced timer never acts, even if its cancellation lost a race. The field was
+                // set before this block could run: both happen on the main thread, set first.
+                if (authenticationRetryTimer !== self) return@withContext
+                authenticationRetryTimer = null
+                DebugLogger.instance.log(LogLevel.INFO, "Automatic authentication retry")
+                retryAuthenticationIfStillNeeded(manager)
+            }
+        }
+    }
+
+    /** Main thread only. */
+    private fun cancelAuthenticationRetry() {
+        authenticationRetryTimer?.cancel()
+        authenticationRetryTimer = null
+    }
+
+    /** The one guard every automatic retry passes through. Runs on the main thread. */
+    private fun retryAuthenticationIfStillNeeded(manager: GrovsManager) {
+        if (grovsManager !== manager) return
+        if (!grovsContext.isForeground) return
+        // A login already running owns the budget; starting another would double it. If it fails,
+        // it arms the next timer itself, so returning here never loses the recovery.
+        if (authenticationJob?.isActive == true) return
+        if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) return
+        checkConfiguration()
+    }
+
     private fun checkConfiguration(awaiting: Job? = null) {
         instance.apiKey?.let { apiKey ->
             grovsManager?.let { manager ->
@@ -1221,6 +1302,9 @@ public class Grovs: ActivityProvider {
                         manager.start()
                         replayParkedIntent()
                         notificationsManager?.displayAutomaticNotificationsIfNeeded()
+                    } else {
+                        // Otherwise a user who never leaves the app stays logged out all session.
+                        scheduleAuthenticationRetry(manager)
                     }
                 }
             } ?: run {
