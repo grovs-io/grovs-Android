@@ -230,6 +230,9 @@ internal class GrovsManager(
     suspend fun onAppForegrounded() {
         grovsContext.isForeground = true
         if (grovsContext.consent.workToken(configuration) == null) return
+        // A value the backend never acknowledged stays pending forever otherwise: the sync only
+        // reacts to changes, and a failed send is not a change.
+        if (grovsContext.userAttributes.value != acknowledgedAttributes) resyncAttributes()
         eventsManager.onAppForegrounded()
         syncScreenAliasesIfNeeded()
     }
