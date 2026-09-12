@@ -43,14 +43,20 @@ class NotificationsE2ETest {
         mockWebServer = E2ETestUtils.createMockWebServer()
         application = RuntimeEnvironment.getApplication()
         E2ETestUtils.setupTestApplication(application)
-        // Deterministic retry timing for the server-error test below, which waits out the bounded
-        // retry schedule in real time. It is a global seam, so teardown restores it.
+        // Deterministic, near-instant retry timing for the server-error test below, which waits out
+        // the bounded retry schedule in real time (no virtual dispatcher here). A real 2s+4s+8s wait
+        // would make the test's pass/fail depend on how much scheduling margin the ceiling leaves
+        // over that fixed 14s, which is a flake risk on a loaded machine; pinning the base delay to
+        // a few milliseconds removes both the flake and the wasted wall-clock time. Both seams are
+        // global, so teardown restores them.
         ConsentRequestExecutor.retryJitterMs = { 0 }
+        ConsentRequestExecutor.retryBaseDelayMs = { 1 }
     }
 
     @After
     fun tearDown() {
         ConsentRequestExecutor.retryJitterMs = ConsentRequestExecutor.defaultJitterMs
+        ConsentRequestExecutor.retryBaseDelayMs = ConsentRequestExecutor.defaultBaseDelayMs
         E2ETestUtils.cleanupMockWebServer(mockWebServer)
     }
 
@@ -186,9 +192,11 @@ class NotificationsE2ETest {
     fun `numberOfUnreadMessages handles server error gracefully`() = runBlocking {
         configureWithUnreadResponse(json("""{"error":"Server Error"}""").setResponseCode(500))
 
-        // A 500 is now retried on the bounded schedule (2s + 4s + 8s, jitter pinned to 0 above)
-        // before the executor gives up, so this needs real time past that whole budget.
-        val count = E2ETestUtils.runWithLooperPumping(16_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
+        // A 500 is retried on the bounded schedule before the executor gives up. The base delay is
+        // pinned to 1ms above (jitter to 0), so the whole retry budget is ~7ms of real delay plus
+        // whatever the 4 real HTTP round trips take; 10s leaves generous margin without the test
+        // depending on a real 14-second wait.
+        val count = E2ETestUtils.runWithLooperPumping(10_000, failOnTimeout = true) { Grovs.numberOfUnreadMessages() }
 
         assertNull("A backend error should return null", count)
         E2ETestUtils.assertRequestMade(

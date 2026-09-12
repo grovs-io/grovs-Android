@@ -175,6 +175,12 @@ internal class ConsentRequestExecutor(
     }
 
     internal companion object {
+        /** First retry wait before doubling per retry count. Overridden in tests that wait on it in real time. */
+        val defaultBaseDelayMs: () -> Long = { GrovsService.RETRY_BASE_DELAY_MS }
+
+        @Volatile
+        internal var retryBaseDelayMs: () -> Long = defaultBaseDelayMs
+
         /** Jitter keeps recovering clients from syncing up. Overridden in tests for exact timing. */
         val defaultJitterMs: () -> Long = { (0L..1000L).random() }
 
@@ -183,6 +189,6 @@ internal class ConsentRequestExecutor(
 
         /** 2s, 4s, 8s, plus jitter. */
         fun retryDelayMs(retryCount: Long): Long =
-            (GrovsService.RETRY_BASE_DELAY_MS shl retryCount.toInt()) + retryJitterMs()
+            (retryBaseDelayMs() shl retryCount.toInt()) + retryJitterMs()
     }
 }
