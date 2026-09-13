@@ -58,8 +58,11 @@ class AuthenticationRecoveryE2ETest : DrivenBackendTestBase() {
 
         foreground()
 
-        // The automatic retry is 10s after the failure, so a doubled budget would already show here.
         advanceUntil("the launch budget to be spent") { manager().lastAuthenticationFailure != null }
+        // A chained second job would only be starting its device lookup at this instant, so give
+        // it time to send its first authenticate request. Still inside the 10s window before the
+        // automatic retry fires, so a correct SDK sends nothing here.
+        advance(5_000)
 
         assertEquals(
             "one retry budget, not two",
