@@ -12,6 +12,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.viewModels
+import io.grovs.Grovs
 import io.grovs.R
 import io.grovs.databinding.FragmentAutoDisplayedNotificationBinding
 import io.grovs.model.notifications.Notification
@@ -21,23 +22,36 @@ import io.grovs.viewmodels.AutoDisplayedNotificationViewModel
 
 const val ARG_NOTIFICATION = "notification"
 
-class AutoDisplayedNotificationFragment(val grovsService: GrovsService) : DialogFragment() {
+/**
+ * Keeps a no-argument constructor: Android rebuilds saved fragments through it whenever the
+ * host Activity is recreated. The service and dismiss callback arrive through [bind] before the
+ * first show and live in the ViewModel from then on.
+ */
+class AutoDisplayedNotificationFragment : DialogFragment() {
     private lateinit var binding: FragmentAutoDisplayedNotificationBinding
     private val viewModel: AutoDisplayedNotificationViewModel by viewModels()
 
     private var notification: Notification? = null
 
-    var onDialogDismissed: (()->Unit)? = null
+    private var pendingService: GrovsService? = null
+    private var pendingOnDismissed: (() -> Unit)? = null
 
     companion object {
 
         @JvmStatic
-        fun newInstance(notification: Notification, grovsService: GrovsService) =
-            AutoDisplayedNotificationFragment(grovsService).apply {
+        fun newInstance(notification: Notification, grovsService: GrovsService, onDismissed: (() -> Unit)? = null) =
+            AutoDisplayedNotificationFragment().apply {
                 arguments = Bundle().apply {
                     putParcelable(ARG_NOTIFICATION, notification)
                 }
+                bind(grovsService, onDismissed)
             }
+    }
+
+    @JvmSynthetic
+    internal fun bind(grovsService: GrovsService, onDismissed: (() -> Unit)?) {
+        pendingService = grovsService
+        pendingOnDismissed = onDismissed
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,6 +65,20 @@ class AutoDisplayedNotificationFragment(val grovsService: GrovsService) : Dialog
         }
 
         setStyle(STYLE_NO_TITLE, R.style.GrovsFullScreenDialogStyle)
+        pendingService?.let {
+            viewModel.grovsService = it
+            viewModel.onDismissed = pendingOnDismissed
+        }
+        pendingService = null
+        pendingOnDismissed = null
+        if (viewModel.grovsService == null) {
+            // Restored after process death: only the configured SDK can supply the service again.
+            Grovs.activeNotificationsManager?.let { manager ->
+                viewModel.grovsService = manager.grovsService
+                viewModel.onDismissed = { manager.automaticNotificationClosed() }
+            }
+        }
+        if (viewModel.grovsService == null) dismissAllowingStateLoss()
     }
 
     override fun onCreateView(
@@ -67,6 +95,7 @@ class AutoDisplayedNotificationFragment(val grovsService: GrovsService) : Dialog
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        if (viewModel.grovsService == null) return
         applySystemBarInsets()
         setup()
     }
@@ -74,15 +103,13 @@ class AutoDisplayedNotificationFragment(val grovsService: GrovsService) : Dialog
     override fun onCancel(dialog: DialogInterface) {
         super.onCancel(dialog)
 
-        onDialogDismissed?.invoke()
+        viewModel.onDismissed?.invoke()
     }
 
     private fun setup() {
-        viewModel.grovsService = grovsService
-
         binding.closeButton.setOnClickListener {
             dismiss()
-            onDialogDismissed?.invoke()
+            viewModel.onDismissed?.invoke()
         }
 
         // Configure the WebView settings

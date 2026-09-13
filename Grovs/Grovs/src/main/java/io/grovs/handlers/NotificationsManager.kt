@@ -31,7 +31,8 @@ class NotificationsManager(
     @get:JvmSynthetic
     internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
 
-    private val grovsService: GrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    @get:JvmSynthetic
+    internal val grovsService: GrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
 
     fun displayAutomaticNotificationsIfNeeded() {
         val consent = grovsContext.consent
@@ -63,8 +64,8 @@ class NotificationsManager(
                 return true
             }
 
-            val dialogFragment = NotificationsMainFragment(grovsService = grovsService)
-            dialogFragment.onDialogDismissed = onDismissed
+            val dialogFragment = NotificationsMainFragment()
+            dialogFragment.bind(grovsService, onDismissed)
             dialogFragment.show(activity.supportFragmentManager, "NotificationsMainFragment")
             activity.supportFragmentManager.executePendingTransactions()
 
@@ -91,14 +92,25 @@ class NotificationsManager(
     ) {
         val alreadyShownFragment = activity.supportFragmentManager.findFragmentByTag(notification.id.toString())
         if (alreadyShownFragment == null) {
-            val dialogFragment = AutoDisplayedNotificationFragment.newInstance(notification = notification, grovsService = grovsService)
-            dialogFragment.onDialogDismissed = {
-                val count = activity.supportFragmentManager.fragments.filterIsInstance<AutoDisplayedNotificationFragment>().count { it.isVisible }
-                activityProvider.requireNotificationsListener()?.onAutomaticNotificationClosed(count == 0)
-            }
+            val dialogFragment = AutoDisplayedNotificationFragment.newInstance(
+                notification = notification,
+                grovsService = grovsService,
+                onDismissed = { automaticNotificationClosed() },
+            )
             dialogFragment.show(activity.supportFragmentManager, notification.id.toString())
             activity.supportFragmentManager.executePendingTransactions()
         }
+    }
+
+    // Counts on the current Activity, not the one the dialog was first shown on: the two differ
+    // once the host has been recreated underneath an open dialog.
+    @JvmSynthetic
+    internal fun automaticNotificationClosed() {
+        val activity = activityProvider.requireActivity() as? FragmentActivity
+        val stillVisible = activity?.supportFragmentManager?.fragments
+            ?.filterIsInstance<AutoDisplayedNotificationFragment>()
+            ?.count { it.isVisible } ?: 0
+        activityProvider.requireNotificationsListener()?.onAutomaticNotificationClosed(stillVisible == 0)
     }
 
 }

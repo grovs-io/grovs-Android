@@ -14,7 +14,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 class NotificationsMainViewModel(application: Application) : AndroidViewModel(application) {
-    lateinit var grovsService: GrovsService
+    // Held here rather than on the fragment so both outlive an Activity recreation. Null only
+    // for a fragment restored after process death before the SDK could supply them again.
+    var grovsService: GrovsService? = null
+    var onDismissed: (() -> Unit)? = null
 
     private val _notifications = MutableStateFlow(emptyList<Notification>())
     val notifications: StateFlow<List<Notification>> = _notifications.asStateFlow()
@@ -29,6 +32,7 @@ class NotificationsMainViewModel(application: Application) : AndroidViewModel(ap
         // Set synchronously, before the launch: two taps in the same frame would both get past a
         // guard that the coroutine only raises once it is dispatched.
         if (_isLoading.value) return
+        val grovsService = grovsService ?: return
         val consent = grovsService.grovsContext.consent
         val token = consent.tryAcquire(grovsService.configuration) ?: return
         _isLoading.value = true
@@ -57,6 +61,7 @@ class NotificationsMainViewModel(application: Application) : AndroidViewModel(ap
     }
 
     fun markAsRead(notification: Notification) {
+        val grovsService = grovsService ?: return
         val consent = grovsService.grovsContext.consent
         val token = consent.tryAcquire(grovsService.configuration) ?: return
         consent.launchOperation(token, scope = viewModelScope) {

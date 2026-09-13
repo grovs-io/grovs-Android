@@ -79,6 +79,11 @@ public class Grovs: ActivityProvider {
     companion object {
         private val instance = Grovs()
 
+        // Lets SDK dialogs that Android restored after process death find their service again.
+        @get:JvmSynthetic
+        internal val activeNotificationsManager: NotificationsManager?
+            get() = instance.notificationsManager
+
         /// Indicates if the test environment should be used
         private var useTestEnvironment: Boolean
             get() = instance.grovsContext.settings.useTestEnvironment
