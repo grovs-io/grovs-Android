@@ -1322,8 +1322,9 @@ public class Grovs: ActivityProvider {
      */
     private fun onNetworkAvailable() {
         val manager = grovsManager ?: return
+        // Main thread (NetworkMonitor posts here), so the main-thread-only state may be touched.
+        pendingLink.onNetworkAvailable()
         if (manager.lastAuthenticationFailure != RequestFailure.OFFLINE) return
-        // Main thread (NetworkMonitor posts here), so the main-thread-only timer may be touched.
         cancelAuthenticationRetry()
         retryAuthenticationIfStillNeeded(manager)
     }
