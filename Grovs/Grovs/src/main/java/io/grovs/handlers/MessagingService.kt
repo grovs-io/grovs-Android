@@ -1,16 +1,11 @@
 package io.grovs.handlers
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.content.Context
 import android.content.pm.PackageManager
-import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import io.grovs.R
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
-import kotlin.random.Random
 
 class MessagingService: FirebaseMessagingService() {
 
@@ -52,32 +47,12 @@ fun FirebaseMessagingService.handleGrovsNotification(message: RemoteMessage): Bo
     // Get the drawable resource ID
     val iconResId = iconName?.let { resources.getIdentifier(it, "drawable", packageName) }
 
-    handleGrovsNotification(message.notification?.title, message.notification?.body, iconResId ?: R.drawable.ic_grovs_notification_default_small)
+    showGrovsPushNotification(
+        this,
+        message.notification?.title,
+        message.notification?.body,
+        iconResId ?: R.drawable.ic_grovs_notification_default_small,
+    )
 
     return true
-}
-
-private fun FirebaseMessagingService.handleGrovsNotification(title: String?, body: String?, smallIcon: Int) {
-    val channelId = "GrovsChannel"
-
-    // Build the notification
-    val notificationBuilder = NotificationCompat.Builder(this, channelId)
-        .setSmallIcon(smallIcon)
-        .setContentTitle(title)
-        .setContentText(body)
-        .setAutoCancel(true)
-
-    // Send the notification
-    val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-    val channel = NotificationChannel(channelId, "Grovs Channel", NotificationManager.IMPORTANCE_HIGH)
-    channel.description = "Channel for Grovs messages"
-    channel.enableLights(true)
-    channel.lightColor = getColor(R.color.grovs_push_notification_icon_tint)
-    channel.enableVibration(true)
-
-    notificationManager.createNotificationChannel(channel)
-
-    var notificationId = Random.nextInt(1000, Int.MAX_VALUE)
-    notificationManager.notify(notificationId, notificationBuilder.build())
 }
