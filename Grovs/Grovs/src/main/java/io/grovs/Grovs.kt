@@ -1296,6 +1296,9 @@ public class Grovs: ActivityProvider {
                     } catch (e: Exception) {
                         // Nothing above this job catches, and an escaped exception would crash the host app.
                         DebugLogger.instance.log(LogLevel.ERROR, "Authentication failed: ${e.message}")
+                        // Otherwise lastAuthenticationFailure stays null or stale, and the automatic
+                        // retry timer would read a delay of 0 and refire almost immediately.
+                        manager.recordAuthenticationOutcome(GrovsManager.AuthenticationFailure.RETRYABLE)
                         false
                     }
                     if (response) {
