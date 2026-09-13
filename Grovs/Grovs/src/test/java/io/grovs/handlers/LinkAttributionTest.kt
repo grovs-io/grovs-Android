@@ -143,9 +143,9 @@ class LinkAttributionTest {
         try {
             val old = async { rig.manager.handleIntent(Intent(), true) }
             started.await()
-            assertEquals(directUrl, rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false)?.link)
+            assertEquals(directUrl, rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false).details?.link)
             gate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.deadlineClock.advanceTimeBy(30_000)
             rig.deadlineClock.runCurrent()
             rig.assertFutureLink(directUrl)
@@ -168,7 +168,7 @@ class LinkAttributionTest {
             started.await()
             rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false)
             gate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.assertFutureLink(directUrl)
             assertEquals(0, rig.clipboard.clearCount)
         } finally { rig.manager.close() }
@@ -189,7 +189,7 @@ class LinkAttributionTest {
             started.await()
             rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false)
             gate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.assertFutureLink(directUrl)
             coVerify(exactly = 0) { rig.service.clipboardStatus() }
         } finally { rig.manager.close() }
@@ -223,7 +223,7 @@ class LinkAttributionTest {
         coEvery { rig.service.payloadWithLinkFor(any()) } returns LSResult.Success(empty)
         try {
             rig.manager.track("before_lookup", null, null)
-            assertNull(rig.manager.handleIntent(Intent().setData(Uri.parse("myapp://open?referrer=unverified")), false))
+            assertNull(rig.manager.handleIntent(Intent().setData(Uri.parse("myapp://open?referrer=unverified")), false).details)
             assertNull(rig.customStorage.getEvents().single().link)
         } finally { rig.manager.close() }
     }
@@ -248,7 +248,7 @@ class LinkAttributionTest {
             assertTrue(rig.sent.none { it.first == EventType.INSTALL })
             assertTrue(rig.events.eventsHeld)
             gate.complete(Unit)
-            assertEquals(directUrl, request.await()?.link)
+            assertEquals(directUrl, request.await().details?.link)
             rig.awaitDeliveries()
             assertEquals(listOf(EventType.INSTALL to clipboardUrl), rig.sent.filter { it.first == EventType.INSTALL })
         } finally { rig.manager.close() }
@@ -272,7 +272,7 @@ class LinkAttributionTest {
             assertFalse(rig.events.eventsHeld)
             assertEquals(listOf(EventType.INSTALL to null), rig.sent.filter { it.first == EventType.INSTALL })
             gate.complete(Unit)
-            assertEquals(directUrl, request.await()?.link)
+            assertEquals(directUrl, request.await().details?.link)
             assertFalse(rig.events.eventsHeld)
         } finally { rig.manager.close() }
     }
@@ -292,7 +292,7 @@ class LinkAttributionTest {
             started.await()
             request.cancelAndJoin()
             assertFalse(rig.events.eventsHeld)
-            assertEquals(directUrl, rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false)?.link)
+            assertEquals(directUrl, rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false).details?.link)
         } finally { rig.manager.close() }
     }
 
@@ -398,11 +398,11 @@ class LinkAttributionTest {
             rig.events.logAppLaunchEvents()
             val old = async { rig.manager.handleIntent(Intent(), true) }
             started.await()
-            assertNull(rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false))
+            assertNull(rig.manager.handleIntent(Intent().setData(Uri.parse(directUrl)), false).details)
             assertTrue(rig.events.eventsHeld)
             assertTrue(rig.sent.none { it.first == EventType.INSTALL })
             gate.complete(Unit)
-            assertEquals(directUrl, old.await()?.link)
+            assertEquals(directUrl, old.await().details?.link)
             rig.events.onAppForegrounded()
             assertEquals(listOf(EventType.INSTALL to clipboardUrl), rig.sent.filter { it.first == EventType.INSTALL })
         } finally { rig.manager.close() }
@@ -439,10 +439,10 @@ class LinkAttributionTest {
             directStarted.await()
             assertTrue(rig.events.eventsHeld)
             directGate.complete(Unit)
-            assertEquals(directUrl, direct.await()?.link)
+            assertEquals(directUrl, direct.await().details?.link)
             assertFalse(rig.events.eventsHeld)
             fingerprintGate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.assertFutureLink(directUrl)
         } finally { rig.manager.close() }
     }
@@ -493,7 +493,7 @@ class LinkAttributionTest {
                 olderReply.complete(Unit)
             }
             val winner = if (olderRespondsFirst) older else newer
-            val delivered = listOfNotNull(first.await(), second.await())
+            val delivered = listOfNotNull(first.await().details, second.await().details)
             assertEquals("Only the first committed destination is delivered; the other is stale", listOf(winner), delivered.map { it.link })
             assertEquals(if (olderRespondsFirst) "a" else "b", delivered.single().data?.get("product"))
             rig.assertFutureLink(winner)
@@ -531,7 +531,7 @@ class LinkAttributionTest {
                     LSResult.Success(DeeplinkDetails(campaignA, null, null))
                 assertEquals(campaignA, rig.manager.handleIntent(
                     Intent().setData(Uri.parse(campaignA)), delayEvents = true
-                )?.link)
+                ).details?.link)
             }
             rig.events.logAppLaunchEvents()
             rig.manager.track("old_checkout", null, null)
@@ -623,7 +623,7 @@ class LinkAttributionTest {
         val rig = Rig(freshInstall = false)
         val session = rig.context.sessionId
         try {
-            assertEquals(directUrl, rig.manager.launcherOnStart(Intent().setData(Uri.parse(directUrl)))?.link)
+            assertEquals(directUrl, rig.manager.launcherOnStart(Intent().setData(Uri.parse(directUrl))).details?.link)
             rig.manager.track("before_background", null, null)
             rig.manager.trackScreenView("BeforeBackground", null)
 
@@ -648,12 +648,12 @@ class LinkAttributionTest {
         val launcherIntent = Intent(Intent.ACTION_VIEW, Uri.parse(directUrl))
         try {
             // Cold start from the link.
-            assertEquals(directUrl, rig.manager.launcherOnStart(launcherIntent)?.link)
+            assertEquals(directUrl, rig.manager.launcherOnStart(launcherIntent).details?.link)
             rig.assertFutureLink(directUrl)
 
             // The user opens another screen and comes back, or rotates the phone: onStart fires
             // again with the same intent and the backend has nothing new to match.
-            assertNull(rig.manager.launcherOnStart(launcherIntent))
+            assertNull(rig.manager.launcherOnStart(launcherIntent).details)
 
             rig.manager.track("viewed_product", null, null)
             rig.manager.logCustomPurchase(PaymentEventType.BUY, 100, "USD", "sku", InstantCompat.now())
@@ -679,7 +679,7 @@ class LinkAttributionTest {
             started.await()
 
             TestFixtures.startNewSession(rig.context)
-            assertNull(rig.manager.launcherOnStart(Intent()))
+            assertNull(rig.manager.launcherOnStart(Intent()).details)
 
             rig.manager.track("while_pending", null, null)
             rig.custom.flush()
@@ -687,7 +687,7 @@ class LinkAttributionTest {
                 emptyList<String?>(), rig.sentCustom)
 
             gate.complete(Unit)
-            assertEquals(directUrl, old.await()?.link)
+            assertEquals(directUrl, old.await().details?.link)
             rig.custom.flush()
             assertEquals(listOf(directUrl), rig.sentCustom)
         } finally { rig.manager.close() }
@@ -713,11 +713,11 @@ class LinkAttributionTest {
             // Backgrounded for longer than the session timeout, then brought back.
             TestFixtures.startNewSession(rig.context)
             assertNotEquals(firstSession, rig.context.sessionId)
-            assertNull(rig.manager.launcherOnStart(Intent()))
+            assertNull(rig.manager.launcherOnStart(Intent()).details)
             rig.manager.track("before_late_match", null, null)
 
             gate.complete(Unit)
-            assertEquals(directUrl, old.await()?.link)
+            assertEquals(directUrl, old.await().details?.link)
             rig.manager.track("after_late_match", null, null)
 
             val links = rig.customStorage.getEvents().filter { it.sessionId == rig.context.sessionId }.map { it.eventName to it.link }
@@ -754,7 +754,7 @@ class LinkAttributionTest {
             nextStarted.await()
             rig.deadlineClock.runCurrent()
             oldGate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.deadlineClock.advanceTimeBy(15_001)
             rig.deadlineClock.runCurrent()
             assertTrue("Old deadline must not release the new hold", rig.events.eventsHeld)
@@ -762,7 +762,7 @@ class LinkAttributionTest {
             rig.custom.flush()
             assertTrue(rig.sentCustom.isEmpty())
             nextGate.complete(Unit)
-            assertEquals(nextUrl, next.await()?.link)
+            assertEquals(nextUrl, next.await().details?.link)
             rig.custom.flush()
             assertEquals(listOf(nextUrl), rig.sentCustom)
         } finally {
@@ -794,10 +794,10 @@ class LinkAttributionTest {
             val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 kotlinx.coroutines.withTimeout(5_000) { current.await() }
             }
-            assertEquals(newUrl, result?.link)
+            assertEquals(newUrl, result.details?.link)
             assertFalse("The revoked response is still withheld", oldGate.isCompleted)
             oldGate.complete(Unit)
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.assertFutureLink(newUrl)
         } finally { oldGate.complete(Unit); rig.manager.close() }
     }
@@ -815,10 +815,10 @@ class LinkAttributionTest {
             val old = async { rig.manager.handleIntent(intent, false, cacheIntent = true) }
             started.await()
             rig.context.settings.sdkEnabled = false
-            assertNull(old.await())
+            assertNull(old.await().details)
             rig.context.settings.sdkEnabled = true
             coEvery { rig.service.payloadWithLinkFor(any()) } returns LSResult.Success(DeeplinkDetails(directUrl, null, null))
-            assertEquals(directUrl, rig.manager.handleIntent(intent, false, cacheIntent = true)?.link)
+            assertEquals(directUrl, rig.manager.handleIntent(intent, false, cacheIntent = true).details?.link)
             coVerify(exactly = 2) { rig.service.payloadWithLinkFor(match { it.url == directUrl }) }
         } finally { rig.manager.close() }
     }

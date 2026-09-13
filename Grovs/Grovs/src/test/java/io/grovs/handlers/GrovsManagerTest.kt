@@ -945,7 +945,7 @@ class GrovsManagerTest {
         val result = grovsManager.handleIntent(intent, delayEvents = false)
 
         assertNullWithContext(
-            result,
+            result.details,
             "handleIntent result",
             "after handleIntent() with UNAUTHENTICATED state"
         )
@@ -971,13 +971,13 @@ class GrovsManagerTest {
         val result = grovsManager.handleIntent(intent, delayEvents = false)
 
         assertNotNullWithContext(
-            result,
+            result.details,
             "handleIntent result",
             "after handleIntent() with data URI and AUTHENTICATED state"
         )
         assertEqualsWithContext(
             "https://test.grovs.io/deep/link",
-            result?.link,
+            result.details?.link,
             "link",
             "after handleIntent() with data URI"
         )
@@ -1002,7 +1002,7 @@ class GrovsManagerTest {
             // Waited in real time: the commit also writes through real storage threads, and a
             // virtual-time timeout would fire the moment the test scheduler went idle on them.
             val result = withContext(Dispatchers.Default) { withTimeoutOrNull(5_000) { lookup.await() } }
-            assertEquals("the commit must return without waiting for the upload", link, result?.link)
+            assertEquals("the commit must return without waiting for the upload", link, result?.details?.link)
         } finally {
             upload.complete(Unit)
         }
@@ -1028,25 +1028,25 @@ class GrovsManagerTest {
         val result = grovsManager.handleIntent(intent, delayEvents = false)
 
         assertNotNullWithContext(
-            result,
+            result.details,
             "handleIntent result",
             "after handleIntent() with promo link"
         )
         assertEqualsWithContext(
             "https://test.grovs.io/promo",
-            result?.link,
+            result.details?.link,
             "link",
             "after handleIntent() with promo link"
         )
         assertEqualsWithContext(
             "summer2024",
-            result?.data?.get("promo"),
+            result.details?.data?.get("promo"),
             "data['promo']",
             "after handleIntent() with promo data"
         )
         assertEqualsWithContext(
             "email",
-            result?.tracking?.get("campaign"),
+            result.details?.tracking?.get("campaign"),
             "tracking['campaign']",
             "after handleIntent() with tracking data"
         )
@@ -1066,7 +1066,7 @@ class GrovsManagerTest {
         val result = grovsManager.handleIntent(intent, delayEvents = false)
 
         assertNullWithContext(
-            result,
+            result.details,
             "handleIntent result",
             "after handleIntent() when service returns error"
         )
@@ -1151,7 +1151,7 @@ class GrovsManagerTest {
         val result = grovsManager.handleIntent(intent, delayEvents = false)
 
         assertNullWithContext(
-            result,
+            result.details,
             "handleIntent result",
             "after handleIntent() when DeeplinkDetails has null link and data"
         )
@@ -1249,7 +1249,7 @@ class GrovsManagerTest {
             advanceTimeBy(250)
             runCurrent()
 
-            assertEquals(clipboardLink, pending.await()?.link)
+            assertEquals(clipboardLink, pending.await().details?.link)
             assertEquals(2, rig.clipboard.awaitAccessCount)
             assertEquals(1, rig.clipboard.readCount)
             assertEquals(1, rig.clipboard.clearCount)
@@ -1272,7 +1272,7 @@ class GrovsManagerTest {
             advanceTimeBy(250)
             runCurrent()
 
-            assertNull(pending.await())
+            assertNull(pending.await().details)
             assertEquals(1, rig.clipboard.awaitAccessCount)
             assertEquals(0, rig.clipboard.readCount)
             assertEquals(0, rig.clipboard.clearCount)
@@ -1293,7 +1293,7 @@ class GrovsManagerTest {
             runCurrent()
 
             assertTrue(pending.isCompleted)
-            assertNull(pending.await())
+            assertNull(pending.await().details)
             assertEquals(0, rig.clipboard.readCount)
             assertTrue(rig.cache.clipboardFlowPending)
             coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(delayEvents = false) }
@@ -1326,7 +1326,7 @@ class GrovsManagerTest {
         val result = manager.handleIntent(Intent(), delayEvents = true)
 
         // The delivered DeeplinkDetails carries the backend-resolved link...
-        assertEqualsWithContext(resolvedLink, result?.link, "link", "after a clipboard match")
+        assertEqualsWithContext(resolvedLink, result.details?.link, "link", "after a clipboard match")
         coVerifyOrder {
             mockEventsManager.beginLinkResolution()
             // ...but INSTALL is stamped with the raw clipboard string, verbatim.
@@ -1346,7 +1346,7 @@ class GrovsManagerTest {
 
         val result = manager.handleIntent(Intent(), delayEvents = true)
 
-        assertNullWithContext(result, "handleIntent result", "after a clipboard no-match")
+        assertNullWithContext(result.details, "handleIntent result", "after a clipboard no-match")
         coVerifyOrder {
             mockEventsManager.beginLinkResolution()
             mockEventsManager.releaseLinkResolution(delayEvents = true)
@@ -1380,7 +1380,7 @@ class GrovsManagerTest {
 
         // The delivered DeeplinkDetails carries the backend-resolved link, but the late patch to
         // INSTALL still carries the raw clipboard string, verbatim.
-        assertEqualsWithContext(resolvedLink, result?.link, "link", "after a late clipboard match")
+        assertEqualsWithContext(resolvedLink, result.details?.link, "link", "after a late clipboard match")
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
         coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         manager.close()
@@ -1400,11 +1400,11 @@ class GrovsManagerTest {
         advanceUntilIdle()
         val second = manager.handleIntent(Intent(), delayEvents = true)
 
-        assertNullWithContext(second, "re-entrant handleIntent result", "while the clipboard flow is in flight")
+        assertNullWithContext(second.details, "re-entrant handleIntent result", "while the clipboard flow is in flight")
         coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
 
         gate.complete(LSResult.Success(true))
-        assertEqualsWithContext(resolvedLink, first.await()?.link, "link", "after the first run completes")
+        assertEqualsWithContext(resolvedLink, first.await().details?.link, "link", "after the first run completes")
         coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(any(), any()) }
         coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         manager.close()
@@ -1434,7 +1434,7 @@ class GrovsManagerTest {
         // re-hold the already-released events or arm a second valve.
         val second = manager.handleIntent(Intent(), delayEvents = true)
 
-        assertNullWithContext(second, "re-entrant handleIntent result", "after the valve already released the hold")
+        assertNullWithContext(second.details, "re-entrant handleIntent result", "after the valve already released the hold")
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
         coVerify(exactly = 1) { mockEventsManager.releaseLinkResolution(any()) }
         coVerify(exactly = 0) { mockEventsManager.completeLinkResolution(any(), any()) }
@@ -1443,7 +1443,7 @@ class GrovsManagerTest {
         val result = first.await()
 
         // The first run's late match still patches, without touching the hold a second time.
-        assertEqualsWithContext(resolvedLink, result?.link, "link", "after the late clipboard match")
+        assertEqualsWithContext(resolvedLink, result.details?.link, "link", "after the late clipboard match")
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
         coVerify { rig.customEventsManager.setLinkForFutureEvents(resolvedLink, grovsContext.sessionId) }
         coVerify(exactly = 1) { mockEventsManager.beginLinkResolution() }
@@ -1482,7 +1482,7 @@ class GrovsManagerTest {
 
         // The still-parked flow reaches its terminal outcome unaffected.
         gate.complete(LSResult.Success(true))
-        assertEqualsWithContext(resolvedLink, pending.await()?.link, "link", "after a throwing valve")
+        assertEqualsWithContext(resolvedLink, pending.await().details?.link, "link", "after a throwing valve")
         coVerify { mockEventsManager.completeLinkResolution(clipboardLink, delayEvents = true) }
         manager.close()
     }
@@ -1542,9 +1542,9 @@ class GrovsManagerTest {
             verify(exactly = 1) { mockEventsManager.beginLinkResolution() }
             coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(any()) }
 
-            assertEquals(direct, manager.handleIntent(Intent().setData(Uri.parse(direct)), false)?.link)
+            assertEquals(direct, manager.handleIntent(Intent().setData(Uri.parse(direct)), false).details?.link)
             deliverServiceConnection()
-            assertNull(old.await())
+            assertNull(old.await().details)
             coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
             coVerify(exactly = 1) { mockEventsManager.completeLinkResolution(direct, false) }
         } finally { manager.close() }
@@ -1561,15 +1561,15 @@ class GrovsManagerTest {
         try {
             val old = async { manager.handleIntent(Intent(), delayEvents = true) }
             runCurrent()
-            assertEquals(direct, manager.handleIntent(Intent().setData(Uri.parse(direct)), false)?.link)
+            assertEquals(direct, manager.handleIntent(Intent().setData(Uri.parse(direct)), false).details?.link)
             deliverServiceConnection()
-            assertNull(old.await())
+            assertNull(old.await().details)
             coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
 
             val next = async { manager.handleIntent(Intent(), delayEvents = true) }
             runCurrent()
             deliverServiceConnection()
-            assertEquals(direct, next.await()?.link)
+            assertEquals(direct, next.await().details?.link)
             coVerify(exactly = 1) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
         } finally { manager.close() }
     }
@@ -1595,7 +1595,7 @@ class GrovsManagerTest {
             val pending = async { manager.handleIntent(Intent(), true) }
             runCurrent()
             deliverServiceConnection()
-            assertEquals(resolved, pending.await()?.link)
+            assertEquals(resolved, pending.await().details?.link)
             assertEquals(resolved, storage.getEvents().single().link)
         } finally { manager.close() }
     }
@@ -1615,7 +1615,7 @@ class GrovsManagerTest {
         advanceUntilIdle()
         val result = pending.await()
 
-        assertEqualsWithContext("https://demo.sqd.link/from-referrer", result?.link, "link", "after an install referrer hit")
+        assertEqualsWithContext("https://demo.sqd.link/from-referrer", result.details?.link, "link", "after an install referrer hit")
         coVerify { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
         assertFalse(rig.cache.clipboardFlowPending)
         coVerify(exactly = 0) { mockGrovsService.clipboardStatus() }
@@ -1646,7 +1646,7 @@ class GrovsManagerTest {
         coVerify(exactly = 1) { mockGrovsService.payloadWithLinkFor(match { it.url == referrerUrl }) }
         coVerify(exactly = 0) { mockGrovsService.payloadFor(any()) }
         // ...and its empty answer fell through to the clipboard flow, which matched.
-        assertEqualsWithContext(resolvedLink, result?.link, "link", "after an empty install referrer resolve")
+        assertEqualsWithContext(resolvedLink, result.details?.link, "link", "after an empty install referrer resolve")
         coVerify(exactly = 1) { mockGrovsService.clipboardStatus() }
         coVerifyOrder {
             mockEventsManager.beginLinkResolution()
@@ -1665,7 +1665,7 @@ class GrovsManagerTest {
 
         val result = manager.handleIntent(Intent(), delayEvents = true)
 
-        assertEqualsWithContext("https://demo.sqd.link/fp", result?.link, "link", "after a fingerprint hit")
+        assertEqualsWithContext("https://demo.sqd.link/fp", result.details?.link, "link", "after a fingerprint hit")
         assertFalse(rig.cache.clipboardFlowPending)
         coVerify(exactly = 0) { mockGrovsService.clipboardStatus() }
         verify(exactly = 1) { mockEventsManager.beginLinkResolution() }
@@ -1694,7 +1694,7 @@ class GrovsManagerTest {
 
         val result = manager.handleIntent(Intent(), delayEvents = true)
 
-        assertNullWithContext(result, "handleIntent result", "on an existing install with no link")
+        assertNullWithContext(result.details, "handleIntent result", "on an existing install with no link")
         coVerify(exactly = 0) { mockGrovsService.clipboardStatus() }
         verify(exactly = 1) { mockEventsManager.beginLinkResolution() }
         manager.close()
@@ -1725,7 +1725,7 @@ class GrovsManagerTest {
             grovsContext.settings.sdkEnabled = true
             deliverServiceConnection()
             runCurrent()
-            assertNull(lookup.await())
+            assertNull(lookup.await().details)
             coVerify(exactly = 0) { mockGrovsService.payloadFor(any()) }
             coVerify(exactly = 0) { mockGrovsService.payloadWithLinkFor(any()) }
             assertNull(context.getSharedPreferences("grovs_prefs", Context.MODE_PRIVATE).getString("last_referrer", null))

@@ -17,6 +17,7 @@ import io.grovs.e2e.E2ETestUtils
 import io.grovs.e2e.TestActivity
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.IntentOutcome
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
@@ -430,7 +431,7 @@ class GrovsSingletonTest {
         every { mockManager.authenticationState } returns GrovsManager.AuthenticationState.AUTHENTICATED
         coEvery { mockManager.handleIntent(any(), any(), any()) } coAnswers {
             gate.await()
-            details
+            IntentOutcome(details = details, tappedLink = link, failure = null)
         }
         injectMockGrovsManagerDirectly(mockManager)
         val listener = mockk<GrovsDeeplinkListener>(relaxed = true)

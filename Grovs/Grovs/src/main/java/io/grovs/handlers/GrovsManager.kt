@@ -137,6 +137,9 @@ internal class GrovsManager(
 
     private data class ResolvedDeeplink(val details: DeeplinkDetails, val eventLink: String?)
 
+    /// A lookup's answer. [failure] is set when the request itself failed, classified for retry.
+    private class LookupAnswer(val resolved: ResolvedDeeplink?, val failure: RequestFailure? = null)
+
     private var lastIntentHandledReference: WeakReference<Intent>? = null
     private var handledIntentTokens: MutableList<Int> = mutableListOf()
 
@@ -307,51 +310,53 @@ internal class GrovsManager(
         if (grovsContext.consent.isCurrent(token)) eventsManager.releaseLinkResolution(delayEvents = delayEvents)
     }
 
-    /// Resolves a candidate without committing it. Null when nothing resolved or the lookup went stale.
-    private suspend fun getDataForDevice(link: String?, lookup: Lookup): ResolvedDeeplink? {
+    /// Resolves a candidate without committing it. No result when nothing resolved or the lookup went stale.
+    private suspend fun getDataForDevice(link: String?, lookup: Lookup): LookupAnswer {
         val request = appDetailsHelperForIntent.toAppDetails().copy(
             url = link,
             sessionId = lookup.sessionId,
         )
         val result = if (link == null) grovsService.payloadFor(request) else grovsService.payloadWithLinkFor(request)
-        if (!isCurrent(lookup)) return null
+        if (!isCurrent(lookup)) return LookupAnswer(null)
 
         return when (result) {
             is LSResult.Error -> {
                 DebugLogger.instance.log(LogLevel.ERROR, "Error occurred while trying to resolve the deeplink. ${result.exception.message}")
-                null
+                LookupAnswer(null, failureKind(result.exception))
             }
-            is LSResult.Success -> {
-                if (result.data.link != null) {
-                    ResolvedDeeplink(result.data, result.data.link)
-                } else if (clipboardHandler.isPending) {
-                    // Only an empty resolve on a fresh install runs the clipboard flow. A run already
-                    // parked by another lookup keeps the hold; this call must not touch it.
-                    // The barrier the flow re-checks at every suspension point covers consent as
-                    // well as staleness, so a revocation between the status call, the focus wait,
-                    // the description, the read and the match stops it before the next of those -
-                    // and no later grant lets this run continue.
-                    val token = grovsContext.consent.workToken(configuration)
-                    val stillAllowed = { isCurrent(lookup) && token != null && grovsContext.consent.isCurrent(token) }
-                    var outcome = clipboardHandler.runFlow(request, stillAllowed)
-                    // A startup dialog can outlive one focus wait without another onStart.
-                    // Retry only this condition, under the original consent token and hold deadline.
-                    while (outcome == ClipboardFlowOutcome.AwaitingFocus &&
-                        holdDeadline?.isActive == true && stillAllowed()
-                    ) {
-                        delay(250)
-                        if (holdDeadline?.isActive != true || !stillAllowed()) break
-                        outcome = clipboardHandler.runFlow(request, stillAllowed)
-                    }
-                    when (outcome) {
-                        // INSTALL carries the clipboard string verbatim; the host gets the resolved details.
-                        is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
-                        else -> null
-                    }
-                } else {
-                    result.data.takeIf { it.data != null }?.let { ResolvedDeeplink(it, null) }
-                }
+            is LSResult.Success -> LookupAnswer(resolveSuccess(result.data, request, lookup))
+        }
+    }
+
+    private suspend fun resolveSuccess(data: DeeplinkDetails, request: AppDetails, lookup: Lookup): ResolvedDeeplink? {
+        return if (data.link != null) {
+            ResolvedDeeplink(data, data.link)
+        } else if (clipboardHandler.isPending) {
+            // Only an empty resolve on a fresh install runs the clipboard flow. A run already
+            // parked by another lookup keeps the hold; this call must not touch it.
+            // The barrier the flow re-checks at every suspension point covers consent as
+            // well as staleness, so a revocation between the status call, the focus wait,
+            // the description, the read and the match stops it before the next of those -
+            // and no later grant lets this run continue.
+            val token = grovsContext.consent.workToken(configuration)
+            val stillAllowed = { isCurrent(lookup) && token != null && grovsContext.consent.isCurrent(token) }
+            var outcome = clipboardHandler.runFlow(request, stillAllowed)
+            // A startup dialog can outlive one focus wait without another onStart.
+            // Retry only this condition, under the original consent token and hold deadline.
+            while (outcome == ClipboardFlowOutcome.AwaitingFocus &&
+                holdDeadline?.isActive == true && stillAllowed()
+            ) {
+                delay(250)
+                if (holdDeadline?.isActive != true || !stillAllowed()) break
+                outcome = clipboardHandler.runFlow(request, stillAllowed)
             }
+            when (outcome) {
+                // INSTALL carries the clipboard string verbatim; the host gets the resolved details.
+                is ClipboardFlowOutcome.Matched -> ResolvedDeeplink(outcome.details, outcome.clipboardUrl)
+                else -> null
+            }
+        } else {
+            data.takeIf { it.data != null }?.let { ResolvedDeeplink(it, null) }
         }
     }
 
@@ -579,25 +584,25 @@ internal class GrovsManager(
         customEventsManager.close()
     }
 
-    suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): DeeplinkDetails? {
-        val token = grovsContext.consent.workToken(configuration) ?: return null
+    suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): IntentOutcome {
+        val token = grovsContext.consent.workToken(configuration) ?: return IntentOutcome.NOTHING
         return try {
             grovsContext.consent.runOperation(token) { handleIntentUnderConsent(intent, delayEvents, cacheIntent, token) }
         } catch (_: ConsentRevokedException) {
-            null
+            IntentOutcome.NOTHING
         }
     }
 
-    private suspend fun handleIntentUnderConsent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean, token: ConsentToken): DeeplinkDetails? {
+    private suspend fun handleIntentUnderConsent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean, token: ConsentToken): IntentOutcome {
         // Consent was admitted by handleIntent and is current here: runOperation checks [token]
         // before this body runs.
         if (authenticationState != AuthenticationState.AUTHENTICATED) {
             DebugLogger.instance.log(LogLevel.ERROR, "SDK is not ready for usage yet.")
-            return null
+            return IntentOutcome.NOTHING
         }
 
-        if (isClosed) return null
-        if (!grovsContext.consent.storeIfConsented(configuration) { clipboardHandler.armIfNeeded() }) return null
+        if (isClosed) return IntentOutcome.NOTHING
+        if (!grovsContext.consent.storeIfConsented(configuration) { clipboardHandler.armIfNeeded() }) return IntentOutcome.NOTHING
 
         var repeatedIntent = false
         var newlyCachedIntent = false
@@ -622,33 +627,44 @@ internal class GrovsManager(
                     eventsManager.setLinkForFutureEvents(explicitLink)
                 }
             }
-        } ?: return null
+        } ?: return IntentOutcome.NOTHING
 
+        // A tapped link whose lookup failed but may heal is left unconsumed, so its replay is a
+        // real link lookup rather than a repeated intent.
+        var leaveUnconsumed = false
         try {
             val link = explicitLink ?: if (repeatedIntent) null else readInstallReferrer()
-            if (!isCurrent(lookup)) return null
+            if (!isCurrent(lookup)) return IntentOutcome.NOTHING
             if (link != null && explicitLink == null) {
                 // Consumed only by a lookup that actually sends it; a stale one leaves it for the next.
                 lastReferrerUrl = link
             }
 
-            val result = getDataForDevice(link, lookup)
+            val answer = getDataForDevice(link, lookup)
+            val result = answer.resolved
             if (result == null) {
-                if (lookup.explicit && isCurrent(lookup)) eventsManager.setLinkForFutureEvents(null)
-                return null
+                if (lookup.explicit && isCurrent(lookup)) {
+                    eventsManager.setLinkForFutureEvents(null)
+                    leaveUnconsumed = answer.failure != null && answer.failure != RequestFailure.REJECTED
+                    return IntentOutcome(details = null, tappedLink = explicitLink, failure = answer.failure)
+                }
+                return IntentOutcome.NOTHING
             }
-            val eventLink = result.eventLink ?: return result.details
+            val eventLink = result.eventLink
+                ?: return IntentOutcome(details = result.details, tappedLink = explicitLink, failure = null)
 
             if (!lookup.explicit) awaitExplicitLookups()
-            return commit(lookup, result, eventLink, delayEvents)
+            return IntentOutcome(details = commit(lookup, result, eventLink, delayEvents), tappedLink = explicitLink, failure = null)
         } finally {
             withContext(NonCancellable) {
                 resolutionMutex.withLock {
                     if (lookup.explicit) explicitLookups.remove(lookup) else if (sharedLookup === lookup) sharedLookup = null
                     lookupsInFlight.remove(lookup)
-                    // Revocation is not consumption. Permit a later explicit call with this same
-                    // intent to retry, without changing a newer intent's cache or replaying here.
-                    if (!grovsContext.consent.isCurrent(token) && !lookup.committed && !repeatedIntent) {
+                    // Neither revocation nor a failure that may heal is consumption. Permit a later
+                    // call with this same intent to retry, without changing a newer intent's cache
+                    // or replaying here.
+                    val unconsumed = leaveUnconsumed || !grovsContext.consent.isCurrent(token)
+                    if (unconsumed && !lookup.committed && !repeatedIntent) {
                         if (newlyCachedIntent) handledIntentTokens.remove(intent.hashCode())
                         if (lastIntentHandledReference?.get() === intent) lastIntentHandledReference = null
                     }

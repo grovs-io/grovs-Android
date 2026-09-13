@@ -1389,7 +1389,8 @@ public class Grovs: ActivityProvider {
                 parkedIntent = ParkedIntent(intent, delayEvents, cacheIntent, token)
                 return@launchOperation
             }
-            val result = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+            val outcome = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+            val result = outcome.details
             result?.let { deeplinkDetails ->
                 deeplinkDetails.link?.let { link ->
                     if (handleIntentConflict && (lastLinkMatched == deeplinkDetails.link)) {
