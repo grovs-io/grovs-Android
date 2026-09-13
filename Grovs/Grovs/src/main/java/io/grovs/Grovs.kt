@@ -769,6 +769,10 @@ public class Grovs: ActivityProvider {
         val endingSegment = if (!enabled) manager?.let { m ->
             consent.tryAcquire(m.configuration)?.let { consent.tryAdmitCommit(it, CommitKind.STORAGE_TRANSACTION) }
         } else null
+        // Snapshot before revoking. A concurrent enable may install a new authentication job right
+        // after the revocation, and that job waits for this permit: joining it from the permit's
+        // finish would deadlock. The job of the generation being revoked is cancelled by it.
+        val revokedAuthentication = authenticationJob
         val transition = if (enabled) consent.enable() else consent.revoke()
         if (!transition.changed) {
             endingSegment?.close()
@@ -779,13 +783,12 @@ public class Grovs: ActivityProvider {
         // The controller owns cancellation. Finish only the engagement bookkeeping admitted above.
         if (!enabled) {
             if (endingSegment != null && manager != null) {
-                val authentication = authenticationJob
                 // ATOMIC so the body starts even if the configuration is retired before dispatch: the
                 // permit always closes and the next enable never waits on it. finish runs the body
                 // NonCancellable.
                 manager.configuration.scope.launch(grovsContext.serialDispatcher, start = CoroutineStart.ATOMIC) {
                     endingSegment.finish {
-                        authentication?.join()
+                        revokedAuthentication?.join()
                         manager.onDisabled(cutoff)
                     }
                 }
