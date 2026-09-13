@@ -154,10 +154,14 @@ internal class PendingLinkRetry(
         reset()
     }
 
-    /** Unconditionally forgets whatever is parked: the slot, its backoff, and its timer. */
+    /**
+     * Returns the retry to its initial state: the slot, its backoff (including the test clock
+     * seam), and its timer.
+     */
     internal fun reset() {
         slot = null
         backoff.record(null)
+        backoff.resetClock()
         cancelTimer()
     }
 }

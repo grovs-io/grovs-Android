@@ -3,7 +3,6 @@ package io.grovs.e2e
 import android.app.Application
 import android.content.Intent
 import android.os.Looper
-import android.os.SystemClock
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
@@ -46,10 +45,6 @@ abstract class DrivenBackendTestBase {
     fun setUpHarness() {
         application = RuntimeEnvironment.getApplication()
         E2ETestUtils.resetGrovsSingleton()
-        // A test that stubs the pending link's backoff clock (to simulate elapsed time) leaves
-        // that stub on the shared PendingLinkRetry instance; reset() clears its state but not
-        // this seam, so a later test would otherwise inherit it.
-        E2ETestUtils.getPendingLinkRetry()?.backoff?.elapsedMs = { SystemClock.elapsedRealtime() }
         E2ETestUtils.setupTestApplication(application)
         E2ETestUtils.setupMockGlInfo()
         E2ETestUtils.setupMockUserAgent("Grovs SDK recovery tests")

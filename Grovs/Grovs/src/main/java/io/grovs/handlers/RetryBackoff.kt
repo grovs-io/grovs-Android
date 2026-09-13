@@ -10,7 +10,7 @@ import android.os.SystemClock
 internal class RetryBackoff {
 
     /// Elapsed-time source the window is measured against. A seam so tests can move time.
-    internal var elapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
+    internal var elapsedMs: () -> Long = defaultElapsedMs
 
     /// Why the last attempt failed, or null after a success or before any attempt.
     @Volatile
@@ -57,10 +57,16 @@ internal class RetryBackoff {
         return (at - elapsedMs()).coerceAtLeast(0L)
     }
 
+    /** Restores [elapsedMs] to the real clock, undoing a test's stub. */
+    fun resetClock() {
+        elapsedMs = defaultElapsedMs
+    }
+
     companion object {
         const val BASE_MS = 10_000L
         const val MAX_MS = 300_000L
         /// Keeps the doubling from overflowing once the ceiling is reached anyway.
         private const val MAX_SHIFT = 16
+        val defaultElapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
     }
 }
