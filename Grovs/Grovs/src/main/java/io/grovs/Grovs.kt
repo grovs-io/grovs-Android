@@ -45,6 +45,7 @@ import io.grovs.utils.NetworkMonitor
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -719,8 +720,18 @@ public class Grovs: ActivityProvider {
         // A new configuration never inherits the previous one's unresolved link.
         parkedIntent = null
 
-        networkMonitor = NetworkMonitor(application.applicationContext).also {
-            grovsContext.networkMonitor = it
+        // One network callback per process: a repeated configure() replaces it instead of adding
+        // another, since Android caps callbacks per app and throws past the cap.
+        val previousMonitor = networkMonitor
+        val monitor = NetworkMonitor(application.applicationContext) { onNetworkAvailable() }
+        networkMonitor = monitor
+        grovsContext.networkMonitor = monitor
+        // Registering and unregistering are calls into the system process. configure() usually
+        // runs on the main thread during app start, so do them on the SDK thread instead. One
+        // serial thread also keeps each stop before the next start.
+        CoroutineScope(grovsContext.serialDispatcher).launch {
+            previousMonitor?.stop()
+            monitor.start()
         }
 
         grovsManager = GrovsManager(context = application.applicationContext,
@@ -1277,6 +1288,19 @@ public class Grovs: ActivityProvider {
         if (authenticationJob?.isActive == true) return
         if (manager.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED) return
         checkConfiguration()
+    }
+
+    /**
+     * The phone has a network again. Retries at once, skipping the window, but only when the last
+     * failure was being offline: a new network does not fix a backend outage or a bad key, and a
+     * flapping connection must not turn into a stream of requests. Runs on the main thread.
+     */
+    private fun onNetworkAvailable() {
+        val manager = grovsManager ?: return
+        if (manager.lastAuthenticationFailure != GrovsManager.AuthenticationFailure.OFFLINE) return
+        // Main thread (NetworkMonitor posts here), so the main-thread-only timer may be touched.
+        cancelAuthenticationRetry()
+        retryAuthenticationIfStillNeeded(manager)
     }
 
     private fun checkConfiguration(awaiting: Job? = null) {
