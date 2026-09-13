@@ -223,9 +223,14 @@ internal class GrovsManager(
         return (retryAt - authenticationBackoffElapsedMs()).coerceAtLeast(0L)
     }
 
-    /// A response the backend refused is final. Anything else may heal.
-    private fun failureKind(exception: Exception): AuthenticationFailure =
-        if (exception is HttpStatusException) AuthenticationFailure.REJECTED else AuthenticationFailure.RETRYABLE
+    /// A response the backend refused is final. A failure with no network is offline. Anything else may heal.
+    private fun failureKind(exception: Exception): AuthenticationFailure = when {
+        exception is HttpStatusException -> AuthenticationFailure.REJECTED
+        !isOnline() -> AuthenticationFailure.OFFLINE
+        else -> AuthenticationFailure.RETRYABLE
+    }
+
+    private fun isOnline(): Boolean = grovsContext.networkMonitor?.isOnline() ?: true
 
     /// The user attributes the backend last confirmed, or that were adopted from it at
     /// authentication. The attribute sync sends whenever [GrovsContext.userAttributes] differs.
@@ -466,7 +471,16 @@ internal class GrovsManager(
             return false
         }
 
+        // No network: every request below would fail. Let the network callback or the retry timer
+        // bring the SDK back, instead of spending two retry budgets on a dead connection.
+        if (!isOnline()) {
+            DebugLogger.instance.log(LogLevel.INFO, "No network - authentication postponed")
+            recordAuthenticationOutcome(AuthenticationFailure.OFFLINE)
+            return false
+        }
+
         val appDetails = appDetails.toAppDetails()
+        var deviceLookupFailure: Exception? = null
         grovsService.getDeviceFor(appDetails.deviceID).transformWhile {
             emit(it)
             it is GVRetryResult.Retrying
@@ -479,7 +493,7 @@ internal class GrovsManager(
                     authenticationState = AuthenticationState.RETRYING
                     DebugLogger.instance.log(LogLevel.INFO, "Retrying to get the device.")
                 }
-                is GVRetryResult.Error -> {}
+                is GVRetryResult.Error -> deviceLookupFailure = deviceResult.exception
             }
         }
 
@@ -487,6 +501,15 @@ internal class GrovsManager(
         // is the last point before the authenticate request (and the launch it would record) goes out.
         if (!consent.isCurrent(token)) {
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn during the device lookup - not authenticating")
+            return false
+        }
+
+        // The lookup spent its budget and the phone is now offline: login would spend a second
+        // budget failing the same way. Online, a failed lookup still goes on to login, as before.
+        if (deviceLookupFailure != null && !isOnline()) {
+            DebugLogger.instance.log(LogLevel.INFO, "No network - authentication postponed")
+            authenticationState = AuthenticationState.UNAUTHENTICATED
+            recordAuthenticationOutcome(AuthenticationFailure.OFFLINE)
             return false
         }
 

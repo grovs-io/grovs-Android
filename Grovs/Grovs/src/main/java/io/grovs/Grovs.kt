@@ -41,6 +41,7 @@ import io.grovs.service.TrackingParams
 import io.grovs.utils.FlowObservable
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
+import io.grovs.utils.NetworkMonitor
 import io.grovs.utils.ScreenUtils
 import io.grovs.utils.flowDelegate
 import kotlinx.coroutines.CancellationException
@@ -504,6 +505,8 @@ public class Grovs: ActivityProvider {
     /// link handling joins that job, and must never wait out a timer.
     private var authenticationRetryTimer: Job? = null
 
+    private var networkMonitor: NetworkMonitor? = null
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The pending screen resolution per Activity, so pause/destroy and re-resumes can cancel it. */
@@ -715,6 +718,10 @@ public class Grovs: ActivityProvider {
 
         // A new configuration never inherits the previous one's unresolved link.
         parkedIntent = null
+
+        networkMonitor = NetworkMonitor(application.applicationContext).also {
+            grovsContext.networkMonitor = it
+        }
 
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,

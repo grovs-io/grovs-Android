@@ -4,6 +4,7 @@ import android.content.Context
 import io.grovs.settings.GrovsSettings
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.InstantCompat
+import io.grovs.utils.NetworkMonitor
 import io.grovs.utils.WebViewUtils
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,10 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
         set(value) = userAttributes.update { it.copy(attributes = value) }
     @Volatile
     internal var isForeground: Boolean = false
+
+    /// Whether the phone has a network. Null before configure(), which the SDK treats as online.
+    @Volatile
+    internal var networkMonitor: NetworkMonitor? = null
 
     /// The configuration whose authentication produced [grovsId]. Changed only by
     /// [markAuthenticated] and [clearAuthentication], so the two always move together.
