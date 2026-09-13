@@ -637,6 +637,9 @@ public class Grovs: ActivityProvider {
                 }
             }
 
+            // A tapped link whose lookup failed follows the same rule as a failed login.
+            pendingLink.onForeground()
+
             collect { manager ->
                 // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
                 // than on the caller's thread. Must precede any screen tracking on this dispatcher.

@@ -86,4 +86,60 @@ class PendingLinkRecoveryE2ETest : DrivenBackendTestBase() {
         assertEquals("one request, no retry", 1, backend.count(payload))
         assertNull(pending().slot)
     }
+
+    @Test
+    fun `going to the background cancels the pending retry`() {
+        tapDuringOutage()
+        backendRecovers()
+
+        background()
+        advance(120_000)
+
+        assertEquals("no retry from the background", 0, backend.count(payload, "recovered"))
+        assertNotNull("the link is still pending", pending().slot)
+    }
+
+    @Test
+    fun `a foreground outside the window replays the link at once`() {
+        tapDuringOutage()
+        backendRecovers()
+        background()
+        advance(120_000)
+
+        // Past the window the failure opened.
+        pending().backoff.elapsedMs = { Long.MAX_VALUE }
+        foreground(Intent())
+
+        pumpUntil("the replay right after foreground") { backend.count(payload, "recovered") >= 1 }
+        pumpUntil("the link to be delivered") { Grovs.openedLinkDetails?.link == link }
+    }
+
+    @Test
+    fun `a foreground inside the window waits it out`() {
+        tapDuringOutage()
+        backendRecovers()
+        background()
+        foreground(Intent())
+        pump()
+
+        assertEquals("nothing inside the window", 0, backend.count(payload, "recovered"))
+        advanceUntil("the replay once the window ends") { backend.count(payload, "recovered") >= 1 }
+        assertEquals("exactly one replay", 1, backend.count(payload, "recovered"))
+    }
+
+    @Test
+    fun `consecutive failures widen the window`() {
+        tapDuringOutage()
+        // Still down: the first replay (10s later) spends a second budget, then waits 20s.
+        advanceUntil("the second budget to be spent") { backend.count(payload) == budget * 2 }
+        // The last attempt's response crosses a real socket, so parking it lags the request count
+        // by a couple of dispatcher hops; wait for the park rather than asserting the instant after.
+        pumpUntil("the second failure to be parked") { pending().slot != null }
+        assertNotNull(pending().slot)
+
+        advance(19_000)
+        assertEquals("inside the doubled window", budget * 2, backend.count(payload))
+        advance(2_000)
+        pumpUntil("the third lookup to start after 20s") { backend.count(payload) >= budget * 2 + 1 }
+    }
 }
