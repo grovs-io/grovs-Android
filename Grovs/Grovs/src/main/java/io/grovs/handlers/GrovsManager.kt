@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.DeadObjectException
-import android.os.SystemClock
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
 import io.grovs.model.AppDetails
@@ -86,25 +85,9 @@ internal class GrovsManager(
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
     }
 
-    /// Why the last authentication failed. Decides which triggers may retry it on their own.
-    internal enum class AuthenticationFailure {
-        /// The phone had no network. Not the backend's fault, so the window does not grow.
-        OFFLINE,
-        /// A timeout, a dropped connection, a 429 or a 5xx. Worth trying again later.
-        RETRYABLE,
-        /// Any other 4xx, for example a bad API key. Only a foreground tries again.
-        REJECTED,
-    }
-
     companion object {
         private const val GROVS_PREFS_NAME = "grovs_prefs"
         private const val KEY_LAST_REFERRER = "last_referrer"
-
-        /// First backoff window after a failed authentication; doubles per consecutive failure.
-        private const val AUTHENTICATION_BACKOFF_BASE_MS = 10_000L
-        private const val AUTHENTICATION_BACKOFF_MAX_MS = 300_000L
-        /// Keeps the doubling from overflowing once the ceiling is reached anyway.
-        private const val AUTHENTICATION_BACKOFF_MAX_SHIFT = 16
     }
 
     internal val configuration: ConsentConfiguration = grovsContext.consent.currentConfiguration
@@ -169,65 +152,36 @@ internal class GrovsManager(
     @Volatile
     var authenticationState: AuthenticationState = AuthenticationState.UNAUTHENTICATED
 
-    /// Consecutive failed authentication attempts. Widens the window below.
-    private var authenticationFailureCount = 0
+    /// The window between automatic login retries. The members below keep every caller as it is.
+    internal val authenticationBackoff = RetryBackoff()
 
     /// Why the last authentication failed, or null after a success or before any attempt.
-    @Volatile
-    internal var lastAuthenticationFailure: AuthenticationFailure? = null
-        private set
+    internal val lastAuthenticationFailure: RequestFailure?
+        get() = authenticationBackoff.lastFailure
 
     /// Elapsed-time source the window is measured against. A seam so tests can move time.
-    internal var authenticationBackoffElapsedMs: () -> Long = { SystemClock.elapsedRealtime() }
-
-    /// When the next authentication attempt is allowed. Null means "now".
-    private var authenticationRetryAt: Long? = null
+    internal var authenticationBackoffElapsedMs: () -> Long
+        get() = authenticationBackoff.elapsedMs
+        set(value) { authenticationBackoff.elapsedMs = value }
 
     /**
      * Whether a foreground may spend a request on authentication. A bad API key fails on every
      * attempt and each one costs a request plus a user agent fetch, so repeated failures widen the
      * window to a 300s ceiling.
      */
-    internal fun canAttemptAuthentication(): Boolean {
-        val retryAt = authenticationRetryAt ?: return true
-        return authenticationBackoffElapsedMs() >= retryAt
-    }
+    internal fun canAttemptAuthentication(): Boolean = authenticationBackoff.canAttempt()
 
     /// Records an attempt's result. Null means it succeeded.
-    internal fun recordAuthenticationOutcome(failure: AuthenticationFailure?) {
-        lastAuthenticationFailure = failure
-        if (failure == null) {
-            authenticationFailureCount = 0
-            authenticationRetryAt = null
-            return
-        }
-        if (failure == AuthenticationFailure.OFFLINE) {
-            // Being offline says nothing about the backend or the key, so the window stays at its base.
-            authenticationRetryAt = authenticationBackoffElapsedMs() + AUTHENTICATION_BACKOFF_BASE_MS
-            return
-        }
-        authenticationFailureCount++
-        val shift = (authenticationFailureCount - 1).coerceAtMost(AUTHENTICATION_BACKOFF_MAX_SHIFT)
-        val delay = minOf(AUTHENTICATION_BACKOFF_BASE_MS shl shift, AUTHENTICATION_BACKOFF_MAX_MS)
-        authenticationRetryAt = authenticationBackoffElapsedMs() + delay
-    }
+    internal fun recordAuthenticationOutcome(failure: RequestFailure?) = authenticationBackoff.record(failure)
 
-    /**
-     * How long an automatic retry waits, or null when nothing should retry on its own: the last
-     * attempt succeeded, or the backend refused the request (a bad key never heals by waiting).
-     */
-    internal fun automaticRetryDelayMs(): Long? {
-        val failure = lastAuthenticationFailure ?: return null
-        if (failure == AuthenticationFailure.REJECTED) return null
-        val retryAt = authenticationRetryAt ?: return 0L
-        return (retryAt - authenticationBackoffElapsedMs()).coerceAtLeast(0L)
-    }
+    /// How long an automatic login retry waits, or null when nothing should retry on its own.
+    internal fun automaticRetryDelayMs(): Long? = authenticationBackoff.delayMs()
 
     /// A response the backend refused is final. A failure with no network is offline. Anything else may heal.
-    private fun failureKind(exception: Exception): AuthenticationFailure = when {
-        exception is HttpStatusException -> AuthenticationFailure.REJECTED
-        !isOnline() -> AuthenticationFailure.OFFLINE
-        else -> AuthenticationFailure.RETRYABLE
+    private fun failureKind(exception: Exception): RequestFailure = when {
+        exception is HttpStatusException -> RequestFailure.REJECTED
+        !isOnline() -> RequestFailure.OFFLINE
+        else -> RequestFailure.RETRYABLE
     }
 
     private fun isOnline(): Boolean = grovsContext.networkMonitor?.isOnline() ?: true
@@ -475,7 +429,7 @@ internal class GrovsManager(
         // bring the SDK back, instead of spending two retry budgets on a dead connection.
         if (!isOnline()) {
             DebugLogger.instance.log(LogLevel.INFO, "No network - authentication postponed")
-            recordAuthenticationOutcome(AuthenticationFailure.OFFLINE)
+            recordAuthenticationOutcome(RequestFailure.OFFLINE)
             return false
         }
 
@@ -509,7 +463,7 @@ internal class GrovsManager(
         if (deviceLookupFailure != null && !isOnline()) {
             DebugLogger.instance.log(LogLevel.INFO, "No network - authentication postponed")
             authenticationState = AuthenticationState.UNAUTHENTICATED
-            recordAuthenticationOutcome(AuthenticationFailure.OFFLINE)
+            recordAuthenticationOutcome(RequestFailure.OFFLINE)
             return false
         }
 

@@ -1,7 +1,7 @@
 package io.grovs.e2e
 
 import io.grovs.handlers.GrovsManager
-import io.grovs.handlers.GrovsManager.AuthenticationFailure
+import io.grovs.handlers.RequestFailure
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -20,7 +20,7 @@ class AuthenticationFailureKindE2ETest : DrivenBackendTestBase() {
         configure()
         pumpUntil("the launch to record its failure") { manager().lastAuthenticationFailure != null }
 
-        assertEquals(AuthenticationFailure.REJECTED, manager().lastAuthenticationFailure)
+        assertEquals(RequestFailure.REJECTED, manager().lastAuthenticationFailure)
         assertNull("a bad key never heals on its own", manager().automaticRetryDelayMs())
     }
 
@@ -31,7 +31,7 @@ class AuthenticationFailureKindE2ETest : DrivenBackendTestBase() {
         pumpUntil("the launch to send its first attempt") { backend.count(authenticate) >= 1 }
         advanceUntil("the launch budget to be spent") { manager().lastAuthenticationFailure != null }
 
-        assertEquals(AuthenticationFailure.RETRYABLE, manager().lastAuthenticationFailure)
+        assertEquals(RequestFailure.RETRYABLE, manager().lastAuthenticationFailure)
         assertNotNull(manager().automaticRetryDelayMs())
     }
 
@@ -44,10 +44,10 @@ class AuthenticationFailureKindE2ETest : DrivenBackendTestBase() {
         }
         manager().authenticationBackoffElapsedMs = { 0L }
 
-        repeat(3) { manager().recordAuthenticationOutcome(AuthenticationFailure.OFFLINE) }
+        repeat(3) { manager().recordAuthenticationOutcome(RequestFailure.OFFLINE) }
         assertEquals("being offline is not the backend's fault", 10_000L, manager().automaticRetryDelayMs())
 
-        repeat(3) { manager().recordAuthenticationOutcome(AuthenticationFailure.RETRYABLE) }
+        repeat(3) { manager().recordAuthenticationOutcome(RequestFailure.RETRYABLE) }
         assertEquals("10s, 20s, 40s", 40_000L, manager().automaticRetryDelayMs())
 
         manager().recordAuthenticationOutcome(null)

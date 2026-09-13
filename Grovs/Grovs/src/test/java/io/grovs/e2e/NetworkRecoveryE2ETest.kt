@@ -5,7 +5,7 @@ import android.content.ContextWrapper
 import android.net.ConnectivityManager
 import android.net.NetworkInfo
 import io.grovs.handlers.GrovsManager
-import io.grovs.handlers.GrovsManager.AuthenticationFailure
+import io.grovs.handlers.RequestFailure
 import io.grovs.service.GrovsService
 import io.grovs.utils.NetworkMonitor
 import org.junit.Assert.assertEquals
@@ -46,7 +46,7 @@ class NetworkRecoveryE2ETest : DrivenBackendTestBase() {
         configure()
         foreground()
         pumpUntil("the offline launch to be recorded") {
-            manager().lastAuthenticationFailure == AuthenticationFailure.OFFLINE
+            manager().lastAuthenticationFailure == RequestFailure.OFFLINE
         }
 
         networkReturns()
@@ -80,7 +80,7 @@ class NetworkRecoveryE2ETest : DrivenBackendTestBase() {
         goOffline()
         configure()
         pumpUntil("the offline launch to be recorded") {
-            manager().lastAuthenticationFailure == AuthenticationFailure.OFFLINE
+            manager().lastAuthenticationFailure == RequestFailure.OFFLINE
         }
 
         networkReturns()

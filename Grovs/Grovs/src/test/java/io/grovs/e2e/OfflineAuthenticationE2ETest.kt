@@ -4,7 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkInfo
 import io.grovs.handlers.GrovsManager
-import io.grovs.handlers.GrovsManager.AuthenticationFailure
+import io.grovs.handlers.RequestFailure
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -41,7 +41,7 @@ class OfflineAuthenticationE2ETest : DrivenBackendTestBase() {
 
         assertEquals("no device lookup while offline", 0, backend.count(device))
         assertEquals("no login while offline", 0, backend.count(authenticate))
-        assertEquals(AuthenticationFailure.OFFLINE, manager().lastAuthenticationFailure)
+        assertEquals(RequestFailure.OFFLINE, manager().lastAuthenticationFailure)
     }
 
     @Test
@@ -54,7 +54,7 @@ class OfflineAuthenticationE2ETest : DrivenBackendTestBase() {
         advance(20_000)
 
         assertEquals("login is skipped once the phone is offline", 0, backend.count(authenticate))
-        assertEquals(AuthenticationFailure.OFFLINE, manager().lastAuthenticationFailure)
+        assertEquals(RequestFailure.OFFLINE, manager().lastAuthenticationFailure)
         assertEquals(GrovsManager.AuthenticationState.UNAUTHENTICATED, manager().authenticationState)
     }
 

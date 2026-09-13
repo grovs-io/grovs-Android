@@ -26,6 +26,7 @@ import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
+import io.grovs.handlers.RequestFailure
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.handlers.launchOperation
 import io.grovs.handlers.runOperation
@@ -1305,7 +1306,7 @@ public class Grovs: ActivityProvider {
      */
     private fun onNetworkAvailable() {
         val manager = grovsManager ?: return
-        if (manager.lastAuthenticationFailure != GrovsManager.AuthenticationFailure.OFFLINE) return
+        if (manager.lastAuthenticationFailure != RequestFailure.OFFLINE) return
         // Main thread (NetworkMonitor posts here), so the main-thread-only timer may be touched.
         cancelAuthenticationRetry()
         retryAuthenticationIfStillNeeded(manager)
@@ -1337,7 +1338,7 @@ public class Grovs: ActivityProvider {
                         DebugLogger.instance.log(LogLevel.ERROR, "Authentication failed: ${e.message}")
                         // Otherwise lastAuthenticationFailure stays null or stale, and the automatic
                         // retry timer would read a delay of 0 and refire almost immediately.
-                        manager.recordAuthenticationOutcome(GrovsManager.AuthenticationFailure.RETRYABLE)
+                        manager.recordAuthenticationOutcome(RequestFailure.RETRYABLE)
                         false
                     }
                     if (response) {
