@@ -268,4 +268,30 @@ class PendingLinkRecoveryE2ETest : DrivenBackendTestBase() {
 
         assertEquals("only the timer retries a backend outage", 0, backend.count(payload, "recovered"))
     }
+
+    @Test
+    fun `a new configuration drops the pending link and a fresh tap waits in the login slot`() {
+        tapDuringOutage()
+        backendRecovers()
+
+        // A new configuration logs in again. Its login fails, so the SDK is logged out.
+        backend.failWithStatus(authenticate, code = 500, body = """{"error":"down"}""")
+        configure()
+        pumpUntil("the new configuration's login attempt to fail") { backend.count(authenticate, "recovered") >= 1 }
+        advance(60_000)
+        assertNull("a new configuration owns no pending link", pending().slot)
+
+        // Tapped while logged out: the intent parks in the login slot, never in the link slot.
+        foreground(tap())
+        advance(60_000)
+        assertNull("nothing looks up a link while logged out", pending().slot)
+        assertEquals("no lookup while logged out", 0, backend.count(payload, "recovered"))
+
+        backend.respond(authenticate, authOk)
+        manager().authenticationBackoffElapsedMs = { Long.MAX_VALUE }
+        foreground(Intent())
+        pumpUntil("login, then the parked link, then delivery") { Grovs.openedLinkDetails?.link == link }
+        assertEquals("one lookup, replayed from the login slot", 1, backend.count(payload, "recovered"))
+        assertNull(pending().slot)
+    }
 }
