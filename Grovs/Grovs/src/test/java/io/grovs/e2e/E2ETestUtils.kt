@@ -8,6 +8,7 @@ import androidx.fragment.app.FragmentManager
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.PendingLinkRetry
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -370,6 +371,11 @@ object E2ETestUtils {
                 errors.add("Failed to close GrovsManager: ${e.message}")
             }
             try {
+                (grovsField("pendingLink") as? PendingLinkRetry)?.dropIfStale()
+            } catch (e: Exception) {
+                errors.add("Failed to drop the pending link: ${e.message}")
+            }
+            try {
                 (grovsField("authenticationJob") as? Job)?.cancel()
             } catch (e: Exception) {
                 errors.add("Failed to cancel authenticationJob: ${e.message}")
@@ -637,6 +643,12 @@ object E2ETestUtils {
      * Get the current GrovsManager from the Grovs singleton via reflection.
      */
     fun getGrovsManager(): Any? = grovsField("grovsManager")
+
+    /**
+     * Reads the Grovs singleton's pending-link-retry slot via reflection, so tests can inspect it
+     * without exposing it on the public API.
+     */
+    internal fun getPendingLinkRetry(): PendingLinkRetry? = grovsField("pendingLink") as? PendingLinkRetry
 
     /**
      * Reads the Grovs singleton's parked-intent slot via reflection. Tests use this to capture a

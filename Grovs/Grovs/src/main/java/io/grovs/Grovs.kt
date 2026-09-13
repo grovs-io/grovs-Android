@@ -24,8 +24,10 @@ import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.ConsentTransition
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.IntentOutcome
 import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
+import io.grovs.handlers.PendingLinkRetry
 import io.grovs.handlers.RequestFailure
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.handlers.launchOperation
@@ -498,6 +500,14 @@ public class Grovs: ActivityProvider {
     @Volatile
     private var parkedIntent: ParkedIntent? = null
 
+    /// A tapped link whose lookup failed but may heal. Reads the current context and manager
+    /// lazily: both are replaced by configure() and, in tests, by reflection.
+    private val pendingLink = PendingLinkRetry(
+        context = { grovsContext },
+        currentManager = { grovsManager },
+        replay = { parked -> handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent) },
+    )
+
     private var grovsContext = GrovsContext()
 
     /// Written by checkConfiguration() on whatever thread calls it (setSDK and configure can run
@@ -646,6 +656,7 @@ public class Grovs: ActivityProvider {
             grovsContext.markBackgrounded()
             // No automatic retries from the background.
             cancelAuthenticationRetry()
+            pendingLink.onBackground()
             grovsManager?.onAppBackgrounded()
         }
     }
@@ -725,6 +736,7 @@ public class Grovs: ActivityProvider {
 
         // A new configuration never inherits the previous one's unresolved link.
         parkedIntent = null
+        mainHandler.post { pendingLink.dropIfStale() }
 
         // One network callback per process: a repeated configure() replaces it instead of adding
         // another, since Android caps callbacks per app and throws past the cap.
@@ -796,6 +808,7 @@ public class Grovs: ActivityProvider {
             }
             // Consent withdrawn: the link must not be resolved or delivered by a later grant.
             parkedIntent = null
+            mainHandler.post { pendingLink.dropIfStale() }
             return
         }
 
@@ -1371,6 +1384,8 @@ public class Grovs: ActivityProvider {
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - the intent is left unhandled")
             return
         }
+        // Tap order, taken before the work is queued so two taps in flight keep their order.
+        val sequence = pendingLink.nextSequence()
         // Not the launcher's lifecycleScope: a splash screen finishing or a rotation must not
         // cancel a lookup mid-flight, or the link is lost and the intent is already marked handled.
         grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
@@ -1416,6 +1431,36 @@ public class Grovs: ActivityProvider {
             // A lookup superseded by a newer link returns null; it must not forget the link that
             // was just delivered, or the 2-second duplicate-intent guard above stops working.
             result?.let { lastLinkMatched = it.link }
+            outcome.tappedLink?.let {
+                withContext(Dispatchers.Main) { recordTappedLinkOutcome(intent, delayEvents, cacheIntent, token, sequence, outcome) }
+            }
+        }
+    }
+
+    /**
+     * Main thread. A tapped link that got no answer but may still get one is kept; any other
+     * answer to a tapped link supersedes whatever older link was pending.
+     */
+    private fun recordTappedLinkOutcome(
+        intent: Intent,
+        delayEvents: Boolean,
+        cacheIntent: Boolean,
+        token: ConsentToken,
+        sequence: Long,
+        outcome: IntentOutcome,
+    ) {
+        val failure = outcome.failure
+        if (failure != null && failure != RequestFailure.REJECTED) {
+            if (!isConsented(token)) {
+                DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not keeping the link")
+                return
+            }
+            pendingLink.park(
+                PendingLinkRetry.Parked(intent, delayEvents, cacheIntent, token, grovsContext.sessionId, sequence),
+                failure,
+            )
+        } else {
+            pendingLink.clear(sequence)
         }
     }
 
