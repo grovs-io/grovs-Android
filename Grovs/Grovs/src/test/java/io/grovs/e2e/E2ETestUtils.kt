@@ -371,9 +371,9 @@ object E2ETestUtils {
                 errors.add("Failed to close GrovsManager: ${e.message}")
             }
             try {
-                (grovsField("pendingLink") as? PendingLinkRetry)?.dropIfStale()
+                (grovsField("pendingLink") as? PendingLinkRetry)?.reset()
             } catch (e: Exception) {
-                errors.add("Failed to drop the pending link: ${e.message}")
+                errors.add("Failed to reset the pending link: ${e.message}")
             }
             try {
                 (grovsField("authenticationJob") as? Job)?.cancel()

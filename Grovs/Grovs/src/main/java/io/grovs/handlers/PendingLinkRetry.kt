@@ -151,6 +151,11 @@ internal class PendingLinkRetry(
 
     private fun drop(reason: String) {
         DebugLogger.instance.log(LogLevel.INFO, "Dropping the pending link: $reason")
+        reset()
+    }
+
+    /** Unconditionally forgets whatever is parked: the slot, its backoff, and its timer. */
+    internal fun reset() {
         slot = null
         backoff.record(null)
         cancelTimer()

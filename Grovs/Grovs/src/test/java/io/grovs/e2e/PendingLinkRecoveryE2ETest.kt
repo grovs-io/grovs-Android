@@ -52,8 +52,8 @@ class PendingLinkRecoveryE2ETest : DrivenBackendTestBase() {
         backendRecovers()
 
         advanceUntil("the pending link to be delivered by the timer") { Grovs.openedLinkDetails?.link == link }
-        // Delivery happens before the outcome is recorded, one dispatch hop later: pump once more
-        // so the slot is cleared and the retry window is reset before this test tears down.
+        // Delivery happens before the replay's own outcome is recorded, one dispatch hop later:
+        // pump once more so that outcome lands before the slot-is-empty assertion below checks it.
         pump()
 
         assertEquals("one replay", 1, backend.count(payload, "recovered"))
