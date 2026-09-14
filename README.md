@@ -35,6 +35,7 @@ The Grovs Android SDK provides deep linking, app links, link generation, in-app 
 - **Smart link generation** — create trackable links with metadata, custom redirects, and UTM parameters
 - **In-app messaging** — display messages and announcements from the Grovs dashboard
 - **Push notifications** — receive push notifications for dashboard-sent messages via Firebase Cloud Messaging
+- **Analytics** — track custom events, automatic and manual screen views, and Jetpack Navigation destinations
 - **Revenue tracking** — log Google Play Billing and custom purchases with automatic attribution
 - **User identity** — attach user IDs and attributes for analytics and segmentation
 - **Self-hosting support** — point the SDK at your own backend
@@ -236,7 +237,7 @@ Screen views are tracked **automatically** for Activities and Fragments. When an
 To disable automatic screen tracking:
 
 ```kotlin
-Grovs.configure(this, "your-api-key", useTestEnvironment = false, autoTrackScreenViews = false)
+Grovs.configure(this, "your-api-key", useTestEnvironment = false, baseURL = null, autoTrackScreenViews = false)
 ```
 
 > **Upgrading from 1.1.x:** auto screen tracking is **on by default** in 1.2.0. Apps that upgrade will start emitting `screen_view` events without any code change. Pass `autoTrackScreenViews = false` to `configure()` to keep the previous behavior.
@@ -284,7 +285,7 @@ Configuring with `enabled = false` starts no requests, reads no clipboard or dev
 
 `setSDK(false)` immediately rejects new collection and invalidates outstanding SDK operations, including their retries and late results. Requests already transmitted may still reach the server. Local writes already admitted can finish safely; this includes acknowledged-event removal, launch bookkeeping, and closing the enabled portion of an engagement interval. Time spent disabled is excluded from engagement. Queued events retain their identity and resume delivery after enable, subject to the existing retention limits. Attribute and alias setters retain their latest desired values while disabled and synchronize when permitted.
 
-Enabling does **not** replay a launch deep link or a cancelled link/notification request. Forward a later `Grovs.onStart(activity)` or `Grovs.onNewIntent(intent, activity)` explicitly to resolve a link. Revoked link-generation/details requests complete with the existing method-specific error; unread-count requests return `null`. Listener completions use the main thread, while caller/lifecycle cancellation still suppresses delivery. Manual message display returns `false` while disabled; existing message UI can remain visible, but its requests and stale updates are blocked.
+Enabling does **not** replay a launch deep link or a cancelled link/notification request. Forward a later `Grovs.onStart(activity)` or `Grovs.onNewIntent(intent, activity)` explicitly to resolve a link. Revoked link-generation/details requests complete with the existing method-specific error; unread-count requests return `null`. Listener completions use the main thread, while caller/lifecycle cancellation still suppresses delivery. Manual message display is skipped while disabled; existing message UI can remain visible, but its requests and stale updates are blocked.
 
 Pass the current consent state through `configure`'s `enabled` parameter on every launch, and call `setSDK` only after `configure` — the shorter `configure` overloads reset the flag to `true`, so a `setSDK(false)` made before `configure` would be overwritten by the next launch's `configure` call.
 
@@ -336,7 +337,7 @@ lifecycleScope.launch {
 }
 ```
 
-To override the project's copy-to-clipboard setting for a single link (used for clipboard-assisted deferred deep linking), pass the platform flags. `null` inherits the project default:
+To override the project's copy-to-clipboard setting for a single link (used for clipboard-assisted deferred deep linking), pass the platform flags. `null` inherits the project default. The `showPreviewIos` and `showPreviewAndroid` flags work the same way for the link preview page:
 
 ```kotlin
 Grovs.generateLink(
@@ -529,7 +530,6 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 
 | Property | Type | Description |
 |---|---|---|
-| `useTestEnvironment` | `Boolean` | Enable or disable test environment |
 | `identifier` | `String?` | User ID shown in dashboard and reports |
 | `attributes` | `Map<String, Any>?` | User attributes for analytics |
 | `openedLinkDetails` | `DeeplinkDetails?` | Kotlin Flow emitting deep link details |
@@ -547,8 +547,14 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 | `generateLink(...)` | Generate a smart link (callback or coroutine) |
 | `setOnDeeplinkReceivedListener(activity, listener)` | Register deep link listener |
 | `linkDetails(path, ...)` | Get details for a link path (callback or coroutine) |
+| `track(name, properties, tags)` | Track a custom analytics event |
+| `setGlobalTags(tags)` | Tags merged onto every subsequent event |
+| `trackScreenView(screenName, properties)` | Track a screen view manually |
+| `trackNavigation(navController)` | Track Jetpack Navigation destinations |
+| `setScreenAliases(aliases)` | Friendly screen names for the dashboard |
 | `displayMessagesFragment(onDismissed)` | Show messages modal fragment |
-| `numberOfUnreadMessages()` | Get unread message count (suspend) |
+| `setOnAutomaticNotificationsListener(listener)` | Get notified when an automatically displayed message closes |
+| `numberOfUnreadMessages(...)` | Get unread message count (callback or coroutine) |
 | `logInAppPurchase(originalJson)` | Log a Google Play Billing purchase |
 | `logCustomPurchase(type, priceInCents, currency, productId, startDate)` | Log a custom purchase |
 

@@ -1,7 +1,7 @@
 # Real-world SDK regression flows
 
 These tests use the existing JUnit 4/Robolectric, MockWebServer, coroutine-test,
-and AndroidJUnitRunner dependencies. Production SDK code is unchanged.
+and AndroidJUnitRunner dependencies.
 
 | Flow | Coverage | Required outcome |
 | --- | --- | --- |
