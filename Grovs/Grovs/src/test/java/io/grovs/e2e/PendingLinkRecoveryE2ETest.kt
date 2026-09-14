@@ -200,8 +200,7 @@ class PendingLinkRecoveryE2ETest : DrivenBackendTestBase() {
         foreground(launcher().intent)
         pumpUntil("the rotation's lookup to start") { backend.count(payload) >= budget + 1 }
         advanceUntil("its budget to be spent") { backend.count(payload) == budget * 2 }
-        pump()
-        assertNotNull("the link is still pending", pending().slot)
+        pumpUntil("the rotation's failure to be parked") { pending().slot != null }
 
         backendRecovers()
         advanceUntil("the timer to replay the pending link") { Grovs.openedLinkDetails?.link == link }
