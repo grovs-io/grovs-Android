@@ -31,14 +31,14 @@ The Grovs Android SDK provides deep linking, app links, link generation, in-app 
 
 ## Features
 
-- **Deep linking & app links** — route users to the right in-app screen, even after install
-- **Smart link generation** — create trackable links with metadata, custom redirects, and UTM parameters
-- **In-app messaging** — display messages and announcements from the Grovs dashboard
-- **Push notifications** — receive push notifications for dashboard-sent messages via Firebase Cloud Messaging
-- **Analytics** — track custom events, automatic and manual screen views, and Jetpack Navigation destinations
-- **Revenue tracking** — log Google Play Billing and custom purchases with automatic attribution
-- **User identity** — attach user IDs and attributes for analytics and segmentation
-- **Self-hosting support** — point the SDK at your own backend
+- **Deep linking & app links**: route users to the right in-app screen, even after install
+- **Smart link generation**: create trackable links with metadata, custom redirects, and UTM parameters
+- **In-app messaging**: display messages and announcements from the Grovs dashboard
+- **Push notifications**: receive push notifications for dashboard-sent messages via Firebase Cloud Messaging
+- **Analytics**: track custom events, automatic and manual screen views, and Jetpack Navigation destinations
+- **Revenue tracking**: log Google Play Billing and custom purchases with automatic attribution
+- **User identity**: attach user IDs and attributes for analytics and segmentation
+- **Self-hosting support**: point the SDK at your own backend
 
 ## Requirements
 
@@ -82,7 +82,7 @@ class MyApplication : Application() {
 }
 ```
 
-For self-hosted backends, pass the `baseURL` parameter (domain only — the SDK appends the API path):
+For self-hosted backends, pass the `baseURL` parameter (domain only, the SDK appends the API path):
 
 ```kotlin
 Grovs.configure(this, "your-api-key", useTestEnvironment = false, baseURL = "https://your-domain.com")
@@ -228,11 +228,11 @@ Merged onto every subsequently tracked event, up to the combined 20-tag cap.
 
 ### Screen views
 
-Screen views are tracked **automatically** for Activities and Fragments. When an Activity hosts Fragments, only the **Fragment is reported** (the host Activity's screen view is suppressed) — this matches iOS, which filters out container view controllers. Compose destinations are NOT auto-tracked (the SDK has no Compose dependency) — track those manually.
+Screen views are tracked **automatically** for Activities and Fragments. When an Activity hosts Fragments, only the **Fragment is reported** (the host Activity's screen view is suppressed). This matches iOS, which filters out container view controllers. Compose destinations are NOT auto-tracked because the SDK has no Compose dependency, so track those manually.
 
-**Modals** (`DialogFragment`, `BottomSheetDialogFragment`) are treated as overlays, not screens, so they are **not** auto-tracked — the screen underneath stays the current screen. If you want a modal reported as a screen, call `Grovs.trackScreenView("...")` when it opens.
+**Modals** (`DialogFragment`, `BottomSheetDialogFragment`) are treated as overlays, not screens, so they are **not** auto-tracked. The screen underneath stays the current screen. If you want a modal reported as a screen, call `Grovs.trackScreenView("...")` when it opens.
 
-> **Tab switching:** tabs driven by the Navigation component, `ViewPager2`, `setMaxLifecycle`, or `replace()` transactions are tracked automatically (they resume the destination fragment). The legacy `hide()`/`show()` tab pattern does **not** change fragment lifecycle, so those switches are not auto-tracked — use `trackNavigation` (below), `setMaxLifecycle`, or a manual `trackScreenView` in your tab handler.
+> **Tab switching:** tabs driven by the Navigation component, `ViewPager2`, `setMaxLifecycle`, or `replace()` transactions are tracked automatically (they resume the destination fragment). The legacy `hide()`/`show()` tab pattern does **not** change fragment lifecycle, so those switches are not auto-tracked. Use `trackNavigation` (below), `setMaxLifecycle`, or a manual `trackScreenView` in your tab handler.
 
 To disable automatic screen tracking:
 
@@ -242,7 +242,7 @@ Grovs.configure(this, "your-api-key", useTestEnvironment = false, baseURL = null
 
 > **Upgrading from 1.1.x:** auto screen tracking is **on by default** in 3.0.0. Apps that upgrade will start emitting `screen_view` events without any code change. Pass `autoTrackScreenViews = false` to `configure()` to keep the previous behavior.
 
-Track a screen manually — needed for Compose destinations, which the SDK cannot observe:
+Track a screen manually. This is needed for Compose destinations, which the SDK cannot observe:
 
 ```kotlin
 Grovs.trackScreenView("Checkout", properties = mapOf("step" to 2))
@@ -250,7 +250,7 @@ Grovs.trackScreenView("Checkout", properties = mapOf("step" to 2))
 
 #### Jetpack Navigation
 
-For apps using Jetpack Navigation (Navigation-Compose or route-based graphs), hand the SDK your `NavController` and every destination change is tracked automatically — including bottom-navigation tabs, navigation rails, and Compose destinations that the lifecycle-based tracker cannot see:
+For apps using Jetpack Navigation (Navigation-Compose or route-based graphs), hand the SDK your `NavController` and every destination change is tracked automatically, including bottom-navigation tabs, navigation rails, and Compose destinations that the lifecycle-based tracker cannot see:
 
 ```kotlin
 Grovs.trackNavigation(navController)
@@ -287,7 +287,7 @@ Configuring with `enabled = false` starts no requests, reads no clipboard or dev
 
 Enabling does **not** replay a launch deep link or a cancelled link/notification request. Forward a later `Grovs.onStart(activity)` or `Grovs.onNewIntent(intent, activity)` explicitly to resolve a link. Revoked link-generation/details requests complete with the existing method-specific error; unread-count requests return `null`. Listener completions use the main thread, while caller/lifecycle cancellation still suppresses delivery. Manual message display is skipped while disabled; existing message UI can remain visible, but its requests and stale updates are blocked.
 
-Pass the current consent state through `configure`'s `enabled` parameter on every launch, and call `setSDK` only after `configure` — the shorter `configure` overloads reset the flag to `true`, so a `setSDK(false)` made before `configure` would be overwritten by the next launch's `configure` call.
+Pass the current consent state through `configure`'s `enabled` parameter on every launch, and call `setSDK` only after `configure`. The shorter `configure` overloads reset the flag to `true`, so a `setSDK(false)` made before `configure` would be overwritten by the next launch's `configure` call.
 
 ## Link Generation
 
@@ -401,7 +401,7 @@ Grovs.generateLink(
 
 To receive push notifications for messages sent from the Grovs dashboard:
 
-**1. Add Firebase Cloud Messaging** — If your app doesn't already use Firebase, add your app in the [Firebase Console](https://console.firebase.google.com), download `google-services.json`, and add the dependencies:
+**1. Add Firebase Cloud Messaging.** If your app doesn't already use Firebase, add your app in the [Firebase Console](https://console.firebase.google.com), download `google-services.json`, and add the dependencies:
 
 ```groovy
 // project-level build.gradle
@@ -420,7 +420,7 @@ dependencies {
 }
 ```
 
-**2. Upload your Firebase credentials** — In the [Firebase Console](https://console.firebase.google.com), go to **Project Settings → Service Accounts** and generate a new private key. Upload the JSON key file and enter your Firebase Project ID in the [Grovs dashboard](https://app.grovs.io) under **Android Setup → Push Notifications**.
+**2. Upload your Firebase credentials.** In the [Firebase Console](https://console.firebase.google.com), go to **Project Settings → Service Accounts** and generate a new private key. Upload the JSON key file and enter your Firebase Project ID in the [Grovs dashboard](https://app.grovs.io) under **Android Setup → Push Notifications**.
 
 **3. Request notification permission** (Android 13+):
 
@@ -494,7 +494,7 @@ lifecycleScope.launch {
 ### Setup
 
 1. Enable revenue tracking in the [Grovs dashboard](https://app.grovs.io) under **Settings → Revenue Tracking**
-2. Configure Google Play Real-Time Developer Notifications — the Grovs dashboard provides an automated setup script under **Developers → Android Setup → Revenue**, or you can configure Pub/Sub manually
+2. Configure Google Play Real-Time Developer Notifications. The Grovs dashboard provides an automated setup script under **Developers → Android Setup → Revenue**, or you can configure Pub/Sub manually
 
 ### Google Play purchases
 
@@ -566,10 +566,10 @@ A demo project is available at [grovs-io/grovs-android-example-app](https://gith
 
 ## Setup Guides
 
-- [Adding a Gradle Dependency](https://docs.grovs.io/docs/how-to-guides/android/gradle) — add the SDK to your project
-- [Getting the Package Name](https://docs.grovs.io/docs/how-to-guides/android/package-name) — find your application ID
-- [Getting the SHA-256 Fingerprint](https://docs.grovs.io/docs/how-to-guides/android/sha256-fingerprint) — get your signing certificate fingerprint
-- [Adding an Intent Filter](https://docs.grovs.io/docs/how-to-guides/android/intent-filter) — set up deep link intent filters
+- [Adding a Gradle Dependency](https://docs.grovs.io/docs/how-to-guides/android/gradle): add the SDK to your project
+- [Getting the Package Name](https://docs.grovs.io/docs/how-to-guides/android/package-name): find your application ID
+- [Getting the SHA-256 Fingerprint](https://docs.grovs.io/docs/how-to-guides/android/sha256-fingerprint): get your signing certificate fingerprint
+- [Adding an Intent Filter](https://docs.grovs.io/docs/how-to-guides/android/intent-filter): set up deep link intent filters
 
 ## Migration Guides
 
