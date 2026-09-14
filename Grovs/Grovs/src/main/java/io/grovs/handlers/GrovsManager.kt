@@ -116,10 +116,26 @@ internal class GrovsManager(
     /// A link lookup in flight. `generation` is the number of links committed when it started; a
     /// later commit makes its result stale. `done` completes when the call exits, so fingerprint
     /// results can wait for a direct link the user opened (which takes precedence) to settle.
-    private class Lookup(val generation: Int, val sessionId: String, val explicit: Boolean, val token: ConsentToken) {
+    /// `sequence` is the tap order of the link being looked up, and a lookup with
+    /// `yieldsToNewerTaps` set is a replay: it goes stale as soon as a newer tap starts.
+    private class Lookup(
+        val generation: Int,
+        val sessionId: String,
+        val explicit: Boolean,
+        val token: ConsentToken,
+        val sequence: Long,
+        val yieldsToNewerTaps: Boolean,
+    ) {
         val done: CompletableJob = Job()
         var committed = false
     }
+
+    /// Sequence of the newest tapped link whose lookup has started. A replay of an older tap yields
+    /// to it. Written under [resolutionMutex] on the serial dispatcher, where [isCurrent] reads it;
+    /// volatile for the main thread, which reads it before replaying a pending link.
+    @Volatile
+    internal var latestTapSequence = 0L
+        private set
 
     /// Every state below is guarded by [resolutionMutex]. [close] never touches it: it only flips
     /// [isClosed], which every lookup re-checks before committing.
@@ -266,7 +282,10 @@ internal class GrovsManager(
         eventsManager.flush()
     }
 
-    private fun isCurrent(lookup: Lookup): Boolean = !isClosed && committedLinks == lookup.generation && grovsContext.consent.isCurrent(lookup.token)
+    private fun isCurrent(lookup: Lookup): Boolean =
+        !isClosed && committedLinks == lookup.generation &&
+            !(lookup.yieldsToNewerTaps && lookup.sequence < latestTapSequence) &&
+            grovsContext.consent.isCurrent(lookup.token)
 
     private fun ownsHold(token: ConsentToken): Boolean = holdToken?.let {
         it.configuration === token.configuration && it.generation == token.generation
@@ -584,16 +603,31 @@ internal class GrovsManager(
         customEventsManager.close()
     }
 
-    suspend fun handleIntent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean = false): IntentOutcome {
+    suspend fun handleIntent(
+        intent: Intent,
+        delayEvents: Boolean,
+        cacheIntent: Boolean = false,
+        sequence: Long = 0L,
+        yieldToNewerTaps: Boolean = false,
+    ): IntentOutcome {
         val token = grovsContext.consent.workToken(configuration) ?: return IntentOutcome.NOTHING
         return try {
-            grovsContext.consent.runOperation(token) { handleIntentUnderConsent(intent, delayEvents, cacheIntent, token) }
+            grovsContext.consent.runOperation(token) {
+                handleIntentUnderConsent(intent, delayEvents, cacheIntent, token, sequence, yieldToNewerTaps)
+            }
         } catch (_: ConsentRevokedException) {
             IntentOutcome.NOTHING
         }
     }
 
-    private suspend fun handleIntentUnderConsent(intent: Intent, delayEvents: Boolean, cacheIntent: Boolean, token: ConsentToken): IntentOutcome {
+    private suspend fun handleIntentUnderConsent(
+        intent: Intent,
+        delayEvents: Boolean,
+        cacheIntent: Boolean,
+        token: ConsentToken,
+        sequence: Long,
+        yieldToNewerTaps: Boolean,
+    ): IntentOutcome {
         // Consent was admitted by handleIntent and is current here: runOperation checks [token]
         // before this body runs.
         if (authenticationState != AuthenticationState.AUTHENTICATED) {
@@ -617,8 +651,20 @@ internal class GrovsManager(
             explicitLink = if (repeatedIntent) null else intent.data?.toString()
             // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.
             if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
-            Lookup(committedLinks, grovsContext.sessionId, explicit = explicitLink != null, token = token).also {
-                if (it.explicit) explicitLookups.add(it) else sharedLookup = it
+            Lookup(
+                committedLinks,
+                grovsContext.sessionId,
+                explicit = explicitLink != null,
+                token = token,
+                sequence = sequence,
+                yieldsToNewerTaps = yieldToNewerTaps,
+            ).also {
+                if (it.explicit) {
+                    latestTapSequence = maxOf(latestTapSequence, sequence)
+                    explicitLookups.add(it)
+                } else {
+                    sharedLookup = it
+                }
                 lookupsInFlight.add(it)
                 armHold(token)
                 if (it.explicit) {

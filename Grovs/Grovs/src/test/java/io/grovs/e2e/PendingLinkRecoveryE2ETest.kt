@@ -172,6 +172,24 @@ class PendingLinkRecoveryE2ETest : DrivenBackendTestBase() {
     }
 
     @Test
+    fun `a link tapped on the foreground that replays the pending one wins over the replay`() {
+        tapDuringOutage()
+        backend.respond(payload, """{"link":"$other","data":{}}""")
+        backend.phase = "recovered"
+        val delivered = mutableListOf<String?>()
+        Grovs.setOnDeeplinkReceivedListener(null) { delivered += it.link }
+        // The window has elapsed, so the foreground would replay the pending link at once.
+        pending().backoff.elapsedMs = { Long.MAX_VALUE }
+
+        foreground(tap(other))
+        pumpUntil("the newer link to be delivered") { Grovs.openedLinkDetails?.link == other }
+        advance(30_000)
+
+        assertEquals("only the link the user tapped last is delivered", listOf(other), delivered)
+        assertNull(pending().slot)
+    }
+
+    @Test
     fun `a rotation during the outage looks the same link up again and keeps it pending`() {
         tapDuringOutage()
 

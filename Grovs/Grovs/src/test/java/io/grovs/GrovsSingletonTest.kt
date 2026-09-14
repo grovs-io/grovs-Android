@@ -429,7 +429,7 @@ class GrovsSingletonTest {
         val gate = CompletableDeferred<Unit>()
         val mockManager = mockk<GrovsManager>(relaxed = true)
         every { mockManager.authenticationState } returns GrovsManager.AuthenticationState.AUTHENTICATED
-        coEvery { mockManager.handleIntent(any(), any(), any()) } coAnswers {
+        coEvery { mockManager.handleIntent(any(), any(), any(), any(), any()) } coAnswers {
             gate.await()
             IntentOutcome(details = details, tappedLink = link, failure = null)
         }
@@ -445,7 +445,7 @@ class GrovsSingletonTest {
         Grovs.onStart(activity)
         // lifecycleScope registers its lifecycle observer on Main, which this test drives by hand.
         testDispatcher.scheduler.advanceUntilIdle()
-        coVerify(timeout = 2_000) { mockManager.handleIntent(any(), any(), any()) }
+        coVerify(timeout = 2_000) { mockManager.handleIntent(any(), any(), any(), any(), any()) }
 
         // A splash screen finishing, or a rotation, destroys the launcher while the lookup is in flight.
         controller.pause().stop().destroy()

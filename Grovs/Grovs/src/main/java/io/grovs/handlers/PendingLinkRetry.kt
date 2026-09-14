@@ -45,11 +45,15 @@ internal class PendingLinkRetry(
 
     private var timer: Job? = null
 
+    /// Sequence of the newest final answer or replay; an older tap can never park after it.
+    private var supersededSequence = 0L
+
     /** Taken by every intent entering the intent path, before it is handled. */
     fun nextSequence(): Long = sequences.incrementAndGet()
 
     /** A tapped link got no answer that may heal. Replaces an older pending link, never a newer one. */
     fun park(parked: Parked, failure: RequestFailure) {
+        if (parked.sequence < supersededSequence) return
         slot?.let { if (parked.sequence < it.sequence) return }
         DebugLogger.instance.log(LogLevel.INFO, "Link lookup failed and may heal - keeping the link for a later retry")
         slot = parked
@@ -60,11 +64,13 @@ internal class PendingLinkRetry(
 
     /** A tapped link got its final answer. A pending link it is newer than is superseded by it. */
     fun clear(sequence: Long) {
+        val newest = sequence >= supersededSequence
+        supersededSequence = maxOf(supersededSequence, sequence)
         val parked = slot ?: run {
-            // Nothing parked: this final answer either needed no parking, or is the success of the
-            // link that was just replayed (its slot was cleared before the replay ran). Either way,
-            // no failure is left pending, so the retry window resets.
-            backoff.record(null)
+            // Nothing parked: the newest tapped link got its final answer, which may be the success
+            // of the link just replayed. No failure is left pending, so the retry window resets. An
+            // older tap's answer changes nothing.
+            if (newest) backoff.record(null)
             return
         }
         if (parked.sequence > sequence) return
@@ -77,7 +83,11 @@ internal class PendingLinkRetry(
      * order, because a link parked under a later grant has a current token and survives.
      */
     fun dropIfStale() {
-        val parked = slot ?: return
+        val parked = slot ?: run {
+            // Nothing parked, but the previous grant's failures must not widen the next grant's window.
+            backoff.record(null)
+            return
+        }
         if (!context().consent.isCurrent(parked.token)) drop("consent withdrawn")
     }
 
@@ -123,8 +133,13 @@ internal class PendingLinkRetry(
             drop("session ended")
             return
         }
+        if (parked.sequence < manager.latestTapSequence) {
+            drop("a newer link was tapped")
+            return
+        }
         // Taken before replaying, so a lookup that fails again parks itself instead of looping here.
         slot = null
+        supersededSequence = maxOf(supersededSequence, parked.sequence)
         replay(parked)
     }
 
@@ -151,17 +166,20 @@ internal class PendingLinkRetry(
 
     private fun drop(reason: String) {
         DebugLogger.instance.log(LogLevel.INFO, "Dropping the pending link: $reason")
-        reset()
+        slot = null
+        backoff.record(null)
+        cancelTimer()
     }
 
     /**
      * Returns the retry to its initial state: the slot, its backoff (including the test clock
-     * seam), and its timer.
+     * seam), its timer and its tap order.
      */
     internal fun reset() {
         slot = null
         backoff.record(null)
         backoff.resetClock()
         cancelTimer()
+        supersededSequence = 0L
     }
 }

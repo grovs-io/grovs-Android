@@ -501,11 +501,18 @@ public class Grovs: ActivityProvider {
     private var parkedIntent: ParkedIntent? = null
 
     /// A tapped link whose lookup failed but may heal. Reads the current context and manager
-    /// lazily: both are replaced by configure() and, in tests, by reflection.
+    /// lazily: configure() replaces the manager, and tests replace the context.
     private val pendingLink = PendingLinkRetry(
         context = { grovsContext },
         currentManager = { grovsManager },
-        replay = { parked -> handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent) },
+        replay = { parked ->
+            handleIntent(
+                parked.intent,
+                delayEvents = parked.delayEvents,
+                cacheIntent = parked.cacheIntent,
+                replaying = parked,
+            )
+        },
     )
 
     private var grovsContext = GrovsContext()
@@ -1375,7 +1382,12 @@ public class Grovs: ActivityProvider {
         }
     }
 
-    private fun handleIntent(intent: Intent?, delayEvents: Boolean, cacheIntent: Boolean = false) {
+    private fun handleIntent(
+        intent: Intent?,
+        delayEvents: Boolean,
+        cacheIntent: Boolean = false,
+        replaying: PendingLinkRetry.Parked? = null,
+    ) {
         val intent = intent ?: defaultIntent
         val manager = grovsManager ?: run {
             DebugLogger.instance.log(LogLevel.ERROR,"The SDK manager is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
@@ -1388,8 +1400,9 @@ public class Grovs: ActivityProvider {
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - the intent is left unhandled")
             return
         }
-        // Tap order, taken before the work is queued so two taps in flight keep their order.
-        val sequence = pendingLink.nextSequence()
+        // Tap order, taken before the work is queued so two taps in flight keep their order. A
+        // replay keeps the sequence of the tap it stands for.
+        val sequence = replaying?.sequence ?: pendingLink.nextSequence()
         // Not the launcher's lifecycleScope: a splash screen finishing or a rotation must not
         // cancel a lookup mid-flight, or the link is lost and the intent is already marked handled.
         grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
@@ -1408,7 +1421,13 @@ public class Grovs: ActivityProvider {
                 parkedIntent = ParkedIntent(intent, delayEvents, cacheIntent, token)
                 return@launchOperation
             }
-            val outcome = manager.handleIntent(intent, delayEvents = delayEvents, cacheIntent = cacheIntent)
+            val outcome = manager.handleIntent(
+                intent,
+                delayEvents = delayEvents,
+                cacheIntent = cacheIntent,
+                sequence = sequence,
+                yieldToNewerTaps = replaying != null,
+            )
             val result = outcome.details
             result?.let { deeplinkDetails ->
                 deeplinkDetails.link?.let { link ->

@@ -18,7 +18,9 @@ import io.grovs.utils.LSResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -83,7 +85,7 @@ class IntentOutcomeTest {
     }
 
     @Test
-    fun `a spent budget on a 5xx is retryable and leaves the intent unconsumed`() = runTest {
+    fun `a 5xx is retryable and leaves the intent unconsumed`() = runTest {
         val rig = Rig()
         coEvery { rig.service.payloadWithLinkFor(any()) } returns
             LSResult.Error(RetryableHttpException(503, "Fetching payload - failed (503)."))
@@ -126,5 +128,65 @@ class IntentOutcomeTest {
         assertNull(second.tappedLink)
         coVerify(exactly = 1) { rig.service.payloadWithLinkFor(any()) }
         coVerify(exactly = 1) { rig.service.payloadFor(any()) }
+    }
+
+    @Test
+    fun `a tapped link superseded by a newer commit reports no tapped link`() = runTest {
+        val rig = Rig()
+        val older = "https://demo.sqd.link/older"
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == older }) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(older, null, null))
+        }
+        val first = async {
+            rig.manager.handleIntent(Intent(Intent.ACTION_VIEW, Uri.parse(older)), delayEvents = false, sequence = 1)
+        }
+        started.await()
+        val second = rig.manager.handleIntent(tap(), delayEvents = false, sequence = 2)
+        assertEquals(tapped, second.details?.link)
+        gate.complete(Unit)
+
+        val outcome = first.await()
+        assertNull("stale to the newer commit", outcome.details)
+        assertNull("must never touch the pending slot", outcome.tappedLink)
+        assertNull(outcome.failure)
+    }
+
+    @Test
+    fun `a replayed lookup yields to a newer tap and reports nothing`() = runTest {
+        val rig = Rig()
+        val older = "https://demo.sqd.link/older"
+        val gate = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == older }) } coAnswers {
+            started.complete(Unit)
+            gate.await()
+            LSResult.Success(DeeplinkDetails(older, null, null))
+        }
+        coEvery { rig.service.payloadWithLinkFor(match { it.url == tapped }) } returns
+            LSResult.Error(RetryableHttpException(503, "Fetching payload - failed (503)."))
+
+        val replay = async {
+            rig.manager.handleIntent(
+                Intent(Intent.ACTION_VIEW, Uri.parse(older)),
+                delayEvents = false,
+                sequence = 1,
+                yieldToNewerTaps = true,
+            )
+        }
+        started.await()
+        // The newer tap starts, and fails, while the replay is still waiting on the backend.
+        val newer = rig.manager.handleIntent(tap(), delayEvents = false, sequence = 2)
+        assertEquals(tapped, newer.tappedLink)
+        assertEquals(RequestFailure.RETRYABLE, newer.failure)
+        gate.complete(Unit)
+
+        val outcome = replay.await()
+        assertNull("the replay yields even though its answer was a success", outcome.details)
+        assertNull(outcome.tappedLink)
+        assertEquals(2L, rig.manager.latestTapSequence)
     }
 }
