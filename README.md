@@ -54,7 +54,7 @@ Add the Grovs dependency to your app-level `build.gradle`:
 
 ```groovy
 dependencies {
-    implementation("io.grovs:Grovs:1.2.0")
+    implementation("io.grovs:Grovs:3.0.0")
 }
 ```
 
@@ -240,7 +240,7 @@ To disable automatic screen tracking:
 Grovs.configure(this, "your-api-key", useTestEnvironment = false, baseURL = null, autoTrackScreenViews = false)
 ```
 
-> **Upgrading from 1.1.x:** auto screen tracking is **on by default** in 1.2.0. Apps that upgrade will start emitting `screen_view` events without any code change. Pass `autoTrackScreenViews = false` to `configure()` to keep the previous behavior.
+> **Upgrading from 1.1.x:** auto screen tracking is **on by default** in 3.0.0. Apps that upgrade will start emitting `screen_view` events without any code change. Pass `autoTrackScreenViews = false` to `configure()` to keep the previous behavior.
 
 Track a screen manually — needed for Compose destinations, which the SDK cannot observe:
 
