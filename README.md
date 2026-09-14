@@ -164,6 +164,8 @@ lifecycleScope.launch {
 }
 ```
 
+If the link lookup fails because the phone is offline or the backend is unavailable, the SDK keeps the link and looks it up again on its own while the app stays open in the same session: after a short, widening wait, when the app returns to the foreground, or as soon as the network comes back. The listener fires once the lookup succeeds. A link the backend refuses (a 4xx) is not retried.
+
 You can also retrieve details for a specific link path:
 
 ```kotlin
