@@ -13,6 +13,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
 import io.grovs.e2e.ScreenTrackingTestBase
+import io.grovs.handlers.ScreenTracker
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -104,6 +105,36 @@ class S06MultiActivityE2ETest : ScreenTrackingTestBase() {
             ),
             readScreenNames(),
         )
+    }
+
+    /** A device rotation recreates the Activity; the same screen is on display, so nothing new is reported. */
+    @Test
+    fun rotation_recreatedActivityDoesNotReportItsScreenAgain() = runTest {
+        configure()
+        E2ETestUtils.getAuthenticationJob()?.join()
+
+        val detail = Robolectric.buildActivity(S06DetailActivity::class.java).setup()
+        settleAndFlush()
+        Thread.sleep(ScreenTracker.DEDUP_WINDOW_MS + 100L)
+        detail.recreate()
+        settleAndFlush()
+
+        assertEquals(listOf("S06DetailActivity"), readScreenNames())
+    }
+
+    /** Rotating a fragment host restores the same fragment leaf; it is not a new screen either. */
+    @Test
+    fun rotation_recreatedFragmentHostDoesNotReportItsLeafAgain() = runTest {
+        configure()
+        E2ETestUtils.getAuthenticationJob()?.join()
+
+        val host = Robolectric.buildActivity(S06DetailHostActivity::class.java).setup()
+        settleAndFlush()
+        Thread.sleep(ScreenTracker.DEDUP_WINDOW_MS + 100L)
+        host.recreate()
+        settleAndFlush()
+
+        assertEquals(listOf("S06DetailFragment"), readScreenNames())
     }
 
     /** Action 6 — Home -> Detail -> Checkout deep chain. */

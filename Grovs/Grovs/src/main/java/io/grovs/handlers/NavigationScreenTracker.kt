@@ -25,12 +25,16 @@ internal object NavigationScreenTracker {
      * Registers a destination listener that reports each destination as a screen. The listener fires
      * immediately with the current destination. Returns false (and does nothing) if this controller
      * is already tracked, so repeat calls cannot double-register.
+     *
+     * [onScreen] receives the screen name and the id of the back stack entry on display. The id is
+     * kept across saveState/restoreState, so a controller rebuilt after a configuration change
+     * reports the same visit; a fresh navigation to the same route reports a new one.
      */
     @Synchronized
-    fun attach(navController: NavController, onScreen: (String) -> Unit): Boolean {
+    fun attach(navController: NavController, onScreen: (screenName: String, visitId: String?) -> Unit): Boolean {
         if (!tracked.add(navController)) return false
-        navController.addOnDestinationChangedListener { _, destination, _ ->
-            onScreen(screenNameFor(destination))
+        navController.addOnDestinationChangedListener { controller, destination, _ ->
+            onScreen(screenNameFor(destination), controller.currentBackStackEntry?.id)
         }
         return true
     }

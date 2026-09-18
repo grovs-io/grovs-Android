@@ -2,6 +2,7 @@ package io.grovs.e2e.analytics
 
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import androidx.navigation.NavDeepLinkRequest
 import androidx.navigation.NavDestination
 import androidx.navigation.NavGraph
@@ -13,6 +14,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
 import io.grovs.e2e.ScreenTrackingTestBase
+import io.grovs.handlers.ScreenTracker
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -59,9 +61,13 @@ class S02NavComposeE2ETest : ScreenTrackingTestBase() {
      * A route-based controller mirroring a Navigation-Compose graph: top-level destinations plus a
      * nested navigation graph (route "nested", start "nestedStart").
      */
-    private fun newController(startDestination: String = "home"): TestNavHostController {
+    private fun newController(
+        startDestination: String = "home",
+        restoredState: Bundle? = null,
+    ): TestNavHostController {
         val navController = TestNavHostController(context())
         navController.navigatorProvider.addNavigator(ComposeNavigator())
+        if (restoredState != null) navController.restoreState(restoredState)
         val graphNavigator = navController.navigatorProvider.getNavigator(NavGraphNavigator::class.java)
         val graph = NavGraph(graphNavigator).apply {
             route = "s02root"
@@ -192,6 +198,41 @@ class S02NavComposeE2ETest : ScreenTrackingTestBase() {
 
         assertTrue("A new controller must be treated as untracked", added)
         assertEquals(listOf("home", "detail", "settings"), drainScreenNames())
+    }
+
+    // A configuration change rebuilds the NavHost and restores the controller from saved state. The
+    // restored back stack entry is the same visit, so its re-report is never a new screen view, no
+    // matter how long the rotation took.
+    @Test
+    fun `a controller restored after a configuration change does not re-report its route`() = runTest {
+        configure(autoTrack = true)
+        E2ETestUtils.getAuthenticationJob()?.join()
+
+        val first = newController(startDestination = "home")
+        Grovs.trackNavigation(first)        // immediate -> home
+        first.navigate("detail")            // -> detail
+        Thread.sleep(ScreenTracker.DEDUP_WINDOW_MS + 100L)
+
+        val recreated = newController(startDestination = "home", restoredState = first.saveState())
+        Grovs.trackNavigation(recreated)    // immediate -> detail again, same restored entry
+
+        assertEquals(listOf("home", "detail"), drainScreenNames())
+    }
+
+    // Navigating to the current route again pushes a new back stack entry: a new visit of the same
+    // screen, reported once the dedup window has passed.
+    @Test
+    fun `re-navigating the same route after the dedup window is a new visit`() = runTest {
+        configure(autoTrack = true)
+        E2ETestUtils.getAuthenticationJob()?.join()
+
+        val nav = newController(startDestination = "home")
+        Grovs.trackNavigation(nav)          // immediate -> home
+        nav.navigate("detail")              // -> detail
+        Thread.sleep(ScreenTracker.DEDUP_WINDOW_MS + 100L)
+        nav.navigate("detail")              // new entry -> detail
+
+        assertEquals(listOf("home", "detail", "detail"), drainScreenNames())
     }
 
     // Calling trackNavigation twice on the same controller registers a single listener, so a

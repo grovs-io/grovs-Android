@@ -536,6 +536,9 @@ public class Grovs: ActivityProvider {
     /** The pending screen resolution per Activity, so pause/destroy and re-resumes can cancel it. */
     private val pendingScreenResolutionJobs = ConcurrentHashMap<Activity, Job>()
 
+    /** The screen class each Activity last resolved to, so a configuration change can name what its replacement re-reports. */
+    private val resolvedScreenByActivity = ConcurrentHashMap<Activity, String>()
+
     private val fragmentLifecycleObserver = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, fragment: Fragment) {
             fragment.activity?.let(::scheduleScreenResolution)
@@ -567,6 +570,7 @@ public class Grovs: ActivityProvider {
             // Fully-qualified name is the dedup identity: two distinct screens that share a simpleName
             // must not be collapsed by the dedup window.
             val screenClass = leaf?.name ?: activity.javaClass.name
+            resolvedScreenByActivity[activity] = screenClass
 
             withContext(grovsContext.serialDispatcher) {
                 manager.autoTrackScreen(screenName, screenClass)
@@ -618,6 +622,12 @@ public class Grovs: ActivityProvider {
         override fun onActivityDestroyed(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
             pendingScreenResolutionJobs.remove(activity)?.cancel()
+            val shownScreen = resolvedScreenByActivity.remove(activity)
+            if (shownScreen != null && activity.isChangingConfigurations) {
+                // Dedup state is confined to serialDispatcher; queued here, it lands before the
+                // replacement Activity's resolution, which is posted to the main looper first.
+                collect { manager -> manager.screenHostRecreating(shownScreen) }
+            }
         }
 
         private fun onAppForegrounded() {
@@ -1111,8 +1121,10 @@ public class Grovs: ActivityProvider {
     fun trackNavigation(navController: NavController) {
         // Explicit opt-in: routed through the manual trackScreenView path so it works even when
         // lifecycle-based auto-tracking is disabled (the "use NavController instead" workflow).
-        NavigationScreenTracker.attach(navController) { screenName ->
-            trackScreenView(screenName = screenName, properties = null)
+        NavigationScreenTracker.attach(navController) { screenName, visitId ->
+            collect { manager ->
+                manager.trackScreenView(screenName = screenName, properties = null, visitId = visitId)
+            }
         }
     }
 

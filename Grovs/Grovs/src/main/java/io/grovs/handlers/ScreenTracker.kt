@@ -10,6 +10,11 @@ import io.grovs.utils.InstantCompat
  * The dedup window guards against the same screen being reported twice in quick succession (a
  * transient pause/resume, a Fragment re-attached without navigation). It does NOT deduplicate an
  * Activity against a Fragment it hosts — those have different screen names. Grovs.kt handles that.
+ *
+ * A configuration change re-reports the screen on display without any time bound, so two rules sit
+ * above the window: a visit reported again under the same [visitId] (a restored NavController back
+ * stack entry) is never new, and a host destroyed for a configuration change ([expectRecreationOf])
+ * gets its replacement's first report of the same screen suppressed once.
  */
 internal class ScreenTracker(
     private val customEventsManager: ICustomEventsManager,
@@ -18,7 +23,9 @@ internal class ScreenTracker(
     private var aliases: Map<String, String> = emptyMap()
     private var lastConsentGeneration: Long? = null
     private var lastDedupKey: String? = null
+    private var lastVisitId: String? = null
     private var lastScreenAt: InstantCompat? = null
+    private val recreatingKeys = mutableSetOf<String>()
 
     companion object {
         const val SCREEN_VIEW_EVENT = "screen_view"
@@ -53,12 +60,16 @@ internal class ScreenTracker(
      * collapsed. When the screen is aliased (aliases are keyed by simpleName, so an aliased screen is
      * intentionally treated as one screen) or no key is supplied (manual [trackScreen] via
      * trackScreenView), the resolved name is used as the key — preserving prior behavior.
+     *
+     * [visitId] identifies one visit of the screen (a NavController back stack entry id). The same
+     * visit reported again is the screen being restored, not viewed anew, however much time passed.
      */
     suspend fun trackScreen(
         rawName: String,
         properties: Map<String, Any>? = null,
         dedupKey: String? = null,
         consentGeneration: Long? = null,
+        visitId: String? = null,
     ) {
         if (consentGeneration != null && consentGeneration != lastConsentGeneration) {
             resetDedup()
@@ -68,8 +79,9 @@ internal class ScreenTracker(
 
         val resolved = aliases[rawName] ?: rawName
         val key = if (dedupKey != null && !aliases.containsKey(rawName)) dedupKey else resolved
+        val recreated = recreatingKeys.remove(key)
 
-        if (isDuplicate(key)) {
+        if (isDuplicate(key, visitId, recreated)) {
             DebugLogger.instance.log(
                 LogLevel.INFO,
                 "Skipping duplicate screen view within dedup window: $resolved"
@@ -78,6 +90,7 @@ internal class ScreenTracker(
         }
 
         lastDedupKey = key
+        lastVisitId = visitId
         lastScreenAt = InstantCompat.now()
 
         customEventsManager.track(
@@ -87,14 +100,27 @@ internal class ScreenTracker(
         )
     }
 
+    /**
+     * Called when the host showing the screen keyed [dedupKey] is destroyed for a configuration
+     * change. Its replacement re-reports that screen; if it is still the last one tracked, that
+     * report is suppressed once. The mark is consumed by the next report of the same key.
+     */
+    fun expectRecreationOf(dedupKey: String) {
+        recreatingKeys.add(dedupKey)
+    }
+
     /** Called on session rotation so the first screen of a new session always fires. */
     fun resetDedup() {
         lastDedupKey = null
+        lastVisitId = null
         lastScreenAt = null
+        recreatingKeys.clear()
     }
 
-    private fun isDuplicate(key: String): Boolean {
+    private fun isDuplicate(key: String, visitId: String?, recreated: Boolean): Boolean {
         if (lastDedupKey != key) return false
+        if (visitId != null && visitId == lastVisitId) return true
+        if (recreated) return true
         val at = lastScreenAt ?: return false
         return (InstantCompat.now().toEpochMilli() - at.toEpochMilli()) < DEDUP_WINDOW_MS
     }

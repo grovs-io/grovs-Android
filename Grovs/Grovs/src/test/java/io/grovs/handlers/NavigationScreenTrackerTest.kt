@@ -54,7 +54,7 @@ class NavigationScreenTrackerTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val navController = NavController(context)
 
-        assertTrue(NavigationScreenTracker.attach(navController) {})
-        assertFalse(NavigationScreenTracker.attach(navController) {})
+        assertTrue(NavigationScreenTracker.attach(navController) { _, _ -> })
+        assertFalse(NavigationScreenTracker.attach(navController) { _, _ -> })
     }
 }

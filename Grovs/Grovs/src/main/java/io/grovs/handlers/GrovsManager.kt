@@ -752,9 +752,14 @@ internal class GrovsManager(
         customEventsManager.track(name = name, properties = properties, tags = tags)
     }
 
-    suspend fun trackScreenView(screenName: String, properties: Map<String, Any>?) {
+    suspend fun trackScreenView(screenName: String, properties: Map<String, Any>?, visitId: String? = null) {
         val token = grovsContext.consent.workToken(configuration) ?: return
-        screenTracker.trackScreen(rawName = screenName, properties = properties, consentGeneration = token.generation)
+        screenTracker.trackScreen(
+            rawName = screenName,
+            properties = properties,
+            consentGeneration = token.generation,
+            visitId = visitId,
+        )
     }
 
     /**
@@ -810,6 +815,11 @@ internal class GrovsManager(
 
     fun resetScreenDedup() {
         screenTracker.resetDedup()
+    }
+
+    /** Called when the Activity last showing [screenClass] is destroyed for a configuration change. */
+    fun screenHostRecreating(screenClass: String) {
+        screenTracker.expectRecreationOf(screenClass)
     }
 
     fun setGlobalTags(tags: List<String>?) {
