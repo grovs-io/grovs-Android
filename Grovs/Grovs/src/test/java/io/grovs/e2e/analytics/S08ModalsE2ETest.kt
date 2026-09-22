@@ -359,6 +359,22 @@ class S08ModalsE2ETest : ScreenTrackingTestBase() {
         assertEquals(listOf("S08ContentFragment", "InfoDialog"), actual)
     }
 
+    // #18b A modal that tracks itself on resume must not make its host re-report the content
+    // underneath: the dialog's resume is an overlay appearing, not a navigation.
+    @Test
+    fun `18b a modal tracked manually on resume does not re-emit the content beneath it`() = runTest {
+        configure()
+        E2ETestUtils.getAuthenticationJob()?.join()
+
+        val controller = buildPrimary()
+        settleAutomaticScreenResolution()
+        show(S08SelfTrackingDialogFragment(), controller.get(), "info")
+
+        val actual = drainScreenNames()
+        println("S08#18b(self-tracking modal) actual=$actual")
+        assertEquals(listOf("S08ContentFragment", "InfoDialog"), actual)
+    }
+
     // #19 Two distinct bottom sheets in sequence on plain host -> both skipped, content stays.
     @Test
     fun `19 two bottom sheets in sequence are not auto-tracked on plain host`() = runTest {
@@ -475,6 +491,14 @@ open class S08InfoDialogFragment : DialogFragment() {
 }
 
 class S08SecondDialogFragment : S08InfoDialogFragment()
+
+/** A modal the app reports as a screen itself, the documented pattern for modals-as-screens. */
+class S08SelfTrackingDialogFragment : S08InfoDialogFragment() {
+    override fun onResume() {
+        super.onResume()
+        Grovs.trackScreenView("InfoDialog")
+    }
+}
 
 /** Full-screen dialog (STYLE_NO_FRAME) that visually acts like a normal screen. */
 class S08FullScreenDialogFragment : DialogFragment() {

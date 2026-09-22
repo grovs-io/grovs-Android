@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Parcelable
 import android.os.SystemClock
+import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
@@ -541,9 +542,15 @@ public class Grovs: ActivityProvider {
 
     private val fragmentLifecycleObserver = object : FragmentManager.FragmentLifecycleCallbacks() {
         override fun onFragmentResumed(fm: FragmentManager, fragment: Fragment) {
+            // A dialog appearing is an overlay, not a navigation: the resolver would only re-find
+            // the screen already underneath it, which the app may just have tracked past.
+            if (isInsideDialog(fragment)) return
             fragment.activity?.let(::scheduleScreenResolution)
         }
     }
+
+    private fun isInsideDialog(fragment: Fragment): Boolean =
+        generateSequence(fragment) { it.parentFragment }.any { it is DialogFragment }
 
     /**
      * Resolves which screen is on display and reports it. Resolution is posted to the main looper
