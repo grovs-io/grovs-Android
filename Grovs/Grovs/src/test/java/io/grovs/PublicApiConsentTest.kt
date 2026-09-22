@@ -358,8 +358,8 @@ class PublicApiConsentTest {
         grovsContext.settings.sdkEnabled = true
         assertNever("any dropped collection call reaching the manager") { false }
 
-        coVerify(exactly = 0) { manager.track(any(), any(), any()) }
-        coVerify(exactly = 0) { manager.trackScreenView(any(), any()) }
+        coVerify(exactly = 0) { manager.track(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { manager.trackScreenView(any(), any(), any(), any()) }
         coVerify(exactly = 0) { manager.logInAppPurchase(any()) }
     }
 
@@ -370,8 +370,8 @@ class PublicApiConsentTest {
         pump()
         pump()
 
-        coVerify(exactly = 1) { manager.track("online_event", any(), any()) }
-        coVerify(exactly = 1) { manager.trackScreenView("OnlineScreen", any()) }
+        coVerify(exactly = 1) { manager.track("online_event", any(), any(), any()) }
+        coVerify(exactly = 1) { manager.trackScreenView("OnlineScreen", any(), any(), any()) }
     }
 
     // ==================== P06 ====================
@@ -388,7 +388,7 @@ class PublicApiConsentTest {
         verify1 { manager.identifier = "user-9" }
         verify1 { manager.pushToken = "token-9" }
         // ...but no collection or explicit request was started by setting them.
-        coVerify(exactly = 0) { manager.track(any(), any(), any()) }
+        coVerify(exactly = 0) { manager.track(any(), any(), any(), any()) }
         coVerify(exactly = 0) { manager.linkDetails(any()) }
     }
 

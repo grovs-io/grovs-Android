@@ -740,7 +740,13 @@ internal class GrovsManager(
         eventsManager.logInAppPurchase(originalJson = originalJson)
     }
 
-    suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?) {
+    /** [createdAt] is when the app tracked the event, captured before it was queued. */
+    suspend fun track(
+        name: String,
+        properties: Map<String, Any>?,
+        tags: List<String>?,
+        createdAt: InstantCompat = InstantCompat.now(),
+    ) {
         if (!CustomEventRules.isValidName(name)) {
             DebugLogger.instance.log(
                 LogLevel.ERROR,
@@ -749,16 +755,22 @@ internal class GrovsManager(
             )
             return
         }
-        customEventsManager.track(name = name, properties = properties, tags = tags)
+        customEventsManager.track(name = name, properties = properties, tags = tags, createdAt = createdAt)
     }
 
-    suspend fun trackScreenView(screenName: String, properties: Map<String, Any>?, visitId: String? = null) {
+    suspend fun trackScreenView(
+        screenName: String,
+        properties: Map<String, Any>?,
+        visitId: String? = null,
+        createdAt: InstantCompat = InstantCompat.now(),
+    ) {
         val token = grovsContext.consent.workToken(configuration) ?: return
         screenTracker.trackScreen(
             rawName = screenName,
             properties = properties,
             consentGeneration = token.generation,
             visitId = visitId,
+            at = createdAt,
         )
     }
 
@@ -807,10 +819,20 @@ internal class GrovsManager(
      * [screenClass] is the resolved screen's fully-qualified class name, used as the dedup identity
      * so distinct screens sharing a simpleName are not collapsed.
      */
-    suspend fun autoTrackScreen(screenName: String, screenClass: String? = null) {
+    suspend fun autoTrackScreen(
+        screenName: String,
+        screenClass: String? = null,
+        createdAt: InstantCompat = InstantCompat.now(),
+    ) {
         if (!grovsContext.settings.autoTrackScreenViews) return
         val token = grovsContext.consent.workToken(configuration) ?: return
-        screenTracker.trackScreen(rawName = screenName, properties = null, dedupKey = screenClass, consentGeneration = token.generation)
+        screenTracker.trackScreen(
+            rawName = screenName,
+            properties = null,
+            dedupKey = screenClass,
+            consentGeneration = token.generation,
+            at = createdAt,
+        )
     }
 
     fun resetScreenDedup() {

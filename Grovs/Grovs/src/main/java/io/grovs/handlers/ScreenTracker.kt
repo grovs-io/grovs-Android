@@ -63,6 +63,9 @@ internal class ScreenTracker(
      *
      * [visitId] identifies one visit of the screen (a NavController back stack entry id). The same
      * visit reported again is the screen being restored, not viewed anew, however much time passed.
+     *
+     * [at] is when the screen was observed. Both the event's time and the dedup window use it, so
+     * a backlog on the tracking queue neither shifts the event nor collapses two distinct visits.
      */
     suspend fun trackScreen(
         rawName: String,
@@ -70,6 +73,7 @@ internal class ScreenTracker(
         dedupKey: String? = null,
         consentGeneration: Long? = null,
         visitId: String? = null,
+        at: InstantCompat = InstantCompat.now(),
     ) {
         if (consentGeneration != null && consentGeneration != lastConsentGeneration) {
             resetDedup()
@@ -81,7 +85,7 @@ internal class ScreenTracker(
         val key = if (dedupKey != null && !aliases.containsKey(rawName)) dedupKey else resolved
         val recreated = recreatingKeys.remove(key)
 
-        if (isDuplicate(key, visitId, recreated)) {
+        if (isDuplicate(key, visitId, recreated, at)) {
             DebugLogger.instance.log(
                 LogLevel.INFO,
                 "Skipping duplicate screen view within dedup window: $resolved"
@@ -91,12 +95,13 @@ internal class ScreenTracker(
 
         lastDedupKey = key
         lastVisitId = visitId
-        lastScreenAt = InstantCompat.now()
+        lastScreenAt = at
 
         customEventsManager.track(
             name = SCREEN_VIEW_EVENT,
             properties = properties.orEmpty() + (SCREEN_NAME_PROPERTY to resolved),
             tags = null,
+            createdAt = at,
         )
     }
 
@@ -117,11 +122,11 @@ internal class ScreenTracker(
         recreatingKeys.clear()
     }
 
-    private fun isDuplicate(key: String, visitId: String?, recreated: Boolean): Boolean {
+    private fun isDuplicate(key: String, visitId: String?, recreated: Boolean, at: InstantCompat): Boolean {
         if (lastDedupKey != key) return false
         if (visitId != null && visitId == lastVisitId) return true
         if (recreated) return true
-        val at = lastScreenAt ?: return false
-        return (InstantCompat.now().toEpochMilli() - at.toEpochMilli()) < DEDUP_WINDOW_MS
+        val previous = lastScreenAt ?: return false
+        return (at.toEpochMilli() - previous.toEpochMilli()) < DEDUP_WINDOW_MS
     }
 }

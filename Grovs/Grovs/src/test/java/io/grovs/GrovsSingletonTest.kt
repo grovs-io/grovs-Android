@@ -28,12 +28,19 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
 import io.grovs.model.exceptions.GrovsErrorCode
 import io.grovs.model.exceptions.GrovsException
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
+import androidx.navigation.NavGraph
+import androidx.navigation.NavGraphNavigator
+import androidx.navigation.compose.ComposeNavigator
+import androidx.navigation.testing.TestNavHostController
 import io.mockk.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -58,6 +65,11 @@ class GrovsSingletonTest {
     private lateinit var application: Application
     private lateinit var context: Context
     private val testDispatcher = StandardTestDispatcher()
+
+    private companion object {
+        /** Real time that passes while queued work waits; well above the millisecond clock resolution. */
+        const val QUEUE_DELAY_MS = 30L
+    }
 
     @Before
     fun setUp() {
@@ -471,7 +483,7 @@ class GrovsSingletonTest {
             Grovs.track("offline_event")
 
             coVerify(timeout = 1_000, exactly = 1) {
-                mockManager.track("offline_event", null, null)
+                mockManager.track("offline_event", null, null, any())
             }
             assertFalse(pendingAuthentication.isCompleted)
         } finally {
@@ -489,7 +501,7 @@ class GrovsSingletonTest {
             Grovs.trackScreenView("Checkout")
 
             coVerify(timeout = 1_000, exactly = 1) {
-                mockManager.trackScreenView("Checkout", null)
+                mockManager.trackScreenView("Checkout", null, null, any())
             }
             assertFalse(pendingAuthentication.isCompleted)
         } finally {
@@ -509,11 +521,99 @@ class GrovsSingletonTest {
             testDispatcher.scheduler.advanceUntilIdle()
 
             coVerify(timeout = 1_500, exactly = 1) {
-                mockManager.autoTrackScreen("TestActivity", any())
+                mockManager.autoTrackScreen("TestActivity", any(), any())
             }
             assertFalse(pendingAuthentication.isCompleted)
         } finally {
             pendingAuthentication.cancel()
+            controller.pause().stop().destroy()
+        }
+    }
+
+    // ==================== Observation time ====================
+
+    /**
+     * Stalls the SDK's serial queue behind [serial], runs [observe] and returns the real-time
+     * window in which it ran. Real time then passes before the queue is released, so a timestamp
+     * taken during processing falls outside the returned window.
+     */
+    private fun observeBehindStalledQueue(serial: TestDispatcher, observe: () -> Unit): ClosedRange<InstantCompat> {
+        val before = InstantCompat.now()
+        observe()
+        val after = InstantCompat.now()
+        Thread.sleep(QUEUE_DELAY_MS)
+        serial.scheduler.advanceUntilIdle()
+        return before..after
+    }
+
+    private fun installStalledSerialQueue(mockManager: GrovsManager): TestDispatcher {
+        // Its own scheduler: advancing the Main test dispatcher must leave the serial queue stalled.
+        val serial = StandardTestDispatcher(TestCoroutineScheduler())
+        E2ETestUtils.installGrovsContext(GrovsContext(serialDispatcher = serial))
+        injectMockGrovsManagerDirectly(mockManager)
+        return serial
+    }
+
+    @Test
+    fun `a tracked event is stamped when the app tracks it, not when the queue processes it`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        val serial = installStalledSerialQueue(mockManager)
+        val createdAt = slot<InstantCompat>()
+
+        val observed = observeBehindStalledQueue(serial) { Grovs.track("checkout") }
+
+        coVerify(exactly = 1) { mockManager.track("checkout", null, null, capture(createdAt)) }
+        assertTrue("stamped ${createdAt.captured}, observed within $observed", createdAt.captured in observed)
+    }
+
+    @Test
+    fun `a manual screen view is stamped when the app reports it, not when the queue processes it`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        val serial = installStalledSerialQueue(mockManager)
+        val createdAt = slot<InstantCompat>()
+
+        val observed = observeBehindStalledQueue(serial) { Grovs.trackScreenView("Checkout") }
+
+        coVerify(exactly = 1) { mockManager.trackScreenView("Checkout", null, null, capture(createdAt)) }
+        assertTrue("stamped ${createdAt.captured}, observed within $observed", createdAt.captured in observed)
+    }
+
+    @Test
+    fun `a navigation destination is stamped when it is shown, not when the queue processes it`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        val serial = installStalledSerialQueue(mockManager)
+        val createdAt = slot<InstantCompat>()
+        val navController = TestNavHostController(context).apply {
+            navigatorProvider.addNavigator(ComposeNavigator())
+            val composeNavigator = navigatorProvider.getNavigator(ComposeNavigator::class.java)
+            graph = NavGraph(navigatorProvider.getNavigator(NavGraphNavigator::class.java)).apply {
+                addDestination(composeNavigator.createDestination().apply { route = "home" })
+                setStartDestination("home")
+            }
+        }
+
+        val observed = observeBehindStalledQueue(serial) { Grovs.trackNavigation(navController) }
+
+        coVerify(exactly = 1) { mockManager.trackScreenView("home", null, any(), capture(createdAt)) }
+        assertTrue("stamped ${createdAt.captured}, observed within $observed", createdAt.captured in observed)
+    }
+
+    @Test
+    fun `an auto tracked screen is stamped when it resumes, not when the queue processes it`() {
+        val mockManager = mockk<GrovsManager>(relaxed = true)
+        val serial = installStalledSerialQueue(mockManager)
+        val createdAt = slot<InstantCompat>()
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+
+        try {
+            val observed = observeBehindStalledQueue(serial) {
+                E2ETestUtils.dispatchActivityResumed(controller.get())
+                testDispatcher.scheduler.advanceUntilIdle()
+            }
+
+            coVerify(exactly = 1) { mockManager.autoTrackScreen("TestActivity", any(), capture(createdAt)) }
+            assertTrue("stamped ${createdAt.captured}, observed within $observed", createdAt.captured in observed)
+        } finally {
             controller.pause().stop().destroy()
         }
     }
@@ -533,7 +633,7 @@ class GrovsSingletonTest {
             // Without this gate, ScreenTracker.trackScreen() would still update its
             // lastDedupKey/lastScreenAt while disabled, poisoning the dedup window so the first
             // legitimate screen_view after re-enable is silently suppressed.
-            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any()) }
+            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any(), any()) }
         } finally {
             controller.pause().stop().destroy()
         }
@@ -552,7 +652,7 @@ class GrovsSingletonTest {
 
             // Positive control: proves the harness can observe the call at all, so the exactly-0
             // assertion above is meaningful rather than vacuous.
-            coVerify(timeout = 1_500, exactly = 1) { mockManager.autoTrackScreen("TestActivity", any()) }
+            coVerify(timeout = 1_500, exactly = 1) { mockManager.autoTrackScreen("TestActivity", any(), any()) }
         } finally {
             controller.pause().stop().destroy()
         }
@@ -575,12 +675,12 @@ class GrovsSingletonTest {
             testDispatcher.scheduler.advanceUntilIdle()
 
             coVerify(timeout = 3_000, exactly = 1) {
-                mockManager.autoTrackScreen("TestActivity", any())
+                mockManager.autoTrackScreen("TestActivity", any(), any())
             }
 
             // Keep observing so a late orphaned job cannot escape the final exact-count verification.
             Thread.sleep(300L)
-            coVerify(exactly = 1) { mockManager.autoTrackScreen("TestActivity", any()) }
+            coVerify(exactly = 1) { mockManager.autoTrackScreen("TestActivity", any(), any()) }
         } finally {
             controller.pause().stop().destroy()
         }
@@ -599,7 +699,7 @@ class GrovsSingletonTest {
             .create().start().resume().pause()
         try {
             testDispatcher.scheduler.advanceUntilIdle()
-            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any()) }
+            coVerify(exactly = 0) { mockManager.autoTrackScreen(any(), any(), any()) }
         } finally {
             controller.stop().destroy()
         }

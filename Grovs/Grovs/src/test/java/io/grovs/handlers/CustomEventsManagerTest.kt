@@ -127,6 +127,15 @@ class CustomEventsManagerTest {
     }
 
     @Test
+    fun `a tracked event is stamped with the time it was observed, not the time it is stored`() = runTest {
+        val observedAt = InstantCompat.now().minusMillis(5_000)
+
+        manager.track("checkout", null, null, createdAt = observedAt)
+
+        assertEquals(observedAt, stored.single().createdAt)
+    }
+
+    @Test
     fun `global tags are merged onto tracked events`() = runTest {
         manager.setGlobalTags(listOf("android", "prod"))
         manager.track("checkout", null, tags = listOf("shop"))

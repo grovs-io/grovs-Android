@@ -1,5 +1,6 @@
 package io.grovs.handlers
 
+import io.grovs.handlers.ScreenTracker.Companion.DEDUP_WINDOW_MS
 import io.grovs.utils.InstantCompat
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -22,13 +23,11 @@ class ScreenTrackerTest {
         tracker = ScreenTracker(customEvents)
     }
 
-    /** Backdates the last tracked screen so the dedup window can be tested against real time. */
-    private fun backdateLastScreen(ms: Long) {
-        ScreenTracker::class.java.getDeclaredField("lastScreenAt").apply {
-            isAccessible = true
-            set(tracker, InstantCompat.now().minusMillis(ms))
-        }
-    }
+    private val start = InstantCompat.now().minusMillis(60_000)
+
+    /** An observation time [windows] dedup windows (plus a millisecond) after [start]. */
+    private fun afterWindow(windows: Int = 1): InstantCompat =
+        start.plusMillis(windows * (DEDUP_WINDOW_MS + 1))
 
     @Test
     fun `screen view is emitted as a screen_view event with screen_name`() = runTest {
@@ -39,6 +38,7 @@ class ScreenTrackerTest {
                 name = "screen_view",
                 properties = mapOf("screen_name" to "HomeActivity"),
                 tags = null,
+                createdAt = any(),
             )
         }
     }
@@ -54,6 +54,7 @@ class ScreenTrackerTest {
                 name = "screen_view",
                 properties = mapOf("screen_name" to "Home"),
                 tags = null,
+                createdAt = any(),
             )
         }
     }
@@ -67,6 +68,7 @@ class ScreenTrackerTest {
                 name = "screen_view",
                 properties = mapOf("items" to 3.0, "screen_name" to "Cart"),
                 tags = null,
+                createdAt = any(),
             )
         }
     }
@@ -76,16 +78,46 @@ class ScreenTrackerTest {
         tracker.trackScreen("HomeActivity")
         tracker.trackScreen("HomeActivity")
 
-        coVerify(exactly = 1) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 1) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
     fun `the same screen after the dedup window fires again`() = runTest {
-        tracker.trackScreen("HomeActivity")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("HomeActivity")
+        tracker.trackScreen("HomeActivity", at = start)
+        tracker.trackScreen("HomeActivity", at = afterWindow())
 
-        coVerify(exactly = 2) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `dedup measures the gap between observations, not between processing`() = runTest {
+        val first = InstantCompat.now().minusMillis(10_000)
+        val second = first.plusMillis(DEDUP_WINDOW_MS + 1)
+
+        tracker.trackScreen("HomeActivity", at = first)
+        tracker.trackScreen("HomeActivity", at = second)
+
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `two observations close together are deduped even when processed far apart`() = runTest {
+        val first = InstantCompat.now().minusMillis(60_000)
+        val second = first.plusMillis(DEDUP_WINDOW_MS - 1)
+
+        tracker.trackScreen("HomeActivity", at = first)
+        tracker.trackScreen("HomeActivity", at = second)
+
+        coVerify(exactly = 1) { customEvents.track(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `the screen view carries the observation time`() = runTest {
+        val observedAt = InstantCompat.now().minusMillis(5_000)
+
+        tracker.trackScreen("HomeActivity", at = observedAt)
+
+        coVerify(exactly = 1) { customEvents.track(any(), any(), any(), observedAt) }
     }
 
     @Test
@@ -93,25 +125,23 @@ class ScreenTrackerTest {
         tracker.trackScreen("HomeActivity")
         tracker.trackScreen("CartFragment")
 
-        coVerify(exactly = 2) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
     fun `the same visit reported again after the dedup window is suppressed`() = runTest {
-        tracker.trackScreen("home", visitId = "entry-1")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("home", visitId = "entry-1")
+        tracker.trackScreen("home", visitId = "entry-1", at = start)
+        tracker.trackScreen("home", visitId = "entry-1", at = afterWindow())
 
-        coVerify(exactly = 1) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 1) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
     fun `a new visit of the same screen after the dedup window fires again`() = runTest {
-        tracker.trackScreen("home", visitId = "entry-1")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("home", visitId = "entry-2")
+        tracker.trackScreen("home", visitId = "entry-1", at = start)
+        tracker.trackScreen("home", visitId = "entry-2", at = afterWindow())
 
-        coVerify(exactly = 2) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
@@ -120,30 +150,27 @@ class ScreenTrackerTest {
         tracker.trackScreen("detail", visitId = "entry-2")
         tracker.trackScreen("home", visitId = "entry-1")
 
-        coVerify(exactly = 3) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 3) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
     fun `a recreated host re-reporting the last screen after the dedup window is suppressed once`() = runTest {
-        tracker.trackScreen("Detail", dedupKey = "app.Detail")
+        tracker.trackScreen("Detail", dedupKey = "app.Detail", at = start)
         tracker.expectRecreationOf("app.Detail")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("Detail", dedupKey = "app.Detail")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("Detail", dedupKey = "app.Detail")
+        tracker.trackScreen("Detail", dedupKey = "app.Detail", at = afterWindow(1))
+        tracker.trackScreen("Detail", dedupKey = "app.Detail", at = afterWindow(2))
 
-        coVerify(exactly = 2) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
     fun `a recreation mark for a screen other than the last tracked one does not suppress`() = runTest {
-        tracker.trackScreen("Home", dedupKey = "app.Home")
-        tracker.trackScreen("Detail", dedupKey = "app.Detail")
+        tracker.trackScreen("Home", dedupKey = "app.Home", at = start)
+        tracker.trackScreen("Detail", dedupKey = "app.Detail", at = start)
         tracker.expectRecreationOf("app.Home")
-        backdateLastScreen(ScreenTracker.DEDUP_WINDOW_MS + 1)
-        tracker.trackScreen("Home", dedupKey = "app.Home")
+        tracker.trackScreen("Home", dedupKey = "app.Home", at = afterWindow())
 
-        coVerify(exactly = 3) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 3) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test
@@ -153,7 +180,7 @@ class ScreenTrackerTest {
         tracker.resetDedup()
         tracker.trackScreen("Home", dedupKey = "app.Home")
 
-        coVerify(exactly = 2) { customEvents.track(any(), any(), any()) }
+        coVerify(exactly = 2) { customEvents.track(any(), any(), any(), any()) }
     }
 
     @Test

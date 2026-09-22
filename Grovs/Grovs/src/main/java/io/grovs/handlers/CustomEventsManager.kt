@@ -83,7 +83,12 @@ internal class CustomEventsManager(
         timerScope.cancel()
     }
 
-    override suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?) {
+    override suspend fun track(
+        name: String,
+        properties: Map<String, Any>?,
+        tags: List<String>?,
+        createdAt: InstantCompat,
+    ) {
         // Checked against this call's own operation, immediately before the record is built and
         // stored: a call whose consent went away between admission and here collects nothing.
         val token = grovsContext.consent.workToken(configuration) ?: run {
@@ -99,7 +104,7 @@ internal class CustomEventsManager(
             eventName = name,
             sessionId = sessionId,
             link = attribution?.takeIf { it.sessionId == sessionId }?.link,
-            createdAt = InstantCompat.now(),
+            createdAt = createdAt,
             properties = CustomEventRules.sanitizeProperties(properties),
             tags = CustomEventRules.mergeTags(eventTags = tags, globalTags = globalTags),
         )

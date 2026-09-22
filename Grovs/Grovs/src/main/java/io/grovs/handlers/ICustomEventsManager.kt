@@ -1,5 +1,7 @@
 package io.grovs.handlers
 
+import io.grovs.utils.InstantCompat
+
 /**
  * Interface for CustomEventsManager, to enable dependency injection and testability.
  */
@@ -8,9 +10,15 @@ internal interface ICustomEventsManager {
     /**
      * Sanitizes and persists a tracked event. Event-name validation (blank/reserved names) happens
      * at the API boundary in [GrovsManager.track]; SDK-internal events like screen_view call this
-     * directly.
+     * directly. [createdAt] is when the event was observed; callers capture it before queueing so
+     * a backlog cannot shift the event's time.
      */
-    suspend fun track(name: String, properties: Map<String, Any>?, tags: List<String>?)
+    suspend fun track(
+        name: String,
+        properties: Map<String, Any>?,
+        tags: List<String>?,
+        createdAt: InstantCompat = InstantCompat.now(),
+    )
 
     /** Tags merged onto every subsequently tracked event. Pass null to clear. */
     fun setGlobalTags(tags: List<String>?)

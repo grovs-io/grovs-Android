@@ -555,6 +555,7 @@ public class Grovs: ActivityProvider {
         val manager = grovsManager ?: return
         if (!grovsContext.settings.autoTrackScreenViews) return
         val token = grovsContext.consent.tryAcquire(manager.configuration) ?: return
+        val shownAt = InstantCompat.now()
         val job = grovsContext.consent.launchOperation(token, context = Dispatchers.Main) {
             val lifecycleOwner = activity as? LifecycleOwner
             if (lifecycleOwner != null &&
@@ -573,7 +574,7 @@ public class Grovs: ActivityProvider {
             resolvedScreenByActivity[activity] = screenClass
 
             withContext(grovsContext.serialDispatcher) {
-                manager.autoTrackScreen(screenName, screenClass)
+                manager.autoTrackScreen(screenName, screenClass, createdAt = shownAt)
             }
         } ?: return
         pendingScreenResolutionJobs.put(activity, job)?.cancel()
@@ -1105,7 +1106,8 @@ public class Grovs: ActivityProvider {
     }
 
     fun track(name: String, properties: Map<String, Any>? = null, tags: List<String>? = null) {
-        collect { manager -> manager.track(name = name, properties = properties, tags = tags) }
+        val createdAt = InstantCompat.now()
+        collect { manager -> manager.track(name = name, properties = properties, tags = tags, createdAt = createdAt) }
     }
 
     fun setGlobalTags(tags: List<String>? = null) {
@@ -1115,15 +1117,17 @@ public class Grovs: ActivityProvider {
     }
 
     fun trackScreenView(screenName: String, properties: Map<String, Any>? = null) {
-        collect { manager -> manager.trackScreenView(screenName = screenName, properties = properties) }
+        val createdAt = InstantCompat.now()
+        collect { manager -> manager.trackScreenView(screenName = screenName, properties = properties, createdAt = createdAt) }
     }
 
     fun trackNavigation(navController: NavController) {
         // Explicit opt-in: routed through the manual trackScreenView path so it works even when
         // lifecycle-based auto-tracking is disabled (the "use NavController instead" workflow).
         NavigationScreenTracker.attach(navController) { screenName, visitId ->
+            val createdAt = InstantCompat.now()
             collect { manager ->
-                manager.trackScreenView(screenName = screenName, properties = null, visitId = visitId)
+                manager.trackScreenView(screenName = screenName, properties = null, visitId = visitId, createdAt = createdAt)
             }
         }
     }

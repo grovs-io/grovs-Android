@@ -31,6 +31,7 @@ import io.grovs.model.GetDeviceResponse
 import io.grovs.service.IGrovsService
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.IAppDetailsHelper
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import io.grovs.FakeClipboard
 import io.grovs.FakeLocalCache
@@ -317,7 +318,7 @@ class GrovsManagerTest {
         manager.track("app_open", null, null)
         manager.track("   ", null, null)
 
-        coVerify(exactly = 0) { customEventsManager.track(any(), any(), any()) }
+        coVerify(exactly = 0) { customEventsManager.track(any(), any(), any(), any()) }
         manager.close()
     }
 
@@ -329,8 +330,44 @@ class GrovsManagerTest {
         manager.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"))
 
         coVerify(exactly = 1) {
-            customEventsManager.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"))
+            customEventsManager.track("checkout_completed", mapOf("sku" to "abc"), listOf("shop"), any())
         }
+        manager.close()
+    }
+
+    @Test
+    fun `track forwards the observation time to the events manager`() = runTest {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+        val observedAt = InstantCompat.now().minusMillis(5_000)
+
+        manager.track("checkout_completed", null, null, createdAt = observedAt)
+
+        coVerify(exactly = 1) { customEventsManager.track("checkout_completed", null, null, observedAt) }
+        manager.close()
+    }
+
+    @Test
+    fun `a manual screen view carries its observation time`() = runTest {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+        val observedAt = InstantCompat.now().minusMillis(5_000)
+
+        manager.trackScreenView("Checkout", null, createdAt = observedAt)
+
+        coVerify(exactly = 1) { customEventsManager.track("screen_view", any(), null, observedAt) }
+        manager.close()
+    }
+
+    @Test
+    fun `an auto tracked screen carries its observation time`() = runTest {
+        val customEventsManager = mockk<ICustomEventsManager>(relaxed = true)
+        val manager = managerWithCustomEvents(customEventsManager)
+        val observedAt = InstantCompat.now().minusMillis(5_000)
+
+        manager.autoTrackScreen("HomeActivity", "app.HomeActivity", createdAt = observedAt)
+
+        coVerify(exactly = 1) { customEventsManager.track("screen_view", any(), null, observedAt) }
         manager.close()
     }
 
