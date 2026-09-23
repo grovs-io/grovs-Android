@@ -174,6 +174,25 @@ class GrovsSingletonTest {
     }
 
     @Test
+    fun `configure attaches the process lifecycle when the app removed the startup provider`() {
+        E2ETestUtils.simulateStartupProviderRemoved()
+
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+        try {
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            assertTrueWithContext(
+                currentGrovsContext().isForeground,
+                "isForeground",
+                "after the first activity started in an app without the startup provider"
+            )
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
     fun `background is detected when the only activity stops after a late configure`() {
         val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
         Grovs.configure(application, "test-api-key", useTestEnvironment = true)

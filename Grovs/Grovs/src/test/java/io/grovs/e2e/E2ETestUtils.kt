@@ -768,6 +768,22 @@ object E2ETestUtils {
     }
 
     /**
+     * Makes the current test Application look like one whose manifest removed the androidx
+     * startup provider: nothing from the lifecycle library listens to its activities and the
+     * process lifecycle owner is back in the state it has before anything attaches it.
+     */
+    fun simulateStartupProviderRemoved() {
+        val application = org.robolectric.RuntimeEnvironment.getApplication()
+        val callbacksField = android.app.Application::class.java.getDeclaredField("mActivityLifecycleCallbacks")
+        callbacksField.isAccessible = true
+        val callbacks = callbacksField.get(application) as MutableList<*>
+        callbacks.removeAll { it != null && it.javaClass.name.startsWith("androidx.lifecycle.") }
+        val registry = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle as androidx.lifecycle.LifecycleRegistry
+        androidx.lifecycle.LifecycleRegistry::class.java.getDeclaredField("state")
+            .apply { isAccessible = true }.set(registry, androidx.lifecycle.Lifecycle.State.INITIALIZED)
+    }
+
+    /**
      * ProcessLifecycleOwner reports the background 700 ms after the last activity stops, so a
      * configuration change does not look like leaving the app. Robolectric's clock only moves
      * when the looper is idled for that long.

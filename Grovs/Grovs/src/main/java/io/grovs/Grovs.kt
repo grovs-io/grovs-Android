@@ -605,6 +605,11 @@ public class Grovs: ActivityProvider {
         }
     }
 
+    // Fallback for an app that removed the androidx startup provider from its manifest, which
+    // leaves ProcessLifecycleOwner unattached: count activity starts here, from configure() on.
+    private var countsActivityStarts = false
+    private var startedActivities = 0
+
     private val applicationLifecycleObserver: Application.ActivityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, p1: Bundle?) {
             // Fragments are where most modern apps' screens actually live — a single-Activity app
@@ -616,6 +621,7 @@ public class Grovs: ActivityProvider {
         }
         override fun onActivityStarted(activity: Activity) {
             currentActivityReference = WeakReference(activity)
+            if (countsActivityStarts && startedActivities++ == 0) onAppForegrounded()
         }
         override fun onActivityResumed(activity: Activity) {
             currentActivityReference = WeakReference(activity)
@@ -627,6 +633,7 @@ public class Grovs: ActivityProvider {
         }
         override fun onActivityStopped(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
+            if (countsActivityStarts && --startedActivities == 0) onAppBackgrounded()
         }
         override fun onActivitySaveInstanceState(activity: Activity, p1: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {
@@ -675,6 +682,9 @@ public class Grovs: ActivityProvider {
             }
 
             authenticationJob?.join()
+            // A slow login can outlast a short foreground: by now the app may be in the background,
+            // where flushing and opening a time-spent node would count time the user did not spend.
+            if (!grovsContext.isForeground) return@collect
             manager.onAppForegrounded()
         }
     }
@@ -806,6 +816,17 @@ public class Grovs: ActivityProvider {
             return
         }
         val lifecycle = ProcessLifecycleOwner.get().lifecycle
+        // Attaching moves the owner to CREATED at process start; INITIALIZED means it never was.
+        countsActivityStarts = lifecycle.currentState == Lifecycle.State.INITIALIZED
+        if (countsActivityStarts) {
+            DebugLogger.instance.log(
+                LogLevel.ERROR,
+                "ProcessLifecycleOwner is not initialized. Keep androidx.lifecycle.ProcessLifecycleInitializer " +
+                    "in the manifest; until then the foreground is tracked from configure() on only."
+            )
+            lifecycle.removeObserver(processLifecycleObserver)
+            return
+        }
         lifecycle.removeObserver(processLifecycleObserver)
         lifecycle.addObserver(processLifecycleObserver)
     }

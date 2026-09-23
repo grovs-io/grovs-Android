@@ -244,7 +244,6 @@ internal class GrovsManager(
     var attributes: Map<String, Any>? by grovsContext::attributes
 
     suspend fun onAppForegrounded() {
-        grovsContext.isForeground = true
         if (grovsContext.consent.workToken(configuration) == null) return
         // A value the backend never acknowledged stays pending forever otherwise: the sync only
         // reacts to changes, and a failed send is not a change.
