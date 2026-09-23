@@ -13,7 +13,9 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import io.grovs.handlers.ActivityProvider
@@ -589,9 +591,21 @@ public class Grovs: ActivityProvider {
         job.invokeOnCompletion { pendingScreenResolutionJobs.remove(activity, job) }
     }
 
-    private val applicationLifecycleObserver: Application.ActivityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
-        private var numStarted = 0
+    // Foreground and background come from the process lifecycle, not from counting activity
+    // starts here: that count would begin at the moment configure() registers it, and a host
+    // whose activity is already started by then (a FlutterFragmentActivity attaches its engine,
+    // and so configures the SDK, during onStart) would never be seen in the foreground at all.
+    // ProcessLifecycleOwner is attached at process start and replays its current state to a late
+    // observer, and it waits out a configuration change before reporting the background.
+    private val processLifecycleObserver = LifecycleEventObserver { _, event ->
+        when (event) {
+            Lifecycle.Event.ON_START -> onAppForegrounded()
+            Lifecycle.Event.ON_STOP -> onAppBackgrounded()
+            else -> Unit
+        }
+    }
 
+    private val applicationLifecycleObserver: Application.ActivityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, p1: Bundle?) {
             // Fragments are where most modern apps' screens actually live — a single-Activity app
             // would otherwise report one screen for its entire lifetime.
@@ -602,12 +616,6 @@ public class Grovs: ActivityProvider {
         }
         override fun onActivityStarted(activity: Activity) {
             currentActivityReference = WeakReference(activity)
-
-            if (numStarted == 0) {
-                // App is in foreground
-                onAppForegrounded()
-            }
-            numStarted++
         }
         override fun onActivityResumed(activity: Activity) {
             currentActivityReference = WeakReference(activity)
@@ -619,12 +627,6 @@ public class Grovs: ActivityProvider {
         }
         override fun onActivityStopped(activity: Activity) {
             if (currentActivityReference?.get() == activity) currentActivityReference = null
-
-            numStarted--
-            if (numStarted == 0) {
-                // App is in background
-                onAppBackgrounded()
-            }
         }
         override fun onActivitySaveInstanceState(activity: Activity, p1: Bundle) {}
         override fun onActivityDestroyed(activity: Activity) {
@@ -637,56 +639,54 @@ public class Grovs: ActivityProvider {
                 collect { manager -> manager.screenHostRecreating(shownScreen) }
             }
         }
+    }
 
-        private fun onAppForegrounded() {
-            // App moved to the foreground
-            DebugLogger.instance.log(LogLevel.INFO, "App is in the foreground")
+    private fun onAppForegrounded() {
+        DebugLogger.instance.log(LogLevel.INFO, "App is in the foreground")
 
-            grovsContext.isForeground = true
-            val previousSession = grovsContext.sessionId
-            grovsContext.rotateSessionIfNeeded()
-            val sessionRotated = grovsContext.sessionId != previousSession
+        grovsContext.isForeground = true
+        val previousSession = grovsContext.sessionId
+        grovsContext.rotateSessionIfNeeded()
+        val sessionRotated = grovsContext.sessionId != previousSession
 
-            // A launch whose authentication failed leaves the SDK unusable until something retries
-            // it, because every other path is gated on being authenticated.
-            val currentManager = grovsManager
-            if (currentManager != null &&
-                authenticationJob?.isActive != true &&
-                currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED
-            ) {
-                if (currentManager.canAttemptAuthentication()) {
-                    checkConfiguration()
-                } else {
-                    // Still inside the window: wait it out now, not until the next foreground.
-                    scheduleAuthenticationRetry(currentManager)
-                }
-            }
-
-            // A tapped link whose lookup failed follows the same rule as a failed login.
-            pendingLink.onForeground()
-
-            collect { manager ->
-                // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
-                // than on the caller's thread. Must precede any screen tracking on this dispatcher.
-                if (sessionRotated) {
-                    manager.resetScreenDedup()
-                }
-
-                authenticationJob?.join()
-                manager.onAppForegrounded()
+        // A launch whose authentication failed leaves the SDK unusable until something retries
+        // it, because every other path is gated on being authenticated.
+        val currentManager = grovsManager
+        if (currentManager != null &&
+            authenticationJob?.isActive != true &&
+            currentManager.authenticationState != GrovsManager.AuthenticationState.AUTHENTICATED
+        ) {
+            if (currentManager.canAttemptAuthentication()) {
+                checkConfiguration()
+            } else {
+                // Still inside the window: wait it out now, not until the next foreground.
+                scheduleAuthenticationRetry(currentManager)
             }
         }
 
-        private fun onAppBackgrounded() {
-            // App moved to the background
-            DebugLogger.instance.log(LogLevel.INFO, "App is in the background")
-            grovsContext.isForeground = false
-            grovsContext.markBackgrounded()
-            // No automatic retries from the background.
-            cancelAuthenticationRetry()
-            pendingLink.onBackground()
-            grovsManager?.onAppBackgrounded()
+        // A tapped link whose lookup failed follows the same rule as a failed login.
+        pendingLink.onForeground()
+
+        collect { manager ->
+            // ScreenTracker's dedup state is confined to serialDispatcher, so reset it here rather
+            // than on the caller's thread. Must precede any screen tracking on this dispatcher.
+            if (sessionRotated) {
+                manager.resetScreenDedup()
+            }
+
+            authenticationJob?.join()
+            manager.onAppForegrounded()
         }
+    }
+
+    private fun onAppBackgrounded() {
+        DebugLogger.instance.log(LogLevel.INFO, "App is in the background")
+        grovsContext.isForeground = false
+        grovsContext.markBackgrounded()
+        // No automatic retries from the background.
+        cancelAuthenticationRetry()
+        pendingLink.onBackground()
+        grovsManager?.onAppBackgrounded()
     }
 
     fun configure(application: Application, apiKey: String, useTestEnvironment: Boolean, baseURL: String? = null) {
@@ -796,6 +796,18 @@ public class Grovs: ActivityProvider {
         // would duplicate lifecycle callbacks (and double-report screen views).
         application.unregisterActivityLifecycleCallbacks(applicationLifecycleObserver)
         application.registerActivityLifecycleCallbacks(applicationLifecycleObserver)
+        observeProcessLifecycle()
+    }
+
+    /** Lifecycle observers are main-thread only; configure() may run anywhere. */
+    private fun observeProcessLifecycle() {
+        if (Looper.myLooper() !== Looper.getMainLooper()) {
+            mainHandler.post { observeProcessLifecycle() }
+            return
+        }
+        val lifecycle = ProcessLifecycleOwner.get().lifecycle
+        lifecycle.removeObserver(processLifecycleObserver)
+        lifecycle.addObserver(processLifecycleObserver)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class) // CoroutineStart.ATOMIC

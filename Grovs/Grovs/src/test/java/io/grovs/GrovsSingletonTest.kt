@@ -53,6 +53,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 /**
  * Core unit tests for Grovs singleton class.
@@ -142,15 +143,54 @@ class GrovsSingletonTest {
     }
 
     @Test
-    fun `reconfigure keeps one application lifecycle callback registration`() {
+    fun `reconfigure reports the foreground once`() {
         Grovs.configure(application, "first-key", useTestEnvironment = true)
         Grovs.configure(application, "second-key", useTestEnvironment = true)
 
         val controller = Robolectric.buildActivity(TestActivity::class.java).create().start()
         try {
-            assertEquals(1, getLifecycleStartedCount())
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(1, foregroundEventCount())
         } finally {
             controller.stop().destroy()
+        }
+    }
+
+    @Test
+    fun `configure after the activity has started still detects the foreground`() {
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+        try {
+            Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+            Shadows.shadowOf(Looper.getMainLooper()).idle()
+
+            assertTrueWithContext(
+                currentGrovsContext().isForeground,
+                "isForeground",
+                "after configure() while the activity was already started"
+            )
+        } finally {
+            controller.pause().stop().destroy()
+        }
+    }
+
+    @Test
+    fun `background is detected when the only activity stops after a late configure`() {
+        val controller = Robolectric.buildActivity(TestActivity::class.java).create().start().resume()
+        Grovs.configure(application, "test-api-key", useTestEnvironment = true)
+        Shadows.shadowOf(Looper.getMainLooper()).idle()
+        assertTrueWithContext(currentGrovsContext().isForeground, "isForeground", "before the activity stopped")
+
+        controller.pause().stop()
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+
+        try {
+            assertFalseWithContext(
+                currentGrovsContext().isForeground,
+                "isForeground",
+                "after the only activity stopped following a late configure()"
+            )
+        } finally {
+            controller.destroy()
         }
     }
 
@@ -742,16 +782,8 @@ class GrovsSingletonTest {
         return instanceField.get(companion) as Grovs
     }
 
-    private fun getLifecycleStartedCount(): Int {
-        val grovsInstance = getGrovsInstance()
-        val observerField = Grovs::class.java.getDeclaredField("applicationLifecycleObserver")
-        observerField.isAccessible = true
-        val observer = observerField.get(grovsInstance)
-
-        val numStartedField = observer.javaClass.getDeclaredField("numStarted")
-        numStartedField.isAccessible = true
-        return numStartedField.getInt(observer)
-    }
+    private fun foregroundEventCount(): Int =
+        ShadowLog.getLogsForTag("Logger").count { it.msg.contains("App is in the foreground") }
 
     private fun grovsField(name: String) =
         Grovs::class.java.getDeclaredField(name).apply { isAccessible = true }

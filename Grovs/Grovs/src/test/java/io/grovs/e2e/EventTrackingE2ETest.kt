@@ -577,17 +577,14 @@ class EventTrackingE2ETest {
         val installCountAfterLaunch = eventCount("install")
         val appOpenCountAfterLaunch = eventCount("app_open")
 
-        // Act - cycle through background/foreground 3 times.
-        // Use pause/stop + start/resume with numStarted correction because
-        // Robolectric double-dispatches onActivityStarted when restarting a
-        // stopped AppCompatActivity, inflating numStarted. Without the reset,
-        // onAppBackgrounded never fires since numStarted never reaches 0.
+        // Act - cycle through background/foreground 3 times. The background is reported
+        // only after ProcessLifecycleOwner's delay, so the clock is idled past it.
         repeat(3) {
             activityController.pause().stop()
+            E2ETestUtils.settleProcessBackground()
             Thread.sleep(1000)
 
             activityController.start().resume()
-            E2ETestUtils.setNumStarted(1)
             E2ETestUtils.enableImmediateEventSending()
             Thread.sleep(1000)
         }
@@ -1004,16 +1001,13 @@ class EventTrackingE2ETest {
     ) {
         // Use the full lifecycle sequence (pause→stop, start→resume) because
         // Robolectric skips onActivityStopped if the activity hasn't been resumed.
-        // However, Robolectric also double-dispatches onActivityStarted during
-        // start→resume on a restarted AppCompatActivity, inflating numStarted.
-        // Reset numStarted after resume to ensure the next stop() correctly
-        // decrements to 0 and fires onAppBackgrounded.
+        // The background is reported only after ProcessLifecycleOwner's delay.
         activityController.pause().stop()
+        E2ETestUtils.settleProcessBackground()
         // Give GlobalScope.launch in onAppBackgrounded time to finalize TIME_SPENT node
         Thread.sleep(2000)
 
         activityController.start().resume()
-        E2ETestUtils.setNumStarted(1) // correct for Robolectric double-dispatch
         E2ETestUtils.enableImmediateEventSending()
         // Give serialDispatcher time to run handleIntent + onAppForegrounded (which sends TIME_SPENT)
         Thread.sleep(3000)
@@ -1231,7 +1225,6 @@ class EventTrackingE2ETest {
 
         val activityController = Robolectric.buildActivity(TestActivity::class.java)
         activityController.create().start().resume()
-        E2ETestUtils.setNumStarted(1) // correct for Robolectric double-dispatch
 
         waitForEvent("install")
         Thread.sleep(2000)

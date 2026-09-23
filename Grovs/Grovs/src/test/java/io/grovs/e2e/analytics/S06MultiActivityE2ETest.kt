@@ -245,14 +245,14 @@ class S06MultiActivityE2ETest : ScreenTrackingTestBase() {
         configure()
         E2ETestUtils.getAuthenticationJob()?.join()
 
-        val home = launch(S06HomeActivity::class.java) // numStarted -> 1, emits Home
+        val home = Robolectric.buildActivity(S06HomeActivity::class.java).create().start().resume() // emits Home
         settleAndFlush()
 
-        // Background: app leaves the foreground (numStarted -> 0).
-        dispatchStopped(home)
-        // Foreground again: numStarted -> 1 (short background: no session rotation, no dedup reset).
-        dispatchStarted(home)
-        dispatchResumed(home) // Home is still in the RESUMED lifecycle state
+        // Background: the only activity stops and the process lifecycle reports the background.
+        home.pause().stop()
+        E2ETestUtils.settleProcessBackground()
+        // Foreground again (short background: no session rotation, no dedup reset).
+        home.start().resume()
         settleAndFlush()
 
         // First Home reported; the foreground re-resume is deduped (< 1s, same name).

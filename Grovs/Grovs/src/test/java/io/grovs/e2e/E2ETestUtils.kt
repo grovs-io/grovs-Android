@@ -393,8 +393,7 @@ object E2ETestUtils {
                 grovsField("applicationLifecycleObserver") as? android.app.Application.ActivityLifecycleCallbacks
 
             // Each configure() call registers the same observer object; leaving old
-            // registrations in place duplicates lifecycle callbacks across tests and
-            // inflates numStarted so it never reaches 0, so both must be reset here.
+            // registrations in place duplicates lifecycle callbacks across tests.
             try {
                 if (registeredApplication != null && lifecycleObserver != null) {
                     // registerActivityLifecycleCallbacks adds to a list, not a set, so
@@ -403,18 +402,14 @@ object E2ETestUtils {
                         registeredApplication.unregisterActivityLifecycleCallbacks(lifecycleObserver)
                     }
                 }
-
-                if (lifecycleObserver != null) {
-                    try {
-                        val numStartedField = lifecycleObserver.javaClass.getDeclaredField("numStarted")
-                        numStartedField.isAccessible = true
-                        numStartedField.setInt(lifecycleObserver, 0)
-                    } catch (e: Exception) {
-                        errors.add("Failed to reset numStarted: ${e.message}")
-                    }
-                }
             } catch (e: Exception) {
                 errors.add("Failed to unregister lifecycle callbacks: ${e.message}")
+            }
+
+            try {
+                resetProcessLifecycle(grovsField("processLifecycleObserver") as? androidx.lifecycle.LifecycleObserver)
+            } catch (e: Exception) {
+                errors.add("Failed to reset the process lifecycle: ${e.message}")
             }
 
             // Reset nullable fields to null
@@ -743,20 +738,42 @@ object E2ETestUtils {
     }
 
     /**
-     * Get grovsId from GrovsContext.
+     * Puts ProcessLifecycleOwner back to the state of a freshly started process and attaches it
+     * to the current test Application. It is a process-wide singleton: Robolectric gives every
+     * test a new Application, but the owner would stay attached to the previous one and keep the
+     * previous test's activity counts. The SDK's observer is removed first so that resetting the
+     * state dispatches nothing to it.
      */
-    fun setNumStarted(value: Int) {
-        try {
-            val instance = getGrovsInstance() ?: return
-            val observerField = instance.javaClass.getDeclaredField("applicationLifecycleObserver")
-            observerField.isAccessible = true
-            val observer = observerField.get(instance) ?: return
-            val numStartedField = observer.javaClass.getDeclaredField("numStarted")
-            numStartedField.isAccessible = true
-            numStartedField.setInt(observer, value)
-        } catch (e: Exception) {
-            println("Could not set numStarted: ${e.message}")
-        }
+    fun resetProcessLifecycle(sdkObserver: androidx.lifecycle.LifecycleObserver?) {
+        val owner = androidx.lifecycle.ProcessLifecycleOwner.get() as androidx.lifecycle.ProcessLifecycleOwner
+        val registry = owner.lifecycle as androidx.lifecycle.LifecycleRegistry
+        sdkObserver?.let { registry.removeObserver(it) }
+        val ownerClass = androidx.lifecycle.ProcessLifecycleOwner::class.java
+        fun set(name: String, value: Any) =
+            ownerClass.getDeclaredField(name).apply { isAccessible = true }.set(owner, value)
+        set("startedCounter", 0)
+        set("resumedCounter", 0)
+        set("pauseSent", true)
+        set("stopSent", true)
+        registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
+        val application = org.robolectric.RuntimeEnvironment.getApplication()
+        // Before API 29 the owner reads activity starts from a ReportFragment that the dispatcher
+        // injects, so the dispatcher must attach first, as ProcessLifecycleInitializer does.
+        val dispatcher = Class.forName("androidx.lifecycle.LifecycleDispatcher")
+        (dispatcher.getDeclaredField("initialized").apply { isAccessible = true }.get(null)
+            as java.util.concurrent.atomic.AtomicBoolean).set(false)
+        dispatcher.getDeclaredMethod("init", android.content.Context::class.java).invoke(null, application)
+        ownerClass.getDeclaredMethod("init\$lifecycle_process_release", android.content.Context::class.java)
+            .invoke(null, application)
+    }
+
+    /**
+     * ProcessLifecycleOwner reports the background 700 ms after the last activity stops, so a
+     * configuration change does not look like leaving the app. Robolectric's clock only moves
+     * when the looper is idled for that long.
+     */
+    fun settleProcessBackground() {
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(800))
     }
 
     fun getGrovsId(): String? {
