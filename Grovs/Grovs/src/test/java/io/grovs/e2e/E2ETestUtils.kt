@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.Looper
 import android.provider.Settings
 import androidx.fragment.app.Fragment
+import androidx.test.core.app.ApplicationProvider
 import androidx.fragment.app.FragmentManager
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
@@ -13,6 +14,7 @@ import io.grovs.handlers.PendingLinkRetry
 import io.grovs.inapp.InAppImages
 import io.grovs.inapp.InAppPresenter
 import io.grovs.inapp.InAppSettings
+import io.grovs.inapp.ui.InAppDialogPresenter
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -459,6 +461,13 @@ object E2ETestUtils {
 
             try {
                 setInAppPresenter(null)
+                (grovsField("inAppPresenter") as? InAppDialogPresenter)?.let {
+                    it.dismiss()
+                    it.unregister(ApplicationProvider.getApplicationContext())
+                }
+                getGrovsInstance()?.let { instance ->
+                    Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }.set(instance, null)
+                }
                 (grovsField("inAppSettings") as? InAppSettings)?.apply {
                     listener = null
                     paused = false

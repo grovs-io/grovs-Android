@@ -6,11 +6,13 @@ import android.content.Intent
 import android.os.DeadObjectException
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
+import io.grovs.inapp.InAppDeviceFacts
 import io.grovs.inapp.InAppHost
 import io.grovs.inapp.InAppImages
 import io.grovs.inapp.InAppPresenter
 import io.grovs.inapp.InAppSettings
 import io.grovs.inapp.NoDrawPresenter
+import io.grovs.inapp.model.InAppPushPermission
 import io.grovs.model.AppDetails
 import io.grovs.model.CustomEventRules
 import io.grovs.model.DebugLogger
@@ -89,6 +91,10 @@ internal class GrovsManager(
     inAppSettings: InAppSettings = InAppSettings(),
     /// Builds what draws in-app messages.
     inAppPresenter: (InAppImages) -> InAppPresenter = { NoDrawPresenter },
+    /// What the device allows for notifications, read before every in-app decision.
+    inAppPushPermission: () -> InAppPushPermission = { InAppDeviceFacts.notificationsPermission(context) },
+    /// In-app actions this app cannot perform, such as a rating without Play review.
+    inAppUnsupportedActions: () -> List<String> = { emptyList() },
 ) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
@@ -274,6 +280,8 @@ internal class GrovsManager(
         isAuthenticated = { authenticationState == AuthenticationState.AUTHENTICATED },
         presenter = inAppPresenter,
         storeKey = (if (grovsContext.settings.useTestEnvironment) "test_" else "") + apiKey,
+        pushPermission = inAppPushPermission,
+        unsupportedActions = inAppUnsupportedActions,
     )
 
     init {

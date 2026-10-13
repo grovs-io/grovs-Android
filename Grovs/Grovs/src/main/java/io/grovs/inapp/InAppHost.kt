@@ -42,6 +42,7 @@ internal class InAppHost(
     images: InAppImages = InAppImages.forDevice(context, storeKey),
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
     pushPermission: () -> InAppPushPermission = { InAppDeviceFacts.notificationsPermission(context.applicationContext) },
+    unsupportedActions: () -> List<String> = { emptyList() },
     storeExecutor: ExecutorService = InAppQueuedStore.newExecutor(),
 ) {
     @Volatile
@@ -57,6 +58,7 @@ internal class InAppHost(
         attributes = { grovsContext.attributes },
         activity = activity,
         pushPermission = pushPermission,
+        unsupportedActions = unsupportedActions,
     )
 
     val controller = InAppController(

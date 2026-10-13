@@ -43,6 +43,8 @@ import io.grovs.inapp.InAppImages
 import io.grovs.inapp.InAppPresenter
 import io.grovs.inapp.InAppSettings
 import io.grovs.inapp.NoDrawPresenter
+import io.grovs.inapp.ui.InAppActions
+import io.grovs.inapp.ui.InAppDialogPresenter
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
@@ -527,8 +529,12 @@ public class Grovs: ActivityProvider {
     private var grovsNotificationsListener: GrovsNotificationsListener? = null
     /// The host's in-app choices, kept across configure() as iOS keeps them in statics.
     private val inAppSettings = InAppSettings()
+    /// One per process: the actions read the push permission and open links for every manager.
+    private var inAppActions: InAppActions? = null
+    /// The presenter the current manager draws with; registered for Activity changes until replaced.
+    private var inAppPresenter: InAppDialogPresenter? = null
     /// Builds what draws in-app messages for each new manager.
-    private var inAppPresenterFactory: (InAppImages) -> InAppPresenter = { NoDrawPresenter }
+    private var inAppPresenterFactory: (InAppImages) -> InAppPresenter = ::dialogPresenter
 
     private var launcherActivityReference: WeakReference<Activity>? = null
     private var currentActivityReference: WeakReference<Activity>? = null
@@ -861,13 +867,16 @@ public class Grovs: ActivityProvider {
             monitor.start()
         }
 
+        val actions = inAppActions(application)
         grovsManager = GrovsManager(context = application.applicationContext,
             application = application,
             grovsContext = grovsContext,
             apiKey = apiKey,
             activityProvider = this,
             inAppSettings = inAppSettings,
-            inAppPresenter = inAppPresenterFactory)
+            inAppPresenter = inAppPresenterFactory,
+            inAppPushPermission = actions::pushPermission,
+            inAppUnsupportedActions = actions::unsupportedActions)
 
         notificationsManager = NotificationsManager(context = application.applicationContext,
             grovsContext = grovsContext,
@@ -1294,6 +1303,26 @@ public class Grovs: ActivityProvider {
     fun discardInAppMessages(dismissCurrent: Boolean) = inAppChoice({ it.discard(dismissCurrent) }) { paused = true }
 
     fun setInAppExcludedScreens(screens: List<String>) = inAppChoice({ it.setExcludedScreens(screens) }) { setExcluded(screens) }
+
+    private fun inAppActions(application: Application): InAppActions = inAppActions
+        ?: InAppActions(application.applicationContext, activity = { currentActivityReference?.get() })
+            .also { inAppActions = it }
+
+    private fun dialogPresenter(images: InAppImages): InAppPresenter {
+        val app = application ?: return NoDrawPresenter
+        inAppPresenter?.let { previous ->
+            // configure() may run off the main thread; the window is only touched on it.
+            runOnMain {
+                previous.dismiss()
+                previous.unregister(app)
+            }
+        }
+        return InAppDialogPresenter({ currentActivityReference?.get() }, images, inAppActions(app))
+            .also {
+                it.register(app)
+                inAppPresenter = it
+            }
+    }
 
     /** Once a manager exists its controller owns the choice; before configure() it goes straight to the settings. */
     private fun inAppChoice(withHost: (InAppHost) -> Unit, withoutHost: InAppSettings.() -> Unit) = runOnMain {
