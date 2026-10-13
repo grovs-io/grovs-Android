@@ -124,6 +124,7 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.all {
             it.useJUnitPlatform()
+            it.maxHeapSize = "2g"
             it.testLogging {
                 events("passed", "skipped", "failed", "standardOut", "standardError")
                 showExceptions = true
