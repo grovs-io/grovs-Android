@@ -3,7 +3,9 @@ package io.grovs.inapp.ui
 import android.app.Activity
 import android.app.Application
 import android.content.ComponentCallbacks
+import android.content.Context
 import android.content.res.Configuration
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -37,6 +39,8 @@ internal class InAppDialogPresenter(
     private var window: InAppWindow? = null
     private var alert: InAppAlert? = null
     private var host: WeakReference<Activity>? = null
+    /** The shown window raised the keyboard for its comment box. */
+    private var typing = false
 
     internal val shownSession: InAppMessageSession? get() = session
     internal val shownWindow: InAppWindow? get() = window
@@ -146,6 +150,9 @@ internal class InAppDialogPresenter(
     /** A banner takes the keyboard only while its comment box is up; the box gets the focus. */
     private fun applyStep(shown: InAppWindow, view: InAppCardView, current: InAppMessageSession) {
         val commenting = current.step is InAppStep.Comment
+        // Hidden while the window still has focus, so a banner gives it up after.
+        if (typing && !commenting) hideKeyboard(shown)
+        typing = commenting
         if (current.campaign.template.isBanner) shown.setFocusable(commenting)
         if (!commenting) return
         val box = view.findViewById<EditText>(R.id.grovs_in_app_comment) ?: return
@@ -153,8 +160,16 @@ internal class InAppDialogPresenter(
         shown.dialog.window?.let { WindowCompat.getInsetsController(it, box).show(WindowInsetsCompat.Type.ime()) }
     }
 
+    private fun hideKeyboard(shown: InAppWindow) {
+        val token = shown.dialog.window?.decorView?.windowToken ?: return
+        val keyboard = shown.dialog.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        keyboard?.hideSoftInputFromWindow(token, 0)
+    }
+
     /** Drops what is drawn without an outcome; the session stays for the next Activity. */
     private fun detach() {
+        window?.let { if (typing) hideKeyboard(it) }
+        typing = false
         window?.close()
         window = null
         alert?.close()

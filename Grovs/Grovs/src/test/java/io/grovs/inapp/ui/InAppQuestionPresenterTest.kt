@@ -4,6 +4,8 @@ import android.app.Activity
 import android.os.Looper
 import android.view.View
 import android.view.WindowManager
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import io.grovs.R
 import io.grovs.e2e.TestActivity
@@ -11,6 +13,7 @@ import io.grovs.inapp.InAppOutcome
 import io.grovs.inapp.model.InAppAnswer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -39,6 +42,10 @@ class InAppQuestionPresenterTest {
 
     private val stars = """{"id":"q1","type":"stars","options":[],
         "comment":{"split":3,"low":"What went wrong?","high":"What did you like?"},"thanks":null,"review_from":4}"""
+    private val starsWithThanks = stars.replace(""""thanks":null""", """"thanks":"Thanks!"""")
+    private val imm get() = app.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+    private val keyboard get() = shadowOf(imm)
+    private fun raiseKeyboard() = imm.showSoftInput(controller.get().window.decorView, 0)
 
     @Before
     fun setUp() {
@@ -57,12 +64,16 @@ class InAppQuestionPresenterTest {
     }
 
     @After
-    fun tearDown() = presenter.unregister(app)
+    fun tearDown() {
+        presenter.dismiss()
+        idle()
+        presenter.unregister(app)
+    }
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
-    private fun present(template: String = "interstitial", isTest: Boolean = false) {
-        val campaign = InAppUiFixtures.campaign("""{"template":"$template","content":{"question":$stars}}""")
+    private fun present(template: String = "interstitial", isTest: Boolean = false, question: String = stars) {
+        val campaign = InAppUiFixtures.campaign("""{"template":"$template","content":{"question":$question}}""")
         presenter.present(InAppUiFixtures.presentation(campaign, isTest = isTest)) {
             events += "outcome"
             outcomes += it
@@ -175,5 +186,50 @@ class InAppQuestionPresenterTest {
         tap("grovs-in-app-answer-3")
         idle()
         assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(3), null), outcomes.single())
+    }
+
+    @Test
+    fun aBannerLetsTheKeyboardGoAgainForTheThanks() {
+        present(template = "footer", question = starsWithThanks)
+        tap("grovs-in-app-answer-2")
+        view(R.id.grovs_in_app_skip).performClick()
+        idle()
+        assertTrue(outcomes.isEmpty())
+        assertTrue(flags() and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+    }
+
+    @Test
+    fun theThanksHidesTheKeyboardTheCommentRaised() {
+        present(question = starsWithThanks)
+        tap("grovs-in-app-answer-5")
+        raiseKeyboard()
+        view(R.id.grovs_in_app_skip).performClick()
+        idle()
+        assertTrue(outcomes.isEmpty())
+        assertFalse(keyboard.isSoftInputVisible)
+    }
+
+    @Test
+    fun closingDuringTheCommentHidesTheKeyboard() {
+        present()
+        tap("grovs-in-app-answer-5")
+        raiseKeyboard()
+        presenter.dismiss()
+        idle()
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null), outcomes.single())
+        assertFalse(keyboard.isSoftInputVisible)
+    }
+
+    @Test
+    fun aQuestionWithoutACommentLeavesTheAppsKeyboardAlone() {
+        val question = """{"id":"q1","type":"stars","options":[],"comment":null,"thanks":"Thanks!","review_from":null}"""
+        present(template = "footer", question = question)
+        raiseKeyboard()
+        tap("grovs-in-app-answer-5")
+        idle()
+        assertTrue(keyboard.isSoftInputVisible)
+        shadowOf(Looper.getMainLooper()).idleFor(2_100, TimeUnit.MILLISECONDS)
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null), outcomes.single())
+        assertTrue(keyboard.isSoftInputVisible)
     }
 }
