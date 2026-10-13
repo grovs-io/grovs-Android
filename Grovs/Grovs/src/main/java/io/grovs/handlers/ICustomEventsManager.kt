@@ -20,6 +20,13 @@ internal interface ICustomEventsManager {
         createdAt: InstantCompat = InstantCompat.now(),
     )
 
+    /**
+     * Queues an SDK in-app event under [eventId], so a view's id is its event's id. Skips the name
+     * check of [GrovsManager.track], since in_app_* names are reserved for the SDK; keeps the
+     * consent gate and the session and link stamping of [track].
+     */
+    suspend fun trackInApp(eventId: String, name: String, properties: Map<String, Any>)
+
     /** Tags merged onto every subsequently tracked event. Pass null to clear. */
     fun setGlobalTags(tags: List<String>?)
 

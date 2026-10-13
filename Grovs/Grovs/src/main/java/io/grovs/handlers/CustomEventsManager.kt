@@ -118,6 +118,27 @@ internal class CustomEventsManager(
         }
     }
 
+    override suspend fun trackInApp(eventId: String, name: String, properties: Map<String, Any>) {
+        val token = grovsContext.consent.workToken(configuration) ?: run {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted, dropping event: $name")
+            return
+        }
+        val sessionId = grovsContext.sessionId
+        val attribution = currentAttribution
+        val event = CustomEvent(
+            eventId = eventId,
+            eventName = name,
+            sessionId = sessionId,
+            link = attribution?.takeIf { it.sessionId == sessionId }?.link,
+            createdAt = InstantCompat.now(),
+            properties = properties,
+        )
+        if (!grovsContext.consent.isCurrent(token)) return
+        withContext(token) {
+            grovsContext.consent.storeIfConsented(configuration) { customEventsStorage.addEvent(event) }
+        }
+    }
+
     override fun setGlobalTags(tags: List<String>?) {
         globalTags = CustomEventRules.sanitizeTags(tags)
     }
