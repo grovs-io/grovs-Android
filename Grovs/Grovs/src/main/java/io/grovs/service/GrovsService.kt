@@ -301,7 +301,11 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
 
     private fun reportInAppStamps(inApp: JsonElement?) {
         val stamps = inApp?.takeIf { it.isJsonObject }?.asJsonObject ?: return
-        onBatchStamps?.invoke(InAppJson.string(stamps.get("campaigns_changed_at")), InAppJson.string(stamps.get("user_changed_at")))
+        try {
+            onBatchStamps?.invoke(InAppJson.string(stamps.get("campaigns_changed_at")), InAppJson.string(stamps.get("user_changed_at")))
+        } catch (e: Exception) {
+            DebugLogger.instance.log(LogLevel.ERROR, "In-app stamps - listener failed: ${e.message}")
+        }
     }
 
     /// One POST events/batch. Never retries; the flush cycles own retrying.
@@ -311,7 +315,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             return LSResult.Error(IllegalArgumentException("$label - batch of ${events.size} exceeds $MAX_BATCH_SIZE"))
         }
         return try {
-            requestExecutor.single<LSResult<BatchEventsResponse>> { token ->
+            val result = requestExecutor.single<LSResult<BatchEventsResponse>> { token ->
                 DebugLogger.instance.log(LogLevel.INFO, "$label batch - ${events.size} events")
                 val response = grovsApi.addEventsBatch(BatchEventsRequest(events), token)
                 if (!response.isSuccessful) {
@@ -325,9 +329,10 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                     DebugLogger.instance.log(LogLevel.ERROR, "$label batch - ${parsed.rejected} events rejected: ${parsed.errors}")
                 }
                 DebugLogger.instance.log(LogLevel.INFO, "$label batch - Successful, accepted ${parsed.accepted}")
-                reportInAppStamps(parsed.inApp)
                 LSResult.Success(parsed)
             }
+            if (result is LSResult.Success) reportInAppStamps(result.data.inApp)
+            result
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

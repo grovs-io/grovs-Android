@@ -4,8 +4,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import io.grovs.model.CustomEvent
+import io.grovs.model.DebugLogger
 import io.grovs.model.Event
 import io.grovs.model.EventType
+import io.grovs.model.LogLevel
 import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -16,6 +18,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 @ExperimentalCoroutinesApi
 @RunWith(AndroidJUnit4::class)
@@ -112,5 +115,33 @@ class GrovsServiceInAppTest : ServiceTestBase() {
         mockWebServer.enqueue(MockResponse().setResponseCode(200).setBody("""{"accepted":1,"rejected":0,"errors":[]}"""))
         service.addCustomEvents(listOf(CustomEvent(eventName = "x", createdAt = InstantCompat.now())))
         assertTrue(!told)
+    }
+
+    @Test
+    fun `a throwing stamps listener never fails the batch`() = runTest {
+        service.onBatchStamps = { _, _ -> throw IllegalStateException("boom") }
+        val inApp = """{"accepted":1,"rejected":0,"errors":[],"in_app":{"campaigns_changed_at":"c","user_changed_at":"u"}}"""
+        mockWebServer.enqueue(MockResponse().setResponseCode(200).setBody(inApp))
+        mockWebServer.enqueue(MockResponse().setResponseCode(200).setBody(inApp))
+
+        val custom = service.addCustomEvents(listOf(CustomEvent(eventName = "x", createdAt = InstantCompat.now())))
+        val system = service.addEvents(listOf(Event(event = EventType.APP_OPEN, createdAt = InstantCompat.now(), sessionId = "s1")))
+
+        assertTrue(custom is LSResult.Success)
+        assertTrue(system is LSResult.Success)
+    }
+
+    @Test
+    fun `the no in-app message is logged once across two 404 syncs`() = runTest {
+        DebugLogger.instance.logLevel = LogLevel.INFO
+        ShadowLog.clear()
+        mockWebServer.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+        mockWebServer.enqueue(MockResponse().setResponseCode(404).setBody("{}"))
+
+        service.inAppSync(body())
+        service.inAppSync(body())
+
+        val told = ShadowLog.getLogs().count { it.msg.contains("this server has no in-app messages") }
+        assertEquals(1, told)
     }
 }
