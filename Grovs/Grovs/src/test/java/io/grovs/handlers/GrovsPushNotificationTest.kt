@@ -1,11 +1,17 @@
 package io.grovs.handlers
 
 import android.app.NotificationManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import io.grovs.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -49,5 +55,60 @@ class GrovsPushNotificationTest {
             assertNotNull(channel)
             assertEquals(NotificationManager.IMPORTANCE_HIGH, channel.importance)
         }
+    }
+
+    @Test
+    fun `a grovs push is recognised by its campaign id`() {
+        assertTrue(isGrovsPush(mapOf("grovs_campaign_id" to "abc")))
+        assertFalse(isGrovsPush(mapOf("grovs_campaign_id" to "")))
+        assertFalse(isGrovsPush(mapOf("linksquared" to "true")))
+        assertFalse(isGrovsPush(emptyMap()))
+    }
+
+    @Test
+    fun `tapping the notification opens the app with the push data`() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        registerLauncherActivity(context)
+
+        showGrovsPushNotification(
+            context, "Title", "Body", R.drawable.ic_grovs_notification_default_small,
+            mapOf("grovs_campaign_id" to "abc", "grovs_link" to "https://app.grovs.link/promo"),
+        )
+
+        val contentIntent = shadowOf(manager).allNotifications.single().contentIntent
+        assertNotNull("the notification should open the app when tapped", contentIntent)
+        val opened = shadowOf(contentIntent).savedIntent
+        assertEquals(LAUNCHER_ACTIVITY, opened.component?.className)
+        assertEquals("abc", opened.getStringExtra("grovs_campaign_id"))
+        assertEquals("https://app.grovs.link/promo", opened.getStringExtra("grovs_link"))
+    }
+
+    @Test
+    fun `without a launcher activity the notification still posts`() {
+        val context = RuntimeEnvironment.getApplication()
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        showGrovsPushNotification(
+            context, "Title", "Body", R.drawable.ic_grovs_notification_default_small,
+            mapOf("grovs_campaign_id" to "abc"),
+        )
+
+        val notification = shadowOf(manager).allNotifications.single()
+        assertNull(notification.contentIntent)
+    }
+
+    private fun registerLauncherActivity(context: Context) {
+        val component = ComponentName(context.packageName, LAUNCHER_ACTIVITY)
+        val packageManager = shadowOf(context.packageManager)
+        packageManager.addActivityIfNotPresent(component)
+        packageManager.addIntentFilterForActivity(
+            component,
+            IntentFilter(Intent.ACTION_MAIN).apply { addCategory(Intent.CATEGORY_LAUNCHER) },
+        )
+    }
+
+    private companion object {
+        const val LAUNCHER_ACTIVITY = "io.grovs.test.LauncherActivity"
     }
 }

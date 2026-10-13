@@ -2,20 +2,32 @@ package io.grovs.handlers
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.PendingIntentCompat
 import androidx.core.content.ContextCompat
 import io.grovs.R
 import kotlin.random.Random
 
 internal const val GROVS_NOTIFICATION_CHANNEL_ID = "GrovsChannel"
+internal const val GROVS_CAMPAIGN_ID_KEY = "grovs_campaign_id"
+
+internal fun isGrovsPush(data: Map<String, String>): Boolean = !data[GROVS_CAMPAIGN_ID_KEY].isNullOrEmpty()
 
 /**
  * Posts a Grovs push as a local notification. Kept off the Firebase service so it can run
  * with a plain [Context] under test on every API level the SDK supports (minSdk 21).
  */
-internal fun showGrovsPushNotification(context: Context, title: String?, body: String?, smallIcon: Int) {
+internal fun showGrovsPushNotification(
+    context: Context,
+    title: String?,
+    body: String?,
+    smallIcon: Int,
+    data: Map<String, String> = emptyMap(),
+) {
     val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     // Notification channels only exist from API 26. Below that the class is missing at
@@ -33,16 +45,25 @@ internal fun showGrovsPushNotification(context: Context, title: String?, body: S
         notificationManager.createNotificationChannel(channel)
     }
 
+    val notificationId = Random.nextInt(1000, Int.MAX_VALUE)
     val notification = NotificationCompat.Builder(context, GROVS_NOTIFICATION_CHANNEL_ID)
         .setSmallIcon(smallIcon)
         .setContentTitle(title)
         .setContentText(body)
         .setAutoCancel(true)
+        .setContentIntent(openAppIntent(context, notificationId, data))
         // Pre-26 devices have no channel importance, so this is what makes the
         // notification heads-up there. On 26+ the channel importance wins.
         .setPriority(NotificationCompat.PRIORITY_HIGH)
         .build()
 
-    val notificationId = Random.nextInt(1000, Int.MAX_VALUE)
     notificationManager.notify(notificationId, notification)
+}
+
+/** Opens the app the way Firebase does for a push received in the background: launcher activity, data as extras. */
+private fun openAppIntent(context: Context, requestCode: Int, data: Map<String, String>): PendingIntent? {
+    val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
+    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    data.forEach { (key, value) -> launch.putExtra(key, value) }
+    return PendingIntentCompat.getActivity(context, requestCode, launch, PendingIntent.FLAG_UPDATE_CURRENT, false)
 }

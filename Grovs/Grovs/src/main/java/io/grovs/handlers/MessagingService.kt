@@ -31,8 +31,7 @@ class MessagingService: FirebaseMessagingService() {
 }
 
 fun FirebaseMessagingService.handleGrovsNotification(message: RemoteMessage): Boolean {
-    val data = message.data
-    if (data["linksquared"] == null) {
+    if (!isGrovsPush(message.data)) {
         return false
     }
 
@@ -52,6 +51,7 @@ fun FirebaseMessagingService.handleGrovsNotification(message: RemoteMessage): Bo
         message.notification?.title,
         message.notification?.body,
         iconResId ?: R.drawable.ic_grovs_notification_default_small,
+        message.data,
     )
 
     return true
