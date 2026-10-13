@@ -64,6 +64,7 @@ internal class InAppActions(
     /** Android cannot tell "never asked" from "refused for good", so a request the SDK made counts as asked. */
     fun pushPermission(): InAppPushPermission {
         if (sdkInt < 33) return if (notificationsOn()) InAppPushPermission.GRANTED else InAppPushPermission.DENIED
+        // Granted but switched off in settings: asking again does nothing, so it counts as denied.
         if (permissionGranted()) return if (notificationsOn()) InAppPushPermission.GRANTED else InAppPushPermission.DENIED
         val asked = prefs.getBoolean(ASKED, false) || rationale(activity())
         return if (asked) InAppPushPermission.DENIED else InAppPushPermission.NOT_ASKED
@@ -149,7 +150,7 @@ private fun declaredPermission(context: Context, permission: String): Boolean = 
     false
 }
 
-/** Asks the system; a host that is not a ComponentActivity gets the answer, so it is read again once the host comes back. */
+/** Asks the system; a host that is not a ComponentActivity gets the answer, so it is read again once the host comes back or goes away. */
 internal fun requestNotificationPermission(host: Activity, done: (Boolean) -> Unit) {
     if (host is ComponentActivity) {
         var launcher: ActivityResultLauncher<String>? = null
@@ -164,7 +165,10 @@ internal fun requestNotificationPermission(host: Activity, done: (Boolean) -> Un
     }
     ActivityCompat.requestPermissions(host, arrayOf(POST_NOTIFICATIONS), 0x6E0)
     host.application.registerActivityLifecycleCallbacks(object : InAppActivityCallbacks() {
-        override fun onActivityResumed(activity: Activity) {
+        override fun onActivityResumed(activity: Activity) = answerFor(activity)
+        override fun onActivityDestroyed(activity: Activity) = answerFor(activity)
+
+        private fun answerFor(activity: Activity) {
             if (activity !== host) return
             host.application.unregisterActivityLifecycleCallbacks(this)
             done(ContextCompat.checkSelfPermission(host, POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)

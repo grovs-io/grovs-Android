@@ -1,8 +1,9 @@
 package io.grovs.inapp.ui
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Intent
-import android.content.pm.ResolveInfo
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Looper
 import android.provider.Settings
@@ -72,14 +73,31 @@ class InAppActionsTest {
     fun theStoreOpensInPlayFirstThenAnyHandler() {
         val store = "https://play.google.com/store/apps/details?id=io.acme"
         shadowOf(app).checkActivities(true)
-        val browser = Intent(Intent.ACTION_VIEW, Uri.parse(store))
-        shadowOf(app.packageManager).addResolveInfoForIntent(browser, ResolveInfo().apply {
-            activityInfo = android.content.pm.ActivityInfo().apply { packageName = "com.browser"; name = "Browser" }
-        })
+        addViewHandler(ComponentName("com.browser", "Browser"))
         actions().openStore(store)
         val intent = started()!!
         assertNull(intent.`package`)
         assertEquals(Uri.parse(store), intent.data)
+    }
+
+    @Test
+    fun theStoreOpensInPlayWhenPlayIsThere() {
+        val store = "https://play.google.com/store/apps/details?id=io.acme"
+        shadowOf(app).checkActivities(true)
+        addViewHandler(ComponentName("com.android.vending", "Store"))
+        actions().openStore(store)
+        val intent = started()!!
+        assertEquals("com.android.vending", intent.`package`)
+        assertEquals(Uri.parse(store), intent.data)
+    }
+
+    private fun addViewHandler(component: ComponentName) {
+        val packages = shadowOf(app.packageManager)
+        packages.addActivityIfNotPresent(component)
+        packages.addIntentFilterForActivity(component, IntentFilter(Intent.ACTION_VIEW).apply {
+            addCategory(Intent.CATEGORY_DEFAULT)
+            addDataScheme("https")
+        })
     }
 
     @Test
@@ -171,5 +189,24 @@ class InAppActionsTest {
     fun theRealRequestAsksTheSystemThroughTheActivity() {
         requestNotificationPermission(activity) { }
         assertTrue(shadowOf(activity).lastRequestedPermission.requestedPermissions.contains(push))
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun aPlainActivityDestroyedBeforeItResumesStillAnswersAndLetsGo() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        val before = lifecycleCallbacks()
+        var answers = 0
+        requestNotificationPermission(controller.get()) { answers++ }
+        assertEquals(before + 1, lifecycleCallbacks())
+        controller.pause().stop().destroy()
+        assertEquals(1, answers)
+        assertEquals(before, lifecycleCallbacks())
+    }
+
+    private fun lifecycleCallbacks(): Int {
+        val field = android.app.Application::class.java.getDeclaredField("mActivityLifecycleCallbacks")
+        field.isAccessible = true
+        return (field.get(app) as java.util.ArrayList<*>).size
     }
 }

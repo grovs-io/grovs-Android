@@ -41,6 +41,7 @@
 -dontwarn io.grovs.GrovsMessaging
 -dontwarn com.google.android.play.core.review.**
 -dontwarn io.grovs.inapp.ui.InAppPlayReview
+-keepnames class com.google.android.play.core.review.ReviewManagerFactory
 
 ################################################################################
 # Retrofit
