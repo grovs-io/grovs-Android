@@ -1,5 +1,6 @@
 package io.grovs.service
 
+import com.google.gson.JsonObject
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
 import io.grovs.model.BatchEventsResponse
@@ -96,6 +97,12 @@ interface IGrovsService {
 
     /** Same contract as [addEvents], for custom events. */
     suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<BatchEventsResponse>
+
+    /**
+     * POST in_app/sync. Success only for a 2xx with a JSON object body. One attempt: the in-app
+     * controller owns when to try again.
+     */
+    suspend fun inAppSync(body: JsonObject): LSResult<JsonObject>
 
     /**
      * Get notifications.

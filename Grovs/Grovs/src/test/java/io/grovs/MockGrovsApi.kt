@@ -1,5 +1,6 @@
 package io.grovs
 
+import com.google.gson.JsonObject
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.ConsentToken
 import io.grovs.model.PushOpenRequest
@@ -54,6 +55,8 @@ internal class MockGrovsApi : GrovsApi {
     var notificationsToDisplayAutomaticallyResponse: Response<NotificationsResponse>? = null
     var syncScreenAliasesResponse: Response<Unit>? = null
     var pushOpenResponse: Response<Unit>? = null
+    var inAppSyncResponse: Response<JsonObject>? = null
+    val inAppSyncCalls = mutableListOf<JsonObject>()
 
     // Track method calls for verification
     var authenticateCalls = mutableListOf<AppDetails>()
@@ -143,6 +146,11 @@ internal class MockGrovsApi : GrovsApi {
         return syncScreenAliasesResponse ?: Response.success(Unit)
     }
 
+    override suspend fun inAppSync(body: JsonObject, token: ConsentToken): Response<JsonObject> {
+        inAppSyncCalls.add(body)
+        return inAppSyncResponse ?: Response.error(404, "{}".toResponseBody("application/json".toMediaType()))
+    }
+
     override suspend fun pushOpen(request: PushOpenRequest, token: ConsentToken): Response<Unit> {
         pushOpenCalls.add(request)
         return pushOpenResponse ?: Response.success(Unit)
@@ -169,6 +177,7 @@ internal class MockGrovsApi : GrovsApi {
         notificationsToDisplayAutomaticallyResponse = null
         syncScreenAliasesResponse = null
         pushOpenResponse = null
+        inAppSyncResponse = null
 
         authenticateCalls.clear()
         generateLinkCalls.clear()
@@ -181,6 +190,7 @@ internal class MockGrovsApi : GrovsApi {
         payloadCalls.clear()
         payloadWithLinkCalls.clear()
         pushOpenCalls.clear()
+        inAppSyncCalls.clear()
     }
 
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()

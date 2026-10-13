@@ -1,6 +1,7 @@
 package io.grovs.api
 
 import android.os.Parcelable
+import com.google.gson.JsonObject
 import io.grovs.handlers.ConsentToken
 import io.grovs.model.PushOpenRequest
 import io.grovs.model.ScreenAliasesRequest
@@ -55,6 +56,9 @@ internal interface GrovsApi {
 
     @POST("events/batch")
     suspend fun addEventsBatch(@Body request: BatchEventsRequest, @Tag token: ConsentToken): Response<BatchEventsResponse>
+
+    @POST("in_app/sync")
+    suspend fun inAppSync(@Body body: JsonObject, @Tag token: ConsentToken): Response<JsonObject>
 
     @POST("add_payment_event")
     suspend fun addPaymentEvent(@Body request: PaymentEvent, @Tag token: ConsentToken): Response<Unit>

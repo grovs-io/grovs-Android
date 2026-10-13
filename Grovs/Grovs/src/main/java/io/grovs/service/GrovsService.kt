@@ -4,11 +4,14 @@ import android.content.Context
 import android.os.Build
 import android.os.Parcelable
 import com.google.gson.GsonBuilder
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.GrovsContext
+import io.grovs.inapp.model.InAppJson
 import io.grovs.model.PushOpenRequest
 import io.grovs.model.ScreenAlias
 import io.grovs.model.ScreenAliasesRequest
@@ -143,6 +146,14 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         const val MAX_BATCH_SIZE = 50
     }
 
+    /// Told the in_app stamps of every accepted batch, custom and system events alike.
+    @Volatile
+    @get:JvmSynthetic
+    internal var onBatchStamps: ((campaignsChangedAt: String?, userChangedAt: String?) -> Unit)? = null
+
+    @Volatile
+    private var reportedNoInApp = false
+
     init {
         grovsApi = getRetrofit().create(GrovsApi::class.java)
     }
@@ -274,6 +285,25 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
     override suspend fun addCustomEvents(events: List<CustomEvent>): LSResult<BatchEventsResponse> =
         postBatch(events, label = "Add custom events")
 
+    override suspend fun inAppSync(body: JsonObject): LSResult<JsonObject> = singleResult { token ->
+        val response = grovsApi.inAppSync(body, token)
+        val parsed = response.body()
+        if (response.isSuccessful && parsed != null) return@singleResult LSResult.Success(parsed)
+        if (response.code() != 404) {
+            DebugLogger.instance.log(LogLevel.INFO, "In-app sync - Failed (${response.code()})")
+        } else if (!reportedNoInApp) {
+            // A Community Edition server has no in-app route; say so once, not at every sync.
+            reportedNoInApp = true
+            DebugLogger.instance.log(LogLevel.INFO, "In-app sync - this server has no in-app messages")
+        }
+        LSResult.Error(HttpStatusException(response.code(), "In-app sync failed (${response.code()})"))
+    }
+
+    private fun reportInAppStamps(inApp: JsonElement?) {
+        val stamps = inApp?.takeIf { it.isJsonObject }?.asJsonObject ?: return
+        onBatchStamps?.invoke(InAppJson.string(stamps.get("campaigns_changed_at")), InAppJson.string(stamps.get("user_changed_at")))
+    }
+
     /// One POST events/batch. Never retries; the flush cycles own retrying.
     private suspend fun postBatch(events: List<Any>, label: String): LSResult<BatchEventsResponse> {
         if (events.isEmpty()) return LSResult.Success(BatchEventsResponse(accepted = 0, rejected = 0))
@@ -295,6 +325,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
                     DebugLogger.instance.log(LogLevel.ERROR, "$label batch - ${parsed.rejected} events rejected: ${parsed.errors}")
                 }
                 DebugLogger.instance.log(LogLevel.INFO, "$label batch - Successful, accepted ${parsed.accepted}")
+                reportInAppStamps(parsed.inApp)
                 LSResult.Success(parsed)
             }
         } catch (e: CancellationException) {

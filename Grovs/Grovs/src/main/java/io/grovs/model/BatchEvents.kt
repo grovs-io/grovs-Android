@@ -1,5 +1,6 @@
 package io.grovs.model
 
+import com.google.gson.JsonElement
 import com.google.gson.annotations.SerializedName
 
 /// Body of POST events/batch. Items are `Event` or `CustomEvent`; Gson serialises each by its
@@ -25,6 +26,9 @@ data class BatchEventsResponse(
     val rejected: Int,
     @SerializedName("errors")
     private val rawErrors: List<BatchEventError>? = null,
+    /// The in-app stamps; kept as a tree so an unexpected shape can never fail the batch.
+    @SerializedName("in_app")
+    val inApp: JsonElement? = null,
 ) {
     val errors: List<BatchEventError> get() = rawErrors ?: emptyList()
 }
