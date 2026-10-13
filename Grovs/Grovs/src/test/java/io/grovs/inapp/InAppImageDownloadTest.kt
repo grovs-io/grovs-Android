@@ -6,7 +6,9 @@ import okhttp3.mockwebserver.MockWebServer
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,7 +37,7 @@ class InAppImageDownloadTest {
         var result: ByteArray? = null
         val latch = CountDownLatch(1)
         InAppImages.download(server.url(path).toString()) { result = it; latch.countDown() }
-        latch.await(5, TimeUnit.SECONDS)
+        assertTrue("download did not finish", latch.await(5, TimeUnit.SECONDS))
         return result
     }
 
@@ -64,7 +66,29 @@ class InAppImageDownloadTest {
     @Test
     fun `an address OkHttp cannot read gives nothing`() {
         var result: ByteArray? = byteArrayOf(1)
-        InAppImages.download("https://") { result = it }
+        var called = false
+        InAppImages.download("https://") { result = it; called = true }
+        assertTrue(called)
         assertNull(result)
+    }
+
+    @Test
+    fun `a body of unknown length over five megabytes gives nothing`() {
+        server.enqueue(MockResponse().setChunkedBody(Buffer().write(ByteArray(InAppImages.MAX_BYTES + 1)), 8192))
+        assertNull(fetch("/chunked.png"))
+    }
+
+    @Test
+    fun `a body of exactly five megabytes is accepted`() {
+        val body = ByteArray(InAppImages.MAX_BYTES)
+        server.enqueue(MockResponse().setBody(Buffer().write(body)))
+        assertArrayEquals(body, fetch("/exact.png"))
+    }
+
+    @Test
+    fun `a redirect that changes the scheme is not followed`() {
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "https://localhost:${server.port}/other.png"))
+        assertNull(fetch("/a.png"))
+        assertEquals(1, server.requestCount)
     }
 }

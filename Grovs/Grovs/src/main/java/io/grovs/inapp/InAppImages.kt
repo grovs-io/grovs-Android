@@ -71,9 +71,12 @@ internal class InAppImages(
         /** Larger than any picture a message needs; a bigger file is not kept. */
         const val MAX_BYTES = 5 * 1024 * 1024
 
-        /** Not the SDK's client: no project or device header may reach an image host. */
+        /**
+         * Not the SDK's client: no project or device header may reach an image host.
+         * A redirect that changes the scheme is not followed, so an https image never ends up on http.
+         */
         private val client: OkHttpClient by lazy {
-            OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).build()
+            OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).followSslRedirects(false).build()
         }
 
         fun images(campaign: JsonElement): List<String> {
