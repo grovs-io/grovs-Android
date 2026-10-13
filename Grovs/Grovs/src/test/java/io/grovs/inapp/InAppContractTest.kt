@@ -23,7 +23,7 @@ class InAppContractTest {
 
     @Test
     fun `the no draw presenter has nowhere to draw`() {
-        assertFalse(NoDrawPresenter.present(dummyPresentation()) { throw AssertionError("never called") })
+        assertFalse(NoDrawPresenter.present(InAppFixtures.dummyPresentation()) { throw AssertionError("never called") })
         NoDrawPresenter.dismiss()
     }
 
@@ -51,17 +51,4 @@ class InAppContractTest {
         assertEquals(mapOf("n" to 1L), map["nested"])
         assertFalse(InAppHostValues.toProperties(json).containsKey("none"))
     }
-}
-
-private fun dummyPresentation(): InAppPresentation {
-    val raw = JsonParser.parseString(
-        """{"format":1,"id":"c1","revision":1,"created_at":"2026-09-01T00:00:00Z","priority":1,"template":"interstitial",
-        "content":{"title":"Hello","message":"Welcome","buttons":[],"tap_action":null},
-        "triggers":[{"type":"event","name":"cart_viewed"}],"conditions":[],
-        "caps":{"session":null,"day":null,"week":null,"lifetime":null,"ignore_global":false},
-        "schedule":{"start_at":"2026-09-01T00:00:00Z","end_at":null,"days":null,"from":null,"to":null},
-        "delay_seconds":0,"delivery_mode":"device","variants":null,"control_group":null,"conversion":null}"""
-    )
-    val campaign = io.grovs.inapp.model.InAppDefinition.readCampaign(raw)!!
-    return InAppPresentation(campaign, io.grovs.inapp.model.InAppRendered("Hello", "Welcome", emptyList(), emptyList()))
 }

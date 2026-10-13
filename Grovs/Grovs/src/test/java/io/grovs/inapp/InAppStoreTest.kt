@@ -94,18 +94,3 @@ class InAppStoreTest {
         assertEquals(false, InAppFileStore(temp.root, "key").write("x", InAppRecord.STATE))
     }
 }
-
-internal class FakeInAppStore : InAppStoring {
-    val records = mutableMapOf<InAppRecord, String>()
-    val written = mutableListOf<InAppRecord>()
-    var refuses = false
-
-    override fun read(record: InAppRecord): String? = records[record]
-
-    override fun write(text: String, record: InAppRecord): Boolean {
-        if (refuses) return false
-        records[record] = text
-        written.add(record)
-        return true
-    }
-}
