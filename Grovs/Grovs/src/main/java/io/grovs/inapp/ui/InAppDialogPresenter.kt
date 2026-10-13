@@ -47,8 +47,11 @@ internal class InAppDialogPresenter(
 
     override fun present(presentation: InAppPresentation, completion: (InAppOutcome) -> Unit): Boolean {
         dismiss()
+        // The dismissal's report may already have shown something else.
+        if (session != null) return false
         if (presentation.campaign.template == InAppTemplate.HTML) return false
         val target = activity() ?: return false
+        if (!fits(presentation.campaign.content.orientation, target.resources.configuration)) return false
         val next = InAppMessageSession(presentation) { outcome -> finish(presentation, outcome, completion) }
         session = next
         if (!attach(target, next)) {
@@ -129,7 +132,7 @@ internal class InAppDialogPresenter(
         val current = session ?: return
         if (host?.get() === activity && (window != null || alert != null)) return
         detach()
-        if (!fits(current, activity.resources.configuration)) return current.leave("orientation")
+        if (!fits(current.campaign.content.orientation, activity.resources.configuration)) return current.leave("orientation")
         attach(activity, current)
     }
 
@@ -145,15 +148,15 @@ internal class InAppDialogPresenter(
     override fun onConfigurationChanged(newConfig: Configuration) {
         val current = session ?: return
         if (host == null) return
-        if (!fits(current, newConfig)) current.leave("orientation")
+        if (!fits(current.campaign.content.orientation, newConfig)) current.leave("orientation")
     }
 
     @Deprecated("Deprecated in Java")
     override fun onLowMemory() {}
 
-    private fun fits(current: InAppMessageSession, configuration: Configuration): Boolean {
+    private fun fits(orientation: InAppOrientation, configuration: Configuration): Boolean {
         val held = if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) InAppOrientation.LANDSCAPE
         else InAppOrientation.PORTRAIT
-        return current.campaign.content.orientation.fits(held)
+        return orientation.fits(held)
     }
 }

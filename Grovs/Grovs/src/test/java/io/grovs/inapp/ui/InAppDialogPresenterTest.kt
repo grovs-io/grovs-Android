@@ -1,6 +1,7 @@
 package io.grovs.inapp.ui
 
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.res.Configuration
 import android.os.Looper
 import android.view.View
@@ -38,8 +39,8 @@ class InAppDialogPresenterTest {
     private var current: Activity? = null
     private lateinit var presenter: InAppDialogPresenter
     private val outcomes = mutableListOf<InAppOutcome>()
-    private val opened = mutableListOf<String>()
     private val events = mutableListOf<String>()
+    private var onCompletion: () -> Unit = {}
 
     @Before
     fun setUp() {
@@ -64,6 +65,7 @@ class InAppDialogPresenterTest {
         val shown = presenter.present(presentation ?: InAppUiFixtures.presentation(InAppUiFixtures.campaign(changes))) {
             events += "completion"
             outcomes += it
+            onCompletion()
         }
         idle()
         return shown
@@ -148,9 +150,15 @@ class InAppDialogPresenterTest {
         val changes = """{"content":{"buttons":[{"id":"b1","text":"Go","action":{"type":"open_url","url":"https://acme.example/x"}}]}}"""
         val campaign = InAppUiFixtures.campaign(changes)
         present(presentation = InAppUiFixtures.presentation(campaign, urls = listOf("https://acme.example/x")))
-        presenter.shownWindow!!.dialog.window!!.decorView.findViewWithTag<View>("grovs-in-app-button-b1").performClick()
+        val window = presenter.shownWindow!!
+        onCompletion = {
+            if (presenter.shownWindow == null && !window.dialog.isShowing) events += "closed before report"
+            if (shadowOf(current).peekNextStartedActivity() == null) events += "nothing opened before report"
+        }
+        window.dialog.window!!.decorView.findViewWithTag<View>("grovs-in-app-button-b1").performClick()
         idle()
         assertEquals(InAppActionType.OPEN_URL, (outcomes.single() as InAppOutcome.Clicked).action.type)
+        assertEquals(listOf("completion", "closed before report", "nothing opened before report"), events)
         assertEquals("https://acme.example/x", shadowOf(current).nextStartedActivity.dataString)
     }
 
@@ -232,6 +240,110 @@ class InAppDialogPresenterTest {
         assertTrue(ShadowDialog.getLatestDialog().isShowing)
         assertTrue(outcomes.isEmpty())
         presenter.dismiss()
+        assertEquals(InAppOutcome.Dismissed("app"), outcomes.single())
+    }
+
+    private fun clickButtonOnly(type: String) {
+        val changes = """{"content":{"buttons":[{"id":"b1","text":"Go","action":{"type":"$type"}}]}}"""
+        present(changes)
+        presenter.shownWindow!!.dialog.window!!.decorView.findViewWithTag<View>("grovs-in-app-button-b1").performClick()
+        idle()
+    }
+
+    private fun presenterWith(actions: InAppActions) {
+        presenter.unregister(app)
+        presenter = InAppDialogPresenter({ current }, InAppUiFixtures.images(folder.newFolder("img2")), actions)
+        presenter.register(app)
+    }
+
+    @Test
+    fun theRatingActionRunsAfterTheReport() {
+        presenterWith(InAppActions(app, { current }, reviewAvailable = true, review = { _, done ->
+            events += "review"
+            done()
+        }))
+        clickButtonOnly("request_app_rating")
+        assertEquals(listOf("completion", "review"), events)
+    }
+
+    @Test
+    fun thePushPermissionActionRunsAfterTheReport() {
+        // Below 33 the compat check reads granted from whether notifications are on.
+        shadowOf(app.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(false)
+        presenterWith(InAppActions(app, { current }, sdkInt = 33, declares = { true }, requestPermission = { _, done ->
+            events += "push"
+            done(true)
+        }, reviewAvailable = false))
+        clickButtonOnly("request_push_permission")
+        assertEquals(listOf("completion", "push"), events)
+    }
+
+    @Test
+    fun dismissWhileInTheBackgroundReportsAnAppDismissalOnce() {
+        present()
+        controller.pause().stop()
+        idle()
+        assertNull(presenter.shownWindow)
+        presenter.dismiss()
+        presenter.dismiss()
+        assertEquals(InAppOutcome.Dismissed("app"), outcomes.single())
+        assertNull(presenter.shownSession)
+    }
+
+    @Test
+    fun presentingWhileTheMessageIsInTheBackgroundEndsItAsAnAppDismissal() {
+        present()
+        val first = presenter.shownWindow!!
+        controller.pause().stop()
+        current = null
+        idle()
+        assertFalse(present("""{"id":"c2"}"""))
+        assertEquals(InAppOutcome.Dismissed("app"), outcomes.single())
+        assertFalse(first.dialog.isShowing)
+        assertNull(presenter.shownSession)
+    }
+
+    @Test
+    fun aMessageHeldToTheOtherOrientationIsNotPresented() {
+        RuntimeEnvironment.setQualifiers("+land")
+        current = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+        assertFalse(present("""{"content":{"orientation":"portrait"}}"""))
+        assertNull(presenter.shownSession)
+        assertTrue(outcomes.isEmpty())
+        assertTrue(present("""{"content":{"orientation":"landscape"}}"""))
+    }
+
+    @Test
+    fun anActivityResumingInTheOtherOrientationClosesWithOrientation() {
+        present("""{"content":{"orientation":"portrait"}}""")
+        controller.pause().stop()
+        current = null
+        idle()
+        RuntimeEnvironment.setQualifiers("+land")
+        current = Robolectric.buildActivity(TestActivity::class.java).setup().get()
+        idle()
+        assertEquals(InAppOutcome.Dismissed("orientation"), outcomes.single())
+        assertNull(presenter.shownWindow)
+    }
+
+    @Test
+    fun aWindowThatCannotShowIsNotPresented() {
+        controller.pause().stop().destroy()
+        assertFalse(present())
+        assertNull(presenter.shownSession)
+        assertTrue(outcomes.isEmpty())
+    }
+
+    @Test
+    fun aPresentFromTheDismissalReportWins() {
+        present()
+        onCompletion = {
+            onCompletion = {}
+            presenter.present(InAppUiFixtures.presentation(InAppUiFixtures.campaign("""{"id":"c2"}"""))) { outcomes += it }
+        }
+        assertFalse(present("""{"id":"c3"}"""))
+        assertEquals("c2", presenter.shownSession!!.campaign.id)
+        assertTrue(presenter.shownWindow!!.dialog.isShowing)
         assertEquals(InAppOutcome.Dismissed("app"), outcomes.single())
     }
 }
