@@ -13,7 +13,12 @@ internal object PushImageLoader {
     const val TIMEOUT_MS = 5_000L
     const val MAX_BYTES = 1_048_576L
 
-    private val client by lazy { OkHttpClient.Builder().callTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS).build() }
+    private val client by lazy {
+        OkHttpClient.Builder()
+            .callTimeout(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            .followSslRedirects(false)
+            .build()
+    }
 
     fun load(url: String?): Bitmap? =
         if (url != null && url.startsWith("https://")) download(url, client) else null
@@ -29,6 +34,9 @@ internal object PushImageLoader {
         }
     } catch (e: Exception) {
         DebugLogger.instance.log(LogLevel.INFO, "Push image not loaded: ${e.message}")
+        null
+    } catch (e: OutOfMemoryError) {
+        DebugLogger.instance.log(LogLevel.INFO, "Push image too large to decode")
         null
     }
 }

@@ -4,7 +4,7 @@
 
 ### Added
 - Push campaigns: tapping a Grovs push reports the open to Grovs and calls the deep-link listener with the campaign data, merged over the data of its link when it has one.
-- Taps before `configure` or before the SDK is authenticated are held. A failed open is retried on the next foreground, up to 3 attempts.
+- Taps before `configure` or before the SDK is authenticated are held. An open that fails because of a network or server error is retried on the next foreground, up to 3 attempts.
 - `Grovs.isGrovsNotification`, `Grovs.handleNotificationOpen`, and `GrovsMessaging` (`handleMessage`, `onNewToken`, `showForegroundNotifications`) for apps with their own `FirebaseMessagingService`.
 - Grovs pushes received while the app is open are shown with their image and open the app when tapped.
 

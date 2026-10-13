@@ -449,7 +449,7 @@ FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
 
 Token refreshes are picked up automatically by the SDK's own messaging service.
 
-**5. Taps work through `onStart` / `onNewIntent`.** When a Grovs push is tapped, the SDK reports the open and calls your deep link listener with the campaign data. If the push has a link, the link's data is included, and the push's own keys win. Every value is a string on Android. The SDK adds `grovs_campaign_id`, plus `grovs_link` and `grovs_image` when they are set.
+**5. Taps work through `onStart` / `onNewIntent`.** When a Grovs push is tapped, the SDK reports the open and calls your deep link listener with the campaign data. If the push has a link, the link's data is included, and the push's own keys win. The push's own keys are all strings on Android; the link's data keeps its types. The push data includes `grovs_campaign_id`, plus `grovs_link` and `grovs_image` when the campaign sets them.
 
 If your launcher is a splash screen that starts another activity, forward the intent extras, or pass the intent yourself:
 
@@ -462,10 +462,26 @@ Grovs.handleNotificationOpen(intent)
 ```kotlin
 class MyMessagingService : io.grovs.handlers.MessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        super.onMessageReceived(message)
+        if (GrovsMessaging.handleMessage(this, message)) return
         // your own messages
     }
 }
+```
+
+Declare your service in your app manifest, and remove the SDK's own declaration so Android does not pick the wrong one:
+
+```xml
+<service
+    android:name=".MyMessagingService"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+    </intent-filter>
+</service>
+
+<service
+    android:name="io.grovs.handlers.MessagingService"
+    tools:node="remove" />
 ```
 
 or forward to Grovs from yours:

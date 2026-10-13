@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import com.google.firebase.messaging.RemoteMessage
 import io.grovs.handlers.GrovsPushContent
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,8 +53,8 @@ class GrovsMessagingTest {
             Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
         })
 
-        assertTrue(shadowOf(manager).allNotifications.size == 1)
-        assertTrue(requested == "https://cdn.grovs.io/i.png")
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+        assertEquals("https://cdn.grovs.io/i.png", requested)
     }
 
     @Test

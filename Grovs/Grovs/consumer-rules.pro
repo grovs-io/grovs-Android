@@ -38,6 +38,7 @@
 -dontwarn org.openjsse.net.ssl.OpenJSSE
 -dontwarn org.slf4j.impl.StaticLoggerBinder
 -dontwarn io.grovs.handlers.MessagingService
+-dontwarn io.grovs.GrovsMessaging
 
 ################################################################################
 # Retrofit
