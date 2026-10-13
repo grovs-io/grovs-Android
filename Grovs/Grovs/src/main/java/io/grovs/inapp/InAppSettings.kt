@@ -11,6 +11,13 @@ internal class InAppSettings {
     var paused: Boolean = false
     /** Lowercased screen names. */
     var excluded: Set<String> = emptySet()
+        private set
+
+    /** Screen names are compared case-insensitively. */
+    fun setExcluded(screens: List<String>) {
+        excluded = screens.map { it.lowercase() }.toSet()
+    }
+
     var debug: Boolean = false
     /** Where debug lines go; independent of the SDK log level, since the host asked for them. */
     var debugOutput: (String) -> Unit = { Log.i("GrovsInApp", it) }

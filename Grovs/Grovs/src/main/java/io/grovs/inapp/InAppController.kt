@@ -162,7 +162,7 @@ internal class InAppController(private val deps: Dependencies) {
     }
 
     fun setExcludedScreens(screens: List<String>) {
-        settings.excluded = screens.map { it.lowercase() }.toSet()
+        settings.setExcluded(screens)
         showWaiting()
     }
 

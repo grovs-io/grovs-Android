@@ -68,10 +68,12 @@ object E2ETestUtils {
     private val drainedServers = mutableListOf<MockWebServer>()
 
     /**
-     * Creates and starts a MockWebServer.
-     * Call this in @Before methods.
+     * Creates and starts a MockWebServer. Call this in @Before methods.
+     *
+     * With [answersInAppSync], the in-app sync after authentication gets a 404 instead of taking a
+     * queued response. The dispatcher's peek() is not overridden, so the sync's connection still
+     * gets the socket policy of the response at the head of the queue.
      */
-    /** [answersInAppSync]: the in-app sync after authentication gets a 404 instead of taking a queued response. */
     fun createMockWebServer(answersInAppSync: Boolean = true): MockWebServer {
         val server = MockWebServer()
         if (answersInAppSync) {
@@ -460,7 +462,7 @@ object E2ETestUtils {
                 (grovsField("inAppSettings") as? InAppSettings)?.apply {
                     listener = null
                     paused = false
-                    excluded = emptySet()
+                    setExcluded(emptyList())
                     debug = false
                 }
             } catch (e: Exception) {

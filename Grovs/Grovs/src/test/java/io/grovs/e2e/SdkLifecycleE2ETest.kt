@@ -236,14 +236,14 @@ class SdkLifecycleE2ETest {
             delay(500)
             Shadows.shadowOf(Looper.getMainLooper()).idle()
 
-            // Assert - verify APP_OPEN event is sent on foreground
-            val newRequestCount = mockWebServer.requestCount - requestCountBefore
+            // Assert - verify APP_OPEN event is sent on foreground. The in-app sync does not count.
+            val requests = E2ETestUtils.collectAllRequests(mockWebServer)
+            val newRequestCount = requests.drop(requestCountBefore).count { !it.first.contains("in_app/sync") }
             assertTrue(
                 "SDK should make at least 1 new request on foreground, got $newRequestCount",
                 newRequestCount >= 1
             )
 
-            val requests = E2ETestUtils.collectAllRequests(mockWebServer)
             E2ETestUtils.verifyEventInfrastructureWorks(requests)
 
             // Verify APP_OPEN event specifically if events were captured

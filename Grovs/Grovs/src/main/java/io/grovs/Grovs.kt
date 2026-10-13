@@ -38,6 +38,7 @@ import io.grovs.handlers.RequestFailure
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.handlers.launchOperation
 import io.grovs.handlers.runOperation
+import io.grovs.inapp.InAppHost
 import io.grovs.inapp.InAppImages
 import io.grovs.inapp.InAppPresenter
 import io.grovs.inapp.InAppSettings
@@ -1286,24 +1287,18 @@ public class Grovs: ActivityProvider {
 
     fun setInAppListener(listener: GrovsInAppListener?) = runOnMain { inAppSettings.listener = listener }
 
-    fun pauseInAppMessages() = runOnMain {
-        inAppSettings.paused = true
-        grovsManager?.inApp?.pause()
-    }
+    fun pauseInAppMessages() = inAppChoice({ it.pause() }) { paused = true }
 
-    fun resumeInAppMessages() = runOnMain {
-        inAppSettings.paused = false
-        grovsManager?.inApp?.resume()
-    }
+    fun resumeInAppMessages() = inAppChoice({ it.resume() }) { paused = false }
 
-    fun discardInAppMessages(dismissCurrent: Boolean) = runOnMain {
-        inAppSettings.paused = true
-        grovsManager?.inApp?.discard(dismissCurrent)
-    }
+    fun discardInAppMessages(dismissCurrent: Boolean) = inAppChoice({ it.discard(dismissCurrent) }) { paused = true }
 
-    fun setInAppExcludedScreens(screens: List<String>) = runOnMain {
-        inAppSettings.excluded = screens.map { it.lowercase() }.toSet()
-        grovsManager?.inApp?.setExcludedScreens(screens)
+    fun setInAppExcludedScreens(screens: List<String>) = inAppChoice({ it.setExcludedScreens(screens) }) { setExcluded(screens) }
+
+    /** Once a manager exists its controller owns the choice; before configure() it goes straight to the settings. */
+    private fun inAppChoice(withHost: (InAppHost) -> Unit, withoutHost: InAppSettings.() -> Unit) = runOnMain {
+        val host = grovsManager?.inApp
+        if (host != null) withHost(host) else inAppSettings.withoutHost()
     }
 
     fun setInAppDebugLogging(enabled: Boolean) = runOnMain { inAppSettings.debug = enabled }

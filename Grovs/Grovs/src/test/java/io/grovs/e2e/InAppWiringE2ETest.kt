@@ -14,6 +14,7 @@ import io.grovs.inapp.InAppKept
 import io.grovs.inapp.InAppSynced
 import io.grovs.inapp.NoDrawPresenter
 import io.grovs.inapp.RecordingInAppListener
+import io.grovs.utils.InstantCompat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -23,6 +24,7 @@ import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -116,7 +118,8 @@ class InAppWiringE2ETest {
         Grovs.configure(application, "test-key", useTestEnvironment = true, baseURL = server.url("/").toString())
         runBlocking { E2ETestUtils.getAuthenticationJob()?.join() }
         Robolectric.buildActivity(TestActivity::class.java).setup()
-        pumpUntil { InAppSynced.load(store()) != null }
+        // A network round trip and a queued disk write; slow on a loaded machine.
+        pumpUntil(timeoutMs = 15_000) { InAppSynced.load(store()) != null }
     }
 
     private fun manager() = E2ETestUtils.getGrovsManager() as GrovsManager
@@ -158,6 +161,23 @@ class InAppWiringE2ETest {
     }
 
     @Test
+    fun `an app_open campaign shows again in a new session`() {
+        launch(InAppFixtures.campaign("""{"triggers":[{"type":"app_open"}]}"""))
+        pumpUntil { presenter.ids == listOf("c1") }
+        presenter.finish(io.grovs.inapp.InAppOutcome.Dismissed("close_button"))
+
+        val context = manager().grovsContext
+        context.javaClass.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+            .set(context, InstantCompat.ofEpochMilli(System.currentTimeMillis() - Duration.ofMinutes(31).toMillis()))
+        val before = context.sessionId
+        context.rotateSessionIfNeeded()
+        assertNotEquals(before, context.sessionId)
+
+        manager().inApp.onForeground()
+        pumpUntil { presenter.ids == listOf("c1", "c1") }
+    }
+
+    @Test
     fun `a screen view triggers a screen campaign`() {
         launch(InAppFixtures.campaign("""{"triggers":[{"type":"screen_view","name":"pricing"}]}"""))
         Grovs.trackScreenView("Pricing")
@@ -191,6 +211,19 @@ class InAppWiringE2ETest {
         Thread.sleep(200)
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(listOf("c1"), presenter.ids)
+    }
+
+    @Test
+    fun `enabling the SDK again while authenticated shows messages again`() {
+        launch(InAppFixtures.campaign())
+        Grovs.setSDK(false)
+        assertFalse(manager().inApp.controller.isRunning)
+
+        Grovs.setSDK(true)
+        pumpUntil { manager().inApp.controller.isRunning }
+        Grovs.track("cart_viewed")
+        pumpUntil { presenter.ids == listOf("c1") }
+        assertEquals(listOf("c1"), listener.shown)
     }
 
     @Test
@@ -237,6 +270,22 @@ class InAppWiringE2ETest {
         })
         Grovs.track("cart_viewed")
         pumpUntil { failures == listOf("c1") }
+    }
+
+    @Test
+    fun `pause and excluded screens set after configure reach the running controller`() {
+        launch(InAppFixtures.campaign())
+        Grovs.pauseInAppMessages()
+        Grovs.track("cart_viewed")
+        shadowOf(Looper.getMainLooper()).idle()
+        Thread.sleep(200)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(emptyList<String>(), presenter.ids)
+
+        Grovs.setInAppExcludedScreens(listOf("Checkout", "PAY"))
+        assertEquals(setOf("checkout", "pay"), manager().inApp.controller.settings.excluded)
+        Grovs.resumeInAppMessages()
+        pumpUntil { presenter.ids == listOf("c1") }
     }
 
     @Test
