@@ -4,13 +4,19 @@ import android.app.Activity
 import android.app.Application
 import android.content.ComponentCallbacks
 import android.content.res.Configuration
+import android.widget.EditText
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import io.grovs.R
 import io.grovs.inapp.InAppImages
 import io.grovs.inapp.InAppOutcome
 import io.grovs.inapp.InAppPresentation
 import io.grovs.inapp.InAppPresenter
 import io.grovs.inapp.model.InAppAction
 import io.grovs.inapp.model.InAppActionType
+import io.grovs.inapp.model.InAppAnswer
 import io.grovs.inapp.model.InAppOrientation
+import io.grovs.inapp.model.InAppQuestionType
 import io.grovs.inapp.model.InAppTemplate
 import java.lang.ref.WeakReference
 
@@ -70,7 +76,21 @@ internal class InAppDialogPresenter(
         detach()
         session = null
         completion(outcome)
-        if (outcome is InAppOutcome.Clicked) perform(outcome.action, presentation)
+        when (outcome) {
+            is InAppOutcome.Clicked -> perform(outcome.action, presentation)
+            is InAppOutcome.Answered -> review(outcome, presentation)
+            else -> Unit
+        }
+    }
+
+    /** Stars at or above `review_from` are followed by the store's review prompt; the controller holds what waits until then. */
+    private fun review(outcome: InAppOutcome.Answered, presentation: InAppPresentation) {
+        val stars = (outcome.value as? InAppAnswer.Stars)?.number ?: return
+        val question = presentation.campaign.content.question ?: return
+        val from = question.reviewFrom ?: return
+        if (question.type != InAppQuestionType.STARS || stars < from) return
+        if (presentation.isTest || !actions.canRequestReview) return onIdle()
+        actions.requestReview { onIdle() }
     }
 
     private fun perform(action: InAppAction, presentation: InAppPresentation) {
@@ -110,12 +130,27 @@ internal class InAppDialogPresenter(
             onBack = { if (current.campaign.content.dismissible) current.leave("close_button") },
             onInsets = view::applyInsets,
         ).also { window = it }
-        current.redraw = { view.rebuild() }
+        current.redraw = {
+            view.rebuild()
+            applyStep(shown, view, current)
+        }
         // Only cover and header sit under the status bar; a picture's colour is unknown.
         val lightIcons = if (template == InAppTemplate.COVER || template == InAppTemplate.HEADER) {
             InAppStyle.wantsLightIcons(view.palette.card)
         } else null
-        return shown.show(lightIcons)
+        if (!shown.show(lightIcons)) return false
+        applyStep(shown, view, current)
+        return true
+    }
+
+    /** A banner takes the keyboard only while its comment box is up; the box gets the focus. */
+    private fun applyStep(shown: InAppWindow, view: InAppCardView, current: InAppMessageSession) {
+        val commenting = current.step is InAppStep.Comment
+        if (current.campaign.template.isBanner) shown.setFocusable(commenting)
+        if (!commenting) return
+        val box = view.findViewById<EditText>(R.id.grovs_in_app_comment) ?: return
+        box.requestFocus()
+        shown.dialog.window?.let { WindowCompat.getInsetsController(it, box).show(WindowInsetsCompat.Type.ime()) }
     }
 
     /** Drops what is drawn without an outcome; the session stays for the next Activity. */
