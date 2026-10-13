@@ -590,20 +590,25 @@ class GrovsManagerTest {
     }
 
     /** Makes the service answer both legs of [GrovsManager.authenticate] with a success. */
-    private fun stubSuccessfulAuthentication() {
+    private fun stubSuccessfulAuthentication(
+        sdkIdentifier: String? = null,
+        sdkAttributes: Map<String, Any>? = null,
+    ) {
         every { mockGrovsService.getDeviceFor(any()) } returns
             flowOf(GVRetryResult.Success(GetDeviceResponse(lastSeen = null)))
         every { mockGrovsService.authenticate(any()) } returns flowOf(
-            GVRetryResult.Success(
-                AuthenticationResponse(
-                    grovsId = "grovs-id",
-                    uriScheme = "grovs",
-                    sdkIdentifier = null,
-                    sdkAttributes = null,
-                )
-            )
+            GVRetryResult.Success(authenticationResponse(sdkIdentifier, sdkAttributes))
         )
     }
+
+    @Suppress("UNCHECKED_CAST", "PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+    private fun authenticationResponse(sdkIdentifier: String?, sdkAttributes: Map<String, Any>?) =
+        AuthenticationResponse(
+            grovsId = "grovs-id",
+            uriScheme = "grovs",
+            sdkIdentifier = sdkIdentifier,
+            sdkAttributes = sdkAttributes as Map<String, Object>?,
+        )
 
     // ==================== Consent Gate Tests ====================
 
@@ -803,6 +808,70 @@ class GrovsManagerTest {
         coVerify(exactly = 1) {
             mockGrovsService.updateAttributes("queued-while-offline", any(), any())
         }
+    }
+
+    @Test
+    fun `a push token set before authentication keeps the server's identifier and attributes`() = runTest {
+        useAttributeSyncScope(backgroundScope)
+        grovsManager.pushToken = "fcm-token"
+        stubSuccessfulAuthentication(sdkIdentifier = "server-user", sdkAttributes = mapOf("plan" to "pro"))
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        coVerify(exactly = 1) {
+            mockGrovsService.updateAttributes("server-user", mapOf("plan" to "pro"), "fcm-token")
+        }
+        coVerify(exactly = 0) { mockGrovsService.updateAttributes(null, any(), any()) }
+        assertEquals("server-user", grovsManager.identifier)
+        assertEquals(mapOf("plan" to "pro"), grovsManager.attributes)
+    }
+
+    @Test
+    fun `an identifier cleared before authentication stays cleared`() = runTest {
+        useAttributeSyncScope(backgroundScope)
+        grovsManager.identifier = null
+        stubSuccessfulAuthentication(sdkIdentifier = "server-user", sdkAttributes = mapOf("plan" to "pro"))
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        assertNull(grovsManager.identifier)
+        coVerify(exactly = 1) {
+            mockGrovsService.updateAttributes(null, mapOf("plan" to "pro"), null)
+        }
+    }
+
+    @Test
+    fun `with nothing set before authentication the server's values are adopted and nothing is sent`() = runTest {
+        useAttributeSyncScope(backgroundScope)
+        stubSuccessfulAuthentication(sdkIdentifier = "server-user", sdkAttributes = mapOf("plan" to "pro"))
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        assertEquals("server-user", grovsManager.identifier)
+        assertEquals(mapOf("plan" to "pro"), grovsManager.attributes)
+        coVerify(exactly = 0) { mockGrovsService.updateAttributes(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a host write during authentication wins over the server's value`() = runTest {
+        useAttributeSyncScope(backgroundScope)
+        stubSuccessfulAuthentication()
+        every { mockGrovsService.authenticate(any()) } answers {
+            grovsManager.identifier = "host-user"
+            flowOf(GVRetryResult.Success(authenticationResponse("server-user", null)))
+        }
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        assertEquals("host-user", grovsManager.identifier)
+        coVerify(exactly = 1) { mockGrovsService.updateAttributes("host-user", null, null) }
     }
 
     @Test

@@ -239,9 +239,23 @@ internal class GrovsManager(
         }
 
     // Views onto the desired state. The attribute sync observes every write, from any thread.
-    var identifier: String? by grovsContext::identifier
+    var identifier: String?
+        get() = grovsContext.identifier
+        set(value) {
+            hostSetIdentifier = true
+            grovsContext.identifier = value
+        }
     var pushToken: String? by grovsContext::pushToken
-    var attributes: Map<String, Any>? by grovsContext::attributes
+    var attributes: Map<String, Any>?
+        get() = grovsContext.attributes
+        set(value) {
+            hostSetAttributes = true
+            grovsContext.attributes = value
+        }
+
+    // Set before the value is written, so a concurrent adoption retries and sees it.
+    @Volatile private var hostSetIdentifier = false
+    @Volatile private var hostSetAttributes = false
 
     suspend fun onAppForegrounded() {
         if (grovsContext.consent.workToken(configuration) == null) return
@@ -958,13 +972,16 @@ internal class GrovsManager(
     }
 
     /**
-     * Takes the backend's identifier and attributes unless the host has set values the backend has
-     * not confirmed yet. The compare-and-set loses to any concurrent host write, so that write is
-     * never overwritten by the server's older values.
+     * Records what the backend holds and takes its identifier and attributes for every field the
+     * host has not set in this process. A host value always wins, including a cleared one.
      */
     private fun adoptBackendAttributes(identifier: String?, attributes: Map<String, Any>?) {
-        val acknowledged = acknowledgedAttributes
-        val adopted = acknowledged.copy(identifier = identifier, attributes = attributes)
-        if (grovsContext.userAttributes.compareAndSet(acknowledged, adopted)) acknowledgedAttributes = adopted
+        acknowledgedAttributes = acknowledgedAttributes.copy(identifier = identifier, attributes = attributes)
+        grovsContext.userAttributes.update { current ->
+            current.copy(
+                identifier = if (hostSetIdentifier) current.identifier else identifier,
+                attributes = if (hostSetAttributes) current.attributes else attributes,
+            )
+        }
     }
 }
