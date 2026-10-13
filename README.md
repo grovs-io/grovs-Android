@@ -439,7 +439,7 @@ Add to your `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
-**4. Pass the FCM token to Grovs:**
+**4. Pass the FCM token to Grovs.** You can do this before `Grovs.configure`. The SDK keeps the token until it is ready.
 
 ```kotlin
 FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
@@ -447,28 +447,51 @@ FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
 }
 ```
 
-Also update the token when it refreshes:
+Token refreshes are picked up automatically by the SDK's own messaging service.
+
+**5. Taps work through `onStart` / `onNewIntent`.** When a Grovs push is tapped, the SDK reports the open and calls your deep link listener with the campaign data. If the push has a link, the link's data is included, and the push's own keys win. Every value is a string on Android. The SDK adds `grovs_campaign_id`, plus `grovs_link` and `grovs_image` when they are set.
+
+If your launcher is a splash screen that starts another activity, forward the intent extras, or pass the intent yourself:
 
 ```kotlin
-class MyMessagingService : FirebaseMessagingService() {
-    override fun onNewToken(token: String) {
-        super.onNewToken(token)
-        Grovs.pushToken = token
+Grovs.handleNotificationOpen(intent)
+```
+
+**6. If your app has its own `FirebaseMessagingService`.** Android delivers messages to one service only. Either extend the Grovs service:
+
+```kotlin
+class MyMessagingService : io.grovs.handlers.MessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        super.onMessageReceived(message)
+        // your own messages
     }
 }
 ```
 
-Register the service in `AndroidManifest.xml`:
+or forward to Grovs from yours:
+
+```kotlin
+class MyMessagingService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        if (GrovsMessaging.handleMessage(this, message)) return
+        // your own messages
+    }
+
+    override fun onNewToken(token: String) {
+        GrovsMessaging.onNewToken(token)
+    }
+}
+```
+
+**7. Notification channel.** Pushes received while the app is in the background are shown by Firebase. Set a default channel so they do not land in "Miscellaneous", and create that channel at startup. Grovs uses the same channel for pushes received in the foreground:
 
 ```xml
-<service
-    android:name=".MyMessagingService"
-    android:exported="false">
-    <intent-filter>
-        <action android:name="com.google.firebase.MESSAGING_EVENT" />
-    </intent-filter>
-</service>
+<meta-data
+    android:name="com.google.firebase.messaging.default_notification_channel_id"
+    android:value="promotions" />
 ```
+
+On Android 8 and later a custom campaign sound plays only if that channel has the sound. To stop the SDK showing pushes while the app is open, set `GrovsMessaging.showForegroundNotifications = false`.
 
 > Push notifications require a physical device or an emulator with Google Play Services.
 
@@ -553,6 +576,11 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 | `trackNavigation(navController)` | Track Jetpack Navigation destinations |
 | `setScreenAliases(aliases)` | Friendly screen names for the dashboard |
 | `displayMessagesFragment(onDismissed)` | Show messages modal fragment |
+| `isGrovsNotification(data)` / `isGrovsNotification(intent)` | Check whether a push or its tap intent comes from Grovs |
+| `handleNotificationOpen(intent)` | Report a Grovs push tap and deliver its data to the deep link listener. Returns `true` if the intent was a Grovs push |
+| `GrovsMessaging.handleMessage(context, message)` | Handle a push from your own messaging service. Returns `true` if it was a Grovs push |
+| `GrovsMessaging.onNewToken(token)` | Pass a refreshed FCM token to Grovs from your own messaging service |
+| `GrovsMessaging.showForegroundNotifications` | Set to `false` to stop the SDK showing pushes while the app is open (default `true`) |
 | `setOnAutomaticNotificationsListener(listener)` | Get notified when an automatically displayed message closes |
 | `numberOfUnreadMessages(...)` | Get unread message count (callback or coroutine) |
 | `logInAppPurchase(originalJson)` | Log a Google Play Billing purchase |

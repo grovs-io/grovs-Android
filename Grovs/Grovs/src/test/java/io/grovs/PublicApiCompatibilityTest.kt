@@ -109,4 +109,29 @@ class PublicApiCompatibilityTest {
         )
         assertEquals(GrovsSettings::class.java, GrovsContext::class.java.getMethod("getSettings").returnType)
     }
+
+    @Test
+    fun `push campaign api is present`() {
+        val companion = Grovs.Companion.javaClass
+        assertNotNull(companion.getDeclaredMethod("isGrovsNotification", Map::class.java))
+        assertNotNull(companion.getDeclaredMethod("isGrovsNotification", android.content.Intent::class.java))
+        assertNotNull(companion.getDeclaredMethod("handleNotificationOpen", android.content.Intent::class.java))
+        assertNotNull(companion.getDeclaredMethod("getPushToken"))
+        assertNotNull(companion.getDeclaredMethod("setPushToken", String::class.java))
+
+        val messaging = GrovsMessaging::class.java
+        val remoteMessage = com.google.firebase.messaging.RemoteMessage::class.java
+        assertNotNull(messaging.getDeclaredMethod("handleMessage", android.content.Context::class.java, remoteMessage))
+        assertNotNull(messaging.getDeclaredMethod("onNewToken", String::class.java))
+        assertNotNull(messaging.getDeclaredMethod("setShowForegroundNotifications", booleanType))
+
+        val legacy = Class.forName("io.grovs.handlers.MessagingServiceKt")
+        assertNotNull(
+            legacy.getDeclaredMethod(
+                "handleGrovsNotification",
+                com.google.firebase.messaging.FirebaseMessagingService::class.java,
+                remoteMessage,
+            )
+        )
+    }
 }
