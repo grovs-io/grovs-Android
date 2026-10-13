@@ -530,8 +530,10 @@ public class Grovs: ActivityProvider {
     /// The host's in-app choices, kept across configure() as iOS keeps them in statics.
     private val inAppSettings = InAppSettings()
     /// One per process: the actions read the push permission and open links for every manager.
+    @Volatile
     private var inAppActions: InAppActions? = null
     /// The presenter the current manager draws with; registered for Activity changes until replaced.
+    @Volatile
     private var inAppPresenter: InAppDialogPresenter? = null
     /// Builds what draws in-app messages for each new manager.
     private var inAppPresenterFactory: (InAppImages) -> InAppPresenter = ::dialogPresenter

@@ -4,7 +4,6 @@ import android.app.Application
 import android.os.Looper
 import android.provider.Settings
 import androidx.fragment.app.Fragment
-import androidx.test.core.app.ApplicationProvider
 import androidx.fragment.app.FragmentManager
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
@@ -463,10 +462,11 @@ object E2ETestUtils {
                 setInAppPresenter(null)
                 (grovsField("inAppPresenter") as? InAppDialogPresenter)?.let {
                     it.dismiss()
-                    it.unregister(ApplicationProvider.getApplicationContext())
+                    registeredApplication?.let(it::unregister)
                 }
-                getGrovsInstance()?.let { instance ->
-                    Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }.set(instance, null)
+                // The actions hold the Application they were built with, so the next test builds its own.
+                listOf("inAppPresenter", "inAppActions").forEach { name ->
+                    grovsClass.getDeclaredField(name).apply { isAccessible = true }.set(instance, null)
                 }
                 (grovsField("inAppSettings") as? InAppSettings)?.apply {
                     listener = null

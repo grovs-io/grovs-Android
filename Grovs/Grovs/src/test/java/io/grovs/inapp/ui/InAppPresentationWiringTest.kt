@@ -1,5 +1,6 @@
 package io.grovs.inapp.ui
 
+import android.app.Application
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -12,9 +13,12 @@ import io.grovs.e2e.TestActivity
 import io.grovs.inapp.InAppCancellable
 import io.grovs.inapp.InAppController
 import io.grovs.inapp.InAppFileStore
+import io.grovs.inapp.InAppOutcome
 import io.grovs.inapp.model.InAppDevice
-import io.grovs.inapp.model.InAppPushPermission
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -73,27 +77,71 @@ class InAppPresentationWiringTest {
             },
             sdkVersion = "test",
         ))
-        controller.start()
-        controller.onAppOpen()
-        shadowOf(Looper.getMainLooper()).idleFor(3, TimeUnit.SECONDS)
-        val window = presenter.shownWindow!!
-        assertTrue(window.dialog.isShowing)
-        window.dialog.findViewById<View>(R.id.grovs_in_app_close).performClick()
-        shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(listOf("in_app_viewed", "in_app_dismissed"), reported)
-        presenter.unregister(app)
+        try {
+            controller.start()
+            controller.onAppOpen()
+            shadowOf(Looper.getMainLooper()).idleFor(3, TimeUnit.SECONDS)
+            val window = presenter.shownWindow!!
+            assertTrue(window.dialog.isShowing)
+            window.dialog.findViewById<View>(R.id.grovs_in_app_close).performClick()
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(listOf("in_app_viewed", "in_app_dismissed"), reported)
+        } finally {
+            controller.stop()
+            presenter.unregister(app)
+        }
     }
 
     @Test
     fun configureDrawsWithTheDialogPresenter() {
         E2ETestUtils.resetGrovsSingleton()
-        E2ETestUtils.setupTestApplication(app)
+        try {
+            E2ETestUtils.setupTestApplication(app)
+            configure()
+            val grovs = E2ETestUtils.getGrovsInstance()!!
+            assertTrue(presenterOf(grovs) is InAppDialogPresenter)
+            E2ETestUtils.resetGrovsSingleton()
+            assertEquals(null, presenterOf(grovs))
+        } finally {
+            E2ETestUtils.resetGrovsSingleton()
+        }
+    }
+
+    @Test
+    fun reconfigureReleasesThePreviousPresenter() {
+        E2ETestUtils.resetGrovsSingleton()
+        try {
+            E2ETestUtils.setupTestApplication(app)
+            configure()
+            val grovs = E2ETestUtils.getGrovsInstance()!!
+            val first = presenterOf(grovs) as InAppDialogPresenter
+            Robolectric.buildActivity(TestActivity::class.java).setup()
+            shadowOf(Looper.getMainLooper()).idle()
+            val outcomes = mutableListOf<InAppOutcome>()
+            assertTrue(first.present(InAppUiFixtures.presentation(InAppUiFixtures.campaign())) { outcomes += it })
+
+            configure()
+
+            val second = presenterOf(grovs)
+            assertTrue(second is InAppDialogPresenter)
+            assertNotSame(first, second)
+            assertEquals(listOf(InAppOutcome.Dismissed("app")), outcomes)
+            assertNull(first.shownWindow)
+            assertFalse(lifecycleCallbacks().contains(first))
+            assertTrue(lifecycleCallbacks().contains(second))
+        } finally {
+            E2ETestUtils.resetGrovsSingleton()
+        }
+    }
+
+    private fun configure() {
         Grovs.configure(app, "in-app-wiring-key", useTestEnvironment = true, baseURL = "http://127.0.0.1:9/")
         shadowOf(Looper.getMainLooper()).idle()
-        val grovs = E2ETestUtils.getGrovsInstance()!!
-        val presenter = Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }.get(grovs)
-        assertTrue(presenter is InAppDialogPresenter)
-        E2ETestUtils.resetGrovsSingleton()
-        assertEquals(null, Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }.get(grovs))
     }
+
+    private fun presenterOf(grovs: Any): Any? =
+        Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }.get(grovs)
+
+    private fun lifecycleCallbacks(): List<*> =
+        Application::class.java.getDeclaredField("mActivityLifecycleCallbacks").apply { isAccessible = true }.get(app) as List<*>
 }
