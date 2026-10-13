@@ -1,6 +1,8 @@
 package io.grovs.inapp
 
+import com.google.gson.JsonArray
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import io.grovs.inapp.model.InAppActionType
 import io.grovs.inapp.model.InAppCampaign
@@ -36,7 +38,54 @@ internal data class InAppEngineState(
     val syncedAt: Long = 0,
     /** Ids of the campaigns whose question was answered on this device. */
     val answered: List<String> = emptyList(),
-)
+) {
+    fun toJson(): JsonObject = JsonObject().apply {
+        add("views", JsonArray().also { out ->
+            for (view in views) {
+                out.add(JsonObject().apply {
+                    addProperty("id", view.id)
+                    addProperty("campaign", view.campaign)
+                    addProperty("at", view.at)
+                    addProperty("global", view.global)
+                })
+            }
+        })
+        add("session", JsonArray().also { out -> session.forEach { out.add(it) } })
+        add("counts", JsonObject().also { out -> counts.forEach { (name, count) -> out.addProperty(name, count) } })
+        addProperty("syncedAt", syncedAt)
+        add("answered", JsonArray().also { out -> answered.forEach { out.add(it) } })
+    }
+
+    companion object {
+        /** Null when unreadable; a damaged `answered` loses only the answers, not the views the caps count. */
+        fun fromJson(json: JsonElement?): InAppEngineState? {
+            val raw = json?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+            val views = strictList(raw.get("views"), ::readView) ?: return null
+            val session = strictList(raw.get("session"), InAppJson::string) ?: return null
+            val countsRaw = raw.get("counts")?.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+            val counts = LinkedHashMap<String, Int>()
+            for ((name, count) in countsRaw.entrySet()) counts[name] = InAppJson.whole(count) ?: return null
+            val syncedAt = InAppJson.double(raw.get("syncedAt"))?.toLong() ?: return null
+            val answered = strictList(raw.get("answered"), InAppJson::string) ?: emptyList()
+            return InAppEngineState(views, session, counts, syncedAt, answered)
+        }
+
+        private fun readView(value: JsonElement): InAppView? {
+            val raw = value.takeIf { it.isJsonObject }?.asJsonObject ?: return null
+            return InAppView(
+                InAppJson.string(raw.get("id")) ?: return null,
+                InAppJson.string(raw.get("campaign")) ?: return null,
+                InAppJson.double(raw.get("at"))?.toLong() ?: return null,
+                InAppJson.bool(raw.get("global")) ?: return null,
+            )
+        }
+
+        private fun <T> strictList(value: JsonElement?, read: (JsonElement) -> T?): List<T>? {
+            val items = value?.takeIf { it.isJsonArray }?.asJsonArray ?: return null
+            return items.map { read(it) ?: return null }
+        }
+    }
+}
 
 /** Decides which campaign an event shows. Pure logic; the order of checks is part of the contract. */
 internal class InAppEngine(
