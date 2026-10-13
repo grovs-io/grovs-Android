@@ -282,4 +282,95 @@ class InAppControllerWaitingTest {
         h.start(listOf(campaign("""{"triggers":[{"type":"screen_view","name":"pricing"}]}""")))
         assertEquals(listOf("c1"), h.presenter.ids)
     }
+
+    @Test
+    fun `going to the background drops a delayed message that was already waiting`() {
+        val h = InAppHarness()
+        h.start(listOf(
+            campaign("""{"id":"late","delay_seconds":5,"triggers":[{"type":"event","name":"a"}]}"""),
+            campaign("""{"id":"now","triggers":[{"type":"event","name":"b"}]}"""),
+        ))
+        h.controller.onEvent(event("a"))
+        h.controller.onEvent(event("b"))
+        h.timer(5_000)!!.work()
+        h.controller.onBackground()
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertEquals(listOf("now"), h.presenter.ids)
+    }
+
+    @Test
+    fun `discard cancels a delayed message`() {
+        val h = InAppHarness()
+        h.start(listOf(campaign("""{"delay_seconds":5}""")))
+        h.controller.onEvent(cart)
+        val timer = h.timer(5_000)!!
+        h.controller.discard(dismissCurrent = false)
+        assertTrue(timer.cancelled)
+        h.controller.resume()
+        assertEquals(emptyList<String>(), h.presenter.ids)
+    }
+
+    @Test
+    fun `an opening is shown before the screen the app landed on`() {
+        val h = InAppHarness()
+        h.holdSync = true
+        h.controller.onEvent(screen("home"))
+        h.respond(listOf(
+            campaign("""{"id":"screen","triggers":[{"type":"screen_view","name":"home"}]}"""),
+            campaign("""{"id":"open","triggers":[{"type":"app_open"}]}"""),
+        ))
+        h.controller.start()
+        h.controller.onEvent(appOpen)
+        assertEquals(emptyList<String>(), h.presenter.ids)
+        h.heldSync!!()
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertEquals(listOf("open", "screen"), h.presenter.ids)
+    }
+
+    @Test
+    fun `discard without dismissing leaves what is showing`() {
+        val h = InAppHarness()
+        h.start(listOf(campaign()))
+        h.controller.onEvent(cart)
+        h.controller.discard(dismissCurrent = false)
+        assertEquals(0, h.presenter.dismissals)
+        assertEquals(listOf("in_app_viewed"), h.names())
+    }
+
+    @Test
+    fun `excluded screens match whatever the case`() {
+        val h = InAppHarness()
+        h.start(listOf(campaign()))
+        h.controller.setExcludedScreens(listOf("checkout"))
+        h.controller.onEvent(screen("CheckOut"))
+        h.controller.onEvent(cart)
+        assertEquals(emptyList<String>(), h.presenter.ids)
+    }
+
+    @Test
+    fun `an equal priority keeps the message that waited first`() {
+        val h = InAppHarness()
+        h.start(listOf(
+            campaign("""{"id":"first","triggers":[{"type":"event","name":"a"}]}"""),
+            campaign("""{"id":"one","triggers":[{"type":"event","name":"b"}]}"""),
+            campaign("""{"id":"two","triggers":[{"type":"event","name":"c"}]}"""),
+        ))
+        listOf("a", "b", "c").forEach { h.controller.onEvent(event(it)) }
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertEquals(listOf("first", "one"), h.presenter.ids)
+    }
+
+    @Test
+    fun `an equal priority keeps the delay that began first`() {
+        val h = InAppHarness()
+        h.start(listOf(
+            campaign("""{"id":"one","delay_seconds":5,"triggers":[{"type":"event","name":"a"}]}"""),
+            campaign("""{"id":"two","delay_seconds":3,"triggers":[{"type":"event","name":"b"}]}"""),
+        ))
+        h.controller.onEvent(event("a"))
+        h.controller.onEvent(event("b"))
+        assertNull(h.timer(3_000))
+        h.timer(5_000)!!.work()
+        assertEquals(listOf("one"), h.presenter.ids)
+    }
 }
