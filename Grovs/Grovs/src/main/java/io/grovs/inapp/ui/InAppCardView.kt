@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -13,7 +14,9 @@ import android.util.TypedValue
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.TouchDelegate
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.accessibility.AccessibilityEvent
 import android.widget.FrameLayout
@@ -26,6 +29,7 @@ import io.grovs.R
 import io.grovs.inapp.InAppImages
 import io.grovs.inapp.model.InAppActionType
 import io.grovs.inapp.model.InAppTemplate
+import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -37,17 +41,36 @@ internal val semibold: Typeface
     get() = if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, 600, false)
     else Typeface.create("sans-serif-medium", Typeface.NORMAL)
 
+/** Hands a touch to whichever of several views it was meant for; a view holds only one TouchDelegate. */
+private class InAppTouchTargets(host: View) : TouchDelegate(Rect(), host) {
+    val targets = mutableListOf<TouchDelegate>()
+
+    override fun onTouchEvent(event: MotionEvent): Boolean =
+        targets.fold(false) { handled, target -> target.onTouchEvent(event) || handled }
+}
+
 /** The card's own frame: rounded, clipped, with a size limit and an optional swipe. */
 internal class InAppCardLayout(context: Context) : FrameLayout(context) {
     var preferredWidth = 0
     var maxHeight = Int.MAX_VALUE
     /** `up` is true for a fling towards the top. */
     var onSwipe: ((up: Boolean) -> Unit)? = null
+    /** Views drawn shorter than a touch target; their touch area grows to [minTouchHeight]. */
+    val smallTargets = mutableListOf<View>()
+    var minTouchHeight = 0
     private val shape = GradientDrawable()
+    private val touchTargets = InAppTouchTargets(this)
+    /** What a scrolling view under the finger could still do when the gesture began. */
+    private var couldScrollDown = false
+    private var couldScrollUp = false
     private val swipes = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
         override fun onFling(e1: MotionEvent?, e2: MotionEvent, velocityX: Float, velocityY: Float): Boolean {
-            if (abs(velocityY) > abs(velocityX)) onSwipe?.invoke(velocityY < 0)
+            if (abs(velocityY) <= abs(velocityX)) return false
+            val up = velocityY < 0
+            // A fling up moves the content down; it belongs to the scroller while it can still go.
+            if (if (up) couldScrollDown else couldScrollUp) return false
+            onSwipe?.invoke(up)
             return false
         }
     })
@@ -55,6 +78,7 @@ internal class InAppCardLayout(context: Context) : FrameLayout(context) {
     init {
         background = shape
         clipToOutline = true
+        touchDelegate = touchTargets
     }
 
     fun style(color: Int, radius: Float) {
@@ -63,8 +87,67 @@ internal class InAppCardLayout(context: Context) : FrameLayout(context) {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (onSwipe != null) swipes.onTouchEvent(ev)
+        if (onSwipe != null) {
+            if (ev.actionMasked == MotionEvent.ACTION_DOWN) {
+                couldScrollDown = scrollsAt(this, ev.x, ev.y, 1)
+                couldScrollUp = scrollsAt(this, ev.x, ev.y, -1)
+            }
+            swipes.onTouchEvent(ev)
+        }
         return super.dispatchTouchEvent(ev)
+    }
+
+    /** True when a view under (x, y), in [view]'s coordinates, can scroll in [direction]. */
+    private fun scrollsAt(view: View, x: Float, y: Float, direction: Int): Boolean {
+        if (view !== this && view.canScrollVertically(direction)) return true
+        val group = view as? ViewGroup ?: return false
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            val childX = x + group.scrollX - child.left
+            val childY = y + group.scrollY - child.top
+            if (child.visibility == VISIBLE && childX >= 0 && childY >= 0 && childX < child.width && childY < child.height &&
+                scrollsAt(child, childX, childY, direction)) return true
+        }
+        return false
+    }
+
+    /** Taps that reach the card itself are never backdrop taps. */
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        super.onTouchEvent(event)
+        return true
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        touchTargets.targets.clear()
+        for (target in smallTargets) {
+            if (!target.isAttachedToCard()) continue
+            val area = boundsInCard(target)
+            val grow = max(0, minTouchHeight - area.height())
+            area.top -= (grow + 1) / 2
+            area.bottom += (grow + 1) / 2
+            touchTargets.targets += TouchDelegate(area, target)
+        }
+    }
+
+    private fun View.isAttachedToCard(): Boolean {
+        var node: View? = this
+        while (node != null && node !== this@InAppCardLayout) node = node.parent as? View
+        return node != null
+    }
+
+    private fun boundsInCard(view: View): Rect {
+        var x = 0
+        var y = 0
+        var node: View = view
+        while (node !== this) {
+            val parent = node.parent as View
+            x += node.left - parent.scrollX
+            y += node.top - parent.scrollY
+            node = parent
+        }
+        return Rect(x, y, x + view.width, y + view.height)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -96,9 +179,10 @@ internal class InAppCardView(
     val palette = InAppPalette(campaign, night)
     val card = InAppCardLayout(context)
     private val skirt = View(context)
-    private val portrait = decode(InAppStyle.imageUrl(campaign, "portrait"))
-    private val landscape = decode(InAppStyle.imageUrl(campaign, "landscape"))
+    private val portrait = images.file(InAppStyle.imageUrl(campaign, "portrait"))
+    private val landscape = images.file(InAppStyle.imageUrl(campaign, "landscape"))
     private val hasPicture = portrait != null || landscape != null
+    private val decoded = mutableMapOf<File, Bitmap?>()
     private var picture: ImageView? = null
     private var content: View? = null
     private var close: View? = null
@@ -117,6 +201,8 @@ internal class InAppCardView(
 
     init {
         id = R.id.grovs_in_app_root
+        // Back closes the message, so the backdrop needs no accessibility action of its own.
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         setBackgroundColor(if (InAppStyle.dims(campaign)) InAppStyle.BACKDROP else Color.TRANSPARENT)
         skirt.id = R.id.grovs_in_app_skirt
         skirt.visibility = GONE
@@ -136,8 +222,8 @@ internal class InAppCardView(
     /** Builds the card again for the current step. */
     fun rebuild() {
         card.removeAllViews()
-        // A tap on the card is never a backdrop tap.
-        card.setOnClickListener {}
+        card.smallTargets.clear()
+        card.minTouchHeight = dp(MIN_TOUCH)
         val art = pictureView()
         val built = if (banner) bannerContent(art) else stackContent(art)
         val full = template == InAppTemplate.COVER || template == InAppTemplate.COVER_IMAGE
@@ -167,13 +253,15 @@ internal class InAppCardView(
         chooseImage(w, h)
     }
 
+    /** Decodes only the picture for the current orientation, once the size is known. */
     private fun chooseImage(w: Int, h: Int) {
-        val wide = w > h
-        picture?.setImageBitmap((if (wide) landscape else portrait) ?: portrait ?: landscape)
+        val shown = picture ?: return
+        if (w <= 0 || h <= 0) return
+        val file = (if (w > h) landscape else portrait) ?: portrait ?: landscape ?: return
+        shown.setImageBitmap(decoded.getOrPut(file) { decode(file) })
     }
 
-    private fun decode(url: String?): Bitmap? {
-        val file = images.file(url)?.takeIf { it.exists() } ?: return null
+    private fun decode(file: File): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply {
@@ -185,7 +273,8 @@ internal class InAppCardView(
     private fun sampleSize(width: Int, height: Int): Int {
         val screen = max(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
         var sample = 1
-        while (max(width, height) / sample > MAX_IMAGE_SIDE || min(width, height) / (sample * 2) >= screen) sample *= 2
+        val cap = max(MAX_IMAGE_SIDE, screen)
+        while (max(width, height) / sample > cap || min(width, height) / (sample * 2) >= screen) sample *= 2
         return sample
     }
 
@@ -287,7 +376,7 @@ internal class InAppCardView(
             id = R.id.grovs_in_app_buttons
             orientation = LinearLayout.HORIZONTAL
             if (!banner) setPadding(dp(16), 0, dp(16), dp(20))
-            else if (besideClose) setPadding(0, 0, dp(CLOSE_CLEARANCE), 0)
+            else if (besideClose) setPaddingRelative(0, 0, dp(CLOSE_CLEARANCE), 0)
         }
         // In a banner a lone button keeps its own width.
         val spans = !banner || defined.size > 1
@@ -298,6 +387,7 @@ internal class InAppCardView(
             val control = pill(title, palette.buttonBackground(index, tints), palette.buttonText(index, tints))
             control.tag = "grovs-in-app-button-${button.id}"
             control.setOnClickListener { session.clickButton(index) }
+            if (banner) card.smallTargets += control
             val params = if (spans) LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
             else LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT)
             if (index > 0) params.marginStart = dp(10)
@@ -358,6 +448,7 @@ internal class InAppCardView(
         val bottom = max(safe.bottom, imeBottom)
         var cardTop = 0
         var cardEnd = 0
+        val endInset = if (layoutDirection == LAYOUT_DIRECTION_RTL) safe.left else safe.right
         val params: LayoutParams
         when (template) {
             InAppTemplate.COVER, InAppTemplate.COVER_IMAGE -> {
@@ -369,21 +460,21 @@ internal class InAppCardView(
                     if (edge) 0 else safe.right, if (edge) 0 else bottom,
                 )
                 cardTop = safe.top
-                cardEnd = safe.right
+                cardEnd = endInset
                 card.maxHeight = Int.MAX_VALUE
             }
             InAppTemplate.HEADER -> {
                 params = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP)
                 built.setPadding(safe.left + dp(16), safe.top + dp(12), safe.right + dp(16), dp(12))
                 cardTop = safe.top
-                cardEnd = safe.right
+                cardEnd = endInset
                 card.maxHeight = max(0, screenHeight - safe.bottom - dp(16))
             }
             InAppTemplate.FOOTER -> {
                 params = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
                 params.bottomMargin = imeBottom
                 built.setPadding(safe.left + dp(16), dp(12), safe.right + dp(16), (if (imeBottom > 0) 0 else safe.bottom) + dp(12))
-                cardEnd = safe.right
+                cardEnd = endInset
                 card.maxHeight = max(0, screenHeight - safe.top - dp(16) - imeBottom)
             }
             else -> {
@@ -403,11 +494,17 @@ internal class InAppCardView(
         requestLayout()
     }
 
+    override fun onRtlPropertiesChanged(layoutDirection: Int) {
+        super.onRtlPropertiesChanged(layoutDirection)
+        applyLayout()
+    }
+
     private companion object {
         /** The close button (28) and a gap (8), measured from the content's trailing margin. */
         const val CLOSE_CLEARANCE = 36
         /** How far a banner's close reaches below the top of its content. */
         const val BANNER_CLOSE_REACH = 26
         const val MAX_IMAGE_SIDE = 2048
+        const val MIN_TOUCH = 48
     }
 }

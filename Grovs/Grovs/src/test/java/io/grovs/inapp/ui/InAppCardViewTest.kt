@@ -250,6 +250,137 @@ class InAppCardViewTest {
     }
 
     @Test
+    @Config(qualifiers = "w1440dp-h3200dp-mdpi")
+    fun aPictureOnABigScreenIsNotCappedBelowTheScreen() {
+        images = InAppUiFixtures.images(folder.newFolder("huge"), mapOf(InAppUiFixtures.PORTRAIT to png(2400, 2400)))
+        val view = make("""{"template":"cover","content":{"image":{"portrait":"${InAppUiFixtures.PORTRAIT}"}}}""",
+            w = 1440, h = 3200)
+        assertEquals(2400, view.shownImage!!.width)
+    }
+
+    private fun rtl(view: InAppCardView, w: Int = width, h: Int = height): InAppCardView {
+        view.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+        view.layout(0, 0, w, h)
+        assertEquals(View.LAYOUT_DIRECTION_RTL, view.card.layoutDirection)
+        return view
+    }
+
+    private fun supportRtl() {
+        activity.applicationInfo.flags = activity.applicationInfo.flags or android.content.pm.ApplicationInfo.FLAG_SUPPORTS_RTL
+    }
+
+    @Test
+    fun inRightToLeftTheCloseSitsAtTheLeftAndClearsTheBannerButtons() {
+        supportRtl()
+        val changes = """{"template":"footer","content":{"buttons":[
+            {"id":"b1","text":"One","action":{"type":"close"}},{"id":"b2","text":"Two","action":{"type":"close"}}]}}"""
+        val campaign = InAppUiFixtures.campaign(changes)
+        val presentation = InAppUiFixtures.presentation(campaign, title = null, message = null)
+        val view = InAppCardView(activity, InAppMessageSession(presentation) { outcomes += it }, images, false)
+        view.screenHeight = height
+        view.applyInsets(Insets.of(0, 24, 0, 48), 0)
+        rtl(view)
+        val close = bounds(view, view.findViewById(R.id.grovs_in_app_close))
+        assertTrue("$close", close.left < width / 2)
+        for (id in listOf("b1", "b2")) {
+            val button = bounds(view, find(view, "grovs-in-app-button-$id"))
+            assertTrue("$id $button overlaps $close", !Rect.intersects(button, Rect(close).apply { inset(10, 10) }))
+        }
+    }
+
+    @Test
+    fun inRightToLeftTheCloseKeepsClearOfTheLeftInset() {
+        supportRtl()
+        val view = rtl(make("""{"template":"header"}""", safe = Insets.of(40, 24, 0, 48)))
+        assertEquals(42, bounds(view.card, view.findViewById(R.id.grovs_in_app_close)).left)
+    }
+
+    /** A click is posted, and a view runs posted work only once it is in a window. */
+    private fun attached(view: InAppCardView): InAppCardView {
+        activity.setContentView(view)
+        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
+        view.layout(0, 0, width, height)
+        return view
+    }
+
+    private fun tap(root: View, x: Int, y: Int) {
+        val time = android.os.SystemClock.uptimeMillis()
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(time, time, android.view.MotionEvent.ACTION_DOWN, x.toFloat(), y.toFloat(), 0))
+        root.dispatchTouchEvent(android.view.MotionEvent.obtain(time, time + 50, android.view.MotionEvent.ACTION_UP, x.toFloat(), y.toFloat(), 0))
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+    }
+
+    @Test
+    fun aBannerButtonTakesTapsJustAboveAndBelowIt() {
+        val changes = """{"template":"footer","content":{"buttons":[{"id":"b1","text":"OK","action":{"type":"close"}}]}}"""
+        val view = attached(make(changes))
+        val button = bounds(view, find(view, "grovs-in-app-button-b1"))
+        assertTrue("${button.height()}", button.height() < 40)
+        tap(view, button.centerX(), button.top - 7)
+        assertEquals("b1", (outcomes.single() as InAppOutcome.Clicked).buttonId)
+        outcomes.clear()
+        val again = attached(make(changes))
+        // The drawn button's last row is bottom - 1.
+        tap(again, button.centerX(), button.bottom - 1 + 7)
+        assertEquals("b1", (outcomes.single() as InAppOutcome.Clicked).buttonId)
+    }
+
+    @Test
+    fun aTapOnTheCardIsNotABackdropTapAndTheCardIsNotAButton() {
+        val view = attached(make())
+        assertTrue(!view.card.isClickable)
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, view.importantForAccessibility)
+        val card = bounds(view, view.card)
+        tap(view, card.left + 4, card.bottom - 4)
+        assertTrue(outcomes.isEmpty())
+        tap(view, 4, 4)
+        assertEquals(InAppOutcome.Dismissed("backdrop"), outcomes.single())
+    }
+
+    private fun fling(root: View, x: Int, fromY: Int, toY: Int) {
+        val time = android.os.SystemClock.uptimeMillis()
+        fun send(action: Int, at: Long, y: Int) =
+            root.dispatchTouchEvent(android.view.MotionEvent.obtain(time, time + at, action, x.toFloat(), y.toFloat(), 0))
+        send(android.view.MotionEvent.ACTION_DOWN, 0, fromY)
+        for (step in 1..5) send(android.view.MotionEvent.ACTION_MOVE, step * 10L, fromY + (toY - fromY) * step / 5)
+        send(android.view.MotionEvent.ACTION_UP, 60, toY)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+    }
+
+    @Test
+    fun aBannerSwipeLeavesAScrollingTextAlone() {
+        val short = make("""{"template":"header"}""")
+        val shortText = bounds(short, short.findViewById(R.id.grovs_in_app_text))
+        fling(short, shortText.centerX(), shortText.bottom - 2, shortText.bottom - 2 - 200)
+        assertEquals(InAppOutcome.Dismissed("swipe"), outcomes.single())
+        outcomes.clear()
+        val long = make("""{"template":"header"}""", message = "Long text. ".repeat(400))
+        val scroll = long.findViewById<ScrollView>(R.id.grovs_in_app_text)
+        assertTrue(scroll.canScrollVertically(1))
+        val text = bounds(long, scroll)
+        fling(long, text.centerX(), text.bottom - 2, text.bottom - 2 - 200)
+        assertTrue(outcomes.isEmpty())
+    }
+
+    @Test
+    fun theRenderedTextAndButtonTitlesAreShown() {
+        val changes = """{"content":{"title":"Hello {{user.name}}","buttons":[
+            {"id":"b1","text":"Buy {{user.plan}}","action":{"type":"close"},"colors":{"background":"#112233","text":"#445566"}}]}}"""
+        val campaign = InAppUiFixtures.campaign(changes)
+        val presentation = InAppUiFixtures.presentation(campaign, title = "Hello Ana", buttons = listOf("Buy Pro"))
+        val view = InAppCardView(activity, InAppMessageSession(presentation) { outcomes += it }, images, false)
+        assertEquals("Hello Ana", view.findViewById<android.widget.TextView>(R.id.grovs_in_app_title).text.toString())
+        val button = find(view, "grovs-in-app-button-b1") as android.widget.TextView
+        assertEquals("Buy Pro", button.text.toString())
+        assertEquals(0xFF445566.toInt(), button.currentTextColor)
+        val fill = (button.background as android.graphics.drawable.GradientDrawable).color!!.defaultColor
+        assertEquals(0xFF112233.toInt(), fill)
+    }
+
+    @Test
     fun aBannerSwipeTowardsItsEdgeCloses() {
         val header = make("""{"template":"header"}""")
         header.card.onSwipe!!.invoke(true)
