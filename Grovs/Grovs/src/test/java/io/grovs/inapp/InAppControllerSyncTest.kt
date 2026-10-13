@@ -159,6 +159,20 @@ class InAppControllerSyncTest {
         assertEquals(listOf("c1"), h.presenter.ids)
     }
 
+    @Test
+    fun `a store address that arrives later starts counting events for its campaign`() {
+        val counting = campaign("""{"content":{"buttons":[{"id":"b1","text":"Update","action":{"type":"open_store"}}]},"conditions":[{"type":"event_count","name":"cart_viewed","op":"gt","value":1}]}""")
+        val h = InAppHarness()
+        h.start(listOf(counting))
+        h.unchanged("""{"store_url":"https://play.google.com/store/apps/details?id=a"}""")
+        h.controller.onForeground()
+
+        h.controller.onEvent(cart)
+        assertEquals(emptyList<String>(), h.presenter.ids)
+        h.controller.onEvent(cart)
+        assertEquals(listOf("c1"), h.presenter.ids)
+    }
+
     // IOS/InAppController.swift:588-597, 630-638
 
     @Test
