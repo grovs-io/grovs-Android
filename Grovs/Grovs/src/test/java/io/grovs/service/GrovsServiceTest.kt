@@ -334,4 +334,33 @@ class GrovsServiceTest {
 
         assertResultSuccess(result, context = "after a 2xx payment response with no body")
     }
+
+    // ==================== pushOpen Tests ====================
+
+    @Test
+    fun `push_open posts campaign_id and session_id`() = runTest {
+        val result = grovsService.pushOpen("k9Qx2")
+
+        assertResultSuccess(result, context = "after a 200")
+        val request = mockGrovsApi.pushOpenCalls.single()
+        assertEqualsWithContext("k9Qx2", request.campaignId, "campaign_id", "push_open body")
+        assertEqualsWithContext(grovsContext.sessionId, request.sessionId, "session_id", "push_open body")
+    }
+
+    @Test
+    fun `a 404 push_open is terminal and not retried by the executor`() = runTest {
+        mockGrovsApi.pushOpenResponse = Response.error(
+            404,
+            """{"error":"Push campaign not found"}""".toResponseBody("application/json".toMediaType()),
+        )
+
+        val result = grovsService.pushOpen("unknown")
+
+        assertTrueWithContext(
+            (result as? LSResult.Error)?.exception is HttpStatusException,
+            "the error is an HttpStatusException",
+            "after a 404",
+        )
+        assertEqualsWithContext(1, mockGrovsApi.pushOpenCalls.size, "push_open calls", "a 404 is not retried")
+    }
 }

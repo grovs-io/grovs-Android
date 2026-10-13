@@ -121,4 +121,7 @@ interface IGrovsService {
      * Syncs the class-name → friendly-name mapping used for screen-view reporting.
      */
     suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean>
+
+    /** Reports that the user opened a push campaign. The backend counts it once per visitor. */
+    suspend fun pushOpen(campaignId: String): LSResult<Boolean>
 }

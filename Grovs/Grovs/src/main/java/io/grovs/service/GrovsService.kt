@@ -9,6 +9,7 @@ import com.google.gson.reflect.TypeToken
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.GrovsContext
+import io.grovs.model.PushOpenRequest
 import io.grovs.model.ScreenAlias
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.BuildConfig
@@ -336,6 +337,12 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             grovsApi.updateAttributes(request, token).toStatusResult("Set attributes", gson)
         }
     }
+
+    override suspend fun pushOpen(campaignId: String): LSResult<Boolean> =
+        requestExecutor.retrying("Push open") { token ->
+            val request = PushOpenRequest(campaignId = campaignId, sessionId = grovsContext.sessionId)
+            grovsApi.pushOpen(request, token).toStatusResult("Push open", gson)
+        }
 
     override fun getDeviceFor(vendorId: String): Flow<GVRetryResult<GetDeviceResponse>> =
         requestExecutor.retryingFlow<GetDeviceResponse>("Getting device last seen") { token ->

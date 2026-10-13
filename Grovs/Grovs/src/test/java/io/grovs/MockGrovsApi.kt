@@ -2,6 +2,7 @@ package io.grovs
 
 import io.grovs.api.GrovsApi
 import io.grovs.handlers.ConsentToken
+import io.grovs.model.PushOpenRequest
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
@@ -52,6 +53,7 @@ internal class MockGrovsApi : GrovsApi {
     var markNotificationAsReadResponse: Response<Unit>? = null
     var notificationsToDisplayAutomaticallyResponse: Response<NotificationsResponse>? = null
     var syncScreenAliasesResponse: Response<Unit>? = null
+    var pushOpenResponse: Response<Unit>? = null
 
     // Track method calls for verification
     var authenticateCalls = mutableListOf<AppDetails>()
@@ -64,6 +66,7 @@ internal class MockGrovsApi : GrovsApi {
     var clipboardStatusCalls = 0
     var payloadCalls = mutableListOf<AppDetails>()
     var payloadWithLinkCalls = mutableListOf<AppDetails>()
+    var pushOpenCalls = mutableListOf<PushOpenRequest>()
 
     // =====================================================================
     // GrovsApi Implementation
@@ -140,6 +143,11 @@ internal class MockGrovsApi : GrovsApi {
         return syncScreenAliasesResponse ?: Response.success(Unit)
     }
 
+    override suspend fun pushOpen(request: PushOpenRequest, token: ConsentToken): Response<Unit> {
+        pushOpenCalls.add(request)
+        return pushOpenResponse ?: Response.success(Unit)
+    }
+
     // =====================================================================
     // Helper methods to reset and verify
     // =====================================================================
@@ -160,6 +168,7 @@ internal class MockGrovsApi : GrovsApi {
         markNotificationAsReadResponse = null
         notificationsToDisplayAutomaticallyResponse = null
         syncScreenAliasesResponse = null
+        pushOpenResponse = null
 
         authenticateCalls.clear()
         generateLinkCalls.clear()
@@ -171,6 +180,7 @@ internal class MockGrovsApi : GrovsApi {
         clipboardStatusCalls = 0
         payloadCalls.clear()
         payloadWithLinkCalls.clear()
+        pushOpenCalls.clear()
     }
 
     fun verifyAuthenticateCalled(): Boolean = authenticateCalls.isNotEmpty()

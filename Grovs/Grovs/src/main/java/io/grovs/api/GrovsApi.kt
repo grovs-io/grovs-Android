@@ -2,6 +2,7 @@ package io.grovs.api
 
 import android.os.Parcelable
 import io.grovs.handlers.ConsentToken
+import io.grovs.model.PushOpenRequest
 import io.grovs.model.ScreenAliasesRequest
 import io.grovs.model.AppDetails
 import io.grovs.model.AuthenticationResponse
@@ -78,4 +79,7 @@ internal interface GrovsApi {
 
     @POST("screen_aliases")
     suspend fun syncScreenAliases(@Body request: ScreenAliasesRequest, @Tag token: ConsentToken): Response<Unit>
+
+    @POST("push_open")
+    suspend fun pushOpen(@Body request: PushOpenRequest, @Tag token: ConsentToken): Response<Unit>
 }
