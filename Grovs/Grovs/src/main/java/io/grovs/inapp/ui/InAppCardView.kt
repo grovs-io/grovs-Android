@@ -45,8 +45,26 @@ internal val semibold: Typeface
 private class InAppTouchTargets(host: View) : TouchDelegate(Rect(), host) {
     val targets = mutableListOf<TouchDelegate>()
 
-    override fun onTouchEvent(event: MotionEvent): Boolean =
-        targets.fold(false) { handled, target -> target.onTouchEvent(event) || handled }
+    /** The target that took the gesture's DOWN, kept until UP or CANCEL. */
+    private var active: TouchDelegate? = null
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) active = targets.firstOrNull { send(it, event) }
+        else active?.let { send(it, event) }
+        val handled = active != null
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) active = null
+        return handled
+    }
+
+    /** A TouchDelegate moves the event it is given, so each one gets its own copy. */
+    private fun send(target: TouchDelegate, event: MotionEvent): Boolean {
+        val copy = MotionEvent.obtain(event)
+        try {
+            return target.onTouchEvent(copy)
+        } finally {
+            copy.recycle()
+        }
+    }
 }
 
 /** The card's own frame: rounded, clipped, with a size limit and an optional swipe. */
@@ -181,8 +199,8 @@ internal class InAppCardView(
     private val skirt = View(context)
     private val portrait = images.file(InAppStyle.imageUrl(campaign, "portrait"))
     private val landscape = images.file(InAppStyle.imageUrl(campaign, "landscape"))
-    private val hasPicture = portrait != null || landscape != null
     private val decoded = mutableMapOf<File, Bitmap?>()
+    private val hasPicture = resources.displayMetrics.let { bitmapFor(it.widthPixels, it.heightPixels) } != null
     private var picture: ImageView? = null
     private var content: View? = null
     private var close: View? = null
@@ -253,12 +271,21 @@ internal class InAppCardView(
         chooseImage(w, h)
     }
 
-    /** Decodes only the picture for the current orientation, once the size is known. */
     private fun chooseImage(w: Int, h: Int) {
         val shown = picture ?: return
         if (w <= 0 || h <= 0) return
-        val file = (if (w > h) landscape else portrait) ?: portrait ?: landscape ?: return
-        shown.setImageBitmap(decoded.getOrPut(file) { decode(file) })
+        shown.setImageBitmap(bitmapFor(w, h))
+    }
+
+    /** The picture for this orientation, else the other one when it is missing or does not decode. */
+    private fun bitmapFor(w: Int, h: Int): Bitmap? {
+        val order = if (w > h) listOf(landscape, portrait) else listOf(portrait, landscape)
+        return order.filterNotNull().asSequence().mapNotNull(::decodeOnce).firstOrNull()
+    }
+
+    private fun decodeOnce(file: File): Bitmap? {
+        if (!decoded.containsKey(file)) decoded[file] = decode(file)
+        return decoded[file]
     }
 
     private fun decode(file: File): Bitmap? {

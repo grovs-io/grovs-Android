@@ -328,6 +328,54 @@ class InAppCardViewTest {
         assertEquals("b1", (outcomes.single() as InAppOutcome.Clicked).buttonId)
     }
 
+    private fun twoButtonFooter(rightToLeft: Boolean): InAppCardView {
+        if (rightToLeft) supportRtl()
+        val changes = """{"template":"footer","content":{"buttons":[
+            {"id":"b1","text":"One","action":{"type":"close"}},{"id":"b2","text":"Two","action":{"type":"close"}}]}}"""
+        val campaign = InAppUiFixtures.campaign(changes)
+        val presentation = InAppUiFixtures.presentation(campaign, title = null, message = null)
+        val view = InAppCardView(activity, InAppMessageSession(presentation) { outcomes += it }, images, false)
+        view.screenHeight = height
+        view.applyInsets(Insets.of(0, 24, 0, 48), 0)
+        if (rightToLeft) view.layoutDirection = View.LAYOUT_DIRECTION_RTL
+        return attached(view)
+    }
+
+    @Test
+    fun aTapInTheGrownBandClicksOnlyTheButtonItBelongsTo() {
+        for (rightToLeft in listOf(false, true)) {
+            for (id in listOf("b1", "b2")) {
+                val view = twoButtonFooter(rightToLeft)
+                // The session reports once, so count the clicks on the buttons themselves.
+                val clicked = mutableListOf<String>()
+                for (each in listOf("b1", "b2")) {
+                    val button = find(view, "grovs-in-app-button-$each")
+                    val original = org.robolectric.Shadows.shadowOf(button).onClickListener
+                    button.setOnClickListener { clicked += each; original.onClick(it) }
+                }
+                val button = bounds(view, find(view, "grovs-in-app-button-$id"))
+                tap(view, button.centerX(), button.top - 7)
+                assertEquals("rtl=$rightToLeft", listOf(id), clicked)
+            }
+        }
+    }
+
+    @Test
+    fun aFileThatIsNotAPictureIsNoPicture() {
+        images = InAppUiFixtures.images(folder.newFolder("bad"), mapOf(InAppUiFixtures.PORTRAIT to "not an image".toByteArray()))
+        val view = make("""{"content":{"image":{"portrait":"${InAppUiFixtures.PORTRAIT}"}}}""")
+        assertNull(view.findViewById(R.id.grovs_in_app_picture))
+        assertNull(view.shownImage)
+    }
+
+    @Test
+    fun aPictureThatFailsToDecodeFallsBackToTheOtherOrientation() {
+        images = InAppUiFixtures.images(folder.newFolder("broken"), mapOf(
+            InAppUiFixtures.PORTRAIT to png(200, 400).copyOf(60), InAppUiFixtures.LANDSCAPE to png(400, 200)))
+        val view = make("""{"content":{$withImage}}""")
+        assertTrue(view.shownImage!!.width > view.shownImage!!.height)
+    }
+
     @Test
     fun aTapOnTheCardIsNotABackdropTapAndTheCardIsNotAButton() {
         val view = attached(make())
