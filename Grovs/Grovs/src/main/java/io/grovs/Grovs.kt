@@ -877,6 +877,7 @@ public class Grovs: ActivityProvider {
             }
             // Consent withdrawn: the link must not be resolved or delivered by a later grant.
             parkedIntent = null
+            manager?.pushOpens?.clear()
             mainHandler.post { pendingLink.dropIfStale() }
             return
         }

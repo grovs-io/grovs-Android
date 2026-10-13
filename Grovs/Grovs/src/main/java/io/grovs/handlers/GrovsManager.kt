@@ -244,6 +244,20 @@ internal class GrovsManager(
     var pushToken: String? by grovsContext::pushToken
     var attributes: Map<String, Any>? by grovsContext::attributes
 
+    internal val pushOpens = PushOpenReporter(
+        service = this.grovsService,
+        consent = grovsContext.consent,
+        isAuthenticated = { authenticationState == AuthenticationState.AUTHENTICATED },
+    )
+
+    /** Sends held opens off the caller's path: each report may wait out the executor's retries. */
+    fun reportPendingPushOpens() {
+        val token = grovsContext.consent.tryAcquire(configuration) ?: return
+        grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
+            pushOpens.reportPending()
+        }
+    }
+
     suspend fun onAppForegrounded() {
         if (grovsContext.consent.workToken(configuration) == null) return
         // A value the backend never acknowledged stays pending forever otherwise: the sync only
@@ -251,6 +265,7 @@ internal class GrovsManager(
         if (grovsContext.userAttributes.value != acknowledgedAttributes) resyncAttributes()
         eventsManager.onAppForegrounded()
         syncScreenAliasesIfNeeded()
+        reportPendingPushOpens()
     }
 
     fun onAppBackgrounded() {
@@ -528,6 +543,7 @@ internal class GrovsManager(
 
                     // Aliases set before the SDK was ready are held; send them now.
                     syncScreenAliasesIfNeeded()
+                    reportPendingPushOpens()
                 }
                 is GVRetryResult.Retrying -> {
                     authenticationState = AuthenticationState.RETRYING
