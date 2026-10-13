@@ -455,10 +455,11 @@ public class Grovs: ActivityProvider {
         }
 
     /// The push token for the user. This property allows getting and setting the push notification token.
+    /// Set before configure(), it is kept and sent once the SDK is authenticated.
     var pushToken: String?
-        get() = grovsManager?.pushToken
+        get() = grovsManager?.pushToken ?: grovsContext.pushToken
         set(value) {
-            grovsManager?.pushToken = value
+            grovsManager?.let { it.pushToken = value } ?: run { grovsContext.pushToken = value }
         }
 
     /// The attributes for the current user. This will be visible in the grovs dashboard.

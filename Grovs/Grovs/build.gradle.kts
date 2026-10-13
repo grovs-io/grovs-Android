@@ -331,6 +331,7 @@ tasks.register("printCoverageReport") {
 
 dependencies {
     compileOnly(libs.firebase.messaging.ktx)
+    testImplementation(libs.firebase.messaging.ktx)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)

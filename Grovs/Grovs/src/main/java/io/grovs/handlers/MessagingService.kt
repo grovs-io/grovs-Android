@@ -3,16 +3,12 @@ package io.grovs.handlers
 import android.content.pm.PackageManager
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import io.grovs.GrovsMessaging
 import io.grovs.R
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 
-class MessagingService: FirebaseMessagingService() {
-
-    override fun onCreate() {
-        super.onCreate()
-
-    }
+open class MessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         DebugLogger.instance.log(LogLevel.INFO, "Push notification handled by grovs FirebaseMessagingService service.")
@@ -23,11 +19,9 @@ class MessagingService: FirebaseMessagingService() {
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-
+    override fun onNewToken(token: String) {
+        GrovsMessaging.onNewToken(token)
     }
-
 }
 
 fun FirebaseMessagingService.handleGrovsNotification(message: RemoteMessage): Boolean {
