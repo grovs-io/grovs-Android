@@ -72,8 +72,10 @@ internal class InAppWindow(
             }
         }
         // Below Android 11 the keyboard's insets reach an edge-to-edge window only in resize mode.
-        @Suppress("DEPRECATION")
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        if (Build.VERSION.SDK_INT < 30) {
+            @Suppress("DEPRECATION")
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         if (edge == Edge.FULL) {
             window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
         } else {
@@ -90,9 +92,11 @@ internal class InAppWindow(
         } catch (e: WindowManager.BadTokenException) {
             return false
         }
-        // A banner never takes focus, so the system does not announce its window.
-        content.post {
-            if (dialog.isShowing) content.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
+        // The system announces a full-screen window as it takes focus; a banner never takes focus.
+        if (edge != Edge.FULL) {
+            content.post {
+                if (dialog.isShowing) content.sendAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)
+            }
         }
         return true
     }
@@ -110,6 +114,7 @@ internal class InAppWindow(
     }
 
     fun close() {
-        if (dialog.isShowing) dialog.dismiss()
+        // A window the destroyed Activity leaked is already gone, and dismissing it would throw.
+        if (dialog.isShowing && dialog.window?.decorView?.parent != null) dialog.dismiss()
     }
 }

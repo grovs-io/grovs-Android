@@ -23,12 +23,16 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28, 34])
 class InAppWindowTest {
-    private val activity: Activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+    private val controller = Robolectric.buildActivity(Activity::class.java).setup()
+    private val activity: Activity = controller.get()
     private var backs = 0
     private var insets: Pair<Insets, Int>? = null
 
     private fun window(edge: InAppWindow.Edge, content: View = View(activity)) =
         InAppWindow(activity, content, edge, onBack = { backs++ }, onInsets = { s, ime -> insets = s to ime })
+
+    private fun insetsController(window: InAppWindow) =
+        WindowCompat.getInsetsController(window.dialog.window!!, window.dialog.window!!.decorView)
 
     private fun flags(window: InAppWindow) = window.dialog.window!!.attributes.flags
 
@@ -44,6 +48,15 @@ class InAppWindowTest {
         if (Build.VERSION.SDK_INT >= 28) {
             assertEquals(WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES, attributes.layoutInDisplayCutoutMode)
         }
+        val resize = attributes.softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST
+        assertEquals(Build.VERSION.SDK_INT < 30, resize == WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+    }
+
+    @Test
+    fun aTopBannerSitsAtTheTop() {
+        val window = window(InAppWindow.Edge.TOP)
+        window.show(lightStatusIcons = null)
+        assertEquals(android.view.Gravity.TOP, window.dialog.window!!.attributes.gravity and android.view.Gravity.VERTICAL_GRAVITY_MASK)
     }
 
     @Test
@@ -93,6 +106,21 @@ class InAppWindowTest {
     }
 
     @Test
+    fun darkStatusIconsWhenTheCardIsLight() {
+        val window = window(InAppWindow.Edge.FULL)
+        window.show(lightStatusIcons = false)
+        assertTrue(insetsController(window).isAppearanceLightStatusBars)
+    }
+
+    @Test
+    fun withoutACardColourTheStatusBarKeepsTheAppsLook() {
+        WindowCompat.getInsetsController(activity.window, activity.window.decorView).isAppearanceLightStatusBars = true
+        val window = window(InAppWindow.Edge.FULL)
+        window.show(lightStatusIcons = null)
+        assertTrue(insetsController(window).isAppearanceLightStatusBars)
+    }
+
+    @Test
     fun closeDismissesWithoutAnyCallback() {
         val window = window(InAppWindow.Edge.FULL)
         window.show(lightStatusIcons = null)
@@ -109,7 +137,45 @@ class InAppWindowTest {
     }
 
     @Test
-    fun theMessageIsAnnouncedOnceItIsShown() {
+    fun aDestroyedActivityHasNowhereToDraw() {
+        controller.pause().stop().destroy()
+        assertFalse(window(InAppWindow.Edge.FULL).show(lightStatusIcons = null))
+    }
+
+    @Test
+    fun closeAfterTheActivityIsDestroyedDoesNotThrow() {
+        val window = window(InAppWindow.Edge.FULL)
+        window.show(lightStatusIcons = null)
+        controller.pause().stop().destroy()
+        // What the framework does with windows an Activity leaks on destroy.
+        activity.windowManager.removeViewImmediate(window.dialog.window!!.decorView)
+        window.close()
+        assertEquals(0, backs)
+    }
+
+    @Test
+    @Config(sdk = [28])
+    fun belowAndroid11TheKeyboardIsReadFromTheResizedWindow() {
+        val window = window(InAppWindow.Edge.FULL)
+        window.show(lightStatusIcons = null)
+        @Suppress("DEPRECATION")
+        val resized = WindowInsetsCompat.Builder().setSystemWindowInsets(Insets.of(0, 24, 0, 300)).build()
+        val content = window.dialog.findViewById<android.view.ViewGroup>(android.R.id.content).getChildAt(0)
+        ViewCompat.dispatchApplyWindowInsets(content, resized)
+        assertEquals(300, insets!!.second)
+    }
+
+    @Test
+    fun aBannerIsAnnouncedOnceItIsShown() {
+        assertEquals(listOf(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED), announcedOnShow(InAppWindow.Edge.BOTTOM))
+    }
+
+    @Test
+    fun aFullScreenWindowIsLeftToTheSystemToAnnounce() {
+        assertEquals(emptyList<Int>(), announcedOnShow(InAppWindow.Edge.FULL))
+    }
+
+    private fun announcedOnShow(edge: InAppWindow.Edge): List<Int> {
         val announced = mutableListOf<Int>()
         val content = View(activity)
         content.accessibilityDelegate = object : View.AccessibilityDelegate() {
@@ -117,10 +183,9 @@ class InAppWindowTest {
                 announced += eventType
             }
         }
-        val window = window(InAppWindow.Edge.BOTTOM, content)
-        window.show(lightStatusIcons = null)
+        window(edge, content).show(lightStatusIcons = null)
         shadowOf(Looper.getMainLooper()).idle()
-        assertEquals(listOf(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED), announced)
+        return announced
     }
 
     @Test
