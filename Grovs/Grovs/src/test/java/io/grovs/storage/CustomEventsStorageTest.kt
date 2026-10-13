@@ -1,6 +1,7 @@
 package io.grovs.storage
 
 import android.content.Context
+import com.google.gson.Gson
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.model.CustomEvent
 import io.grovs.utils.InstantCompat
@@ -64,6 +65,40 @@ class CustomEventsStorageTest {
         val stored = storage.getEvents().first()
         assertEquals("abc", stored.properties!!["sku"])
         assertEquals(listOf("checkout"), stored.tags)
+    }
+
+    @Test
+    fun `whole numbers stay whole numbers after a round trip`() = runTest {
+        storage.addEvent(
+            CustomEvent(
+                eventName = "rated",
+                createdAt = InstantCompat.now(),
+                properties = mapOf(
+                    "value" to 4,
+                    "ratio" to 4.5,
+                    "big" to 9_007_199_254_740_993L,
+                    "nested" to mapOf("count" to 2),
+                ),
+            )
+        )
+
+        val properties = storage.getEvents().single().properties!!
+
+        assertEquals(
+            """{"value":4,"ratio":4.5,"big":9007199254740993,"nested":{"count":2}}""",
+            Gson().toJson(properties),
+        )
+    }
+
+    @Test
+    fun `events saved by an earlier storage instance keep whole numbers`() = runTest {
+        storage.addEvent(
+            CustomEvent(eventName = "rated", createdAt = InstantCompat.now(), properties = mapOf("value" to 4))
+        )
+
+        val afterUpdate = CustomEventsStorage(context)
+
+        assertEquals("""{"value":4}""", Gson().toJson(afterUpdate.getEvents().single().properties))
     }
 
     @Test

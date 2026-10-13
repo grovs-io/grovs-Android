@@ -2,6 +2,7 @@ package io.grovs.storage
 
 import android.content.Context
 import com.google.gson.GsonBuilder
+import com.google.gson.ToNumberPolicy
 import com.google.gson.reflect.TypeToken
 import io.grovs.model.CustomEvent
 import io.grovs.model.DebugLogger
@@ -17,9 +18,12 @@ internal class CustomEventsStorage(context: Context) : ICustomEventsStorage {
         context.getSharedPreferences(EventsStorage.GROVS_STORAGE, Context.MODE_PRIVATE)
 
 
-    private val gson = GsonBuilder().setLenient().registerTypeAdapterFactory(
-        LSJsonInstantCompatTypeAdapterFactory()
-    ).create()
+    private val gson = GsonBuilder().setLenient()
+        // Whole numbers read back as Long, so a tracked 4 is not sent as 4.0.
+        .setObjectToNumberStrategy(ToNumberPolicy.LONG_OR_DOUBLE)
+        .registerTypeAdapterFactory(
+            LSJsonInstantCompatTypeAdapterFactory()
+        ).create()
 
     companion object {
         // All instances share a preference file; serialize read/modify/write across instances too.
