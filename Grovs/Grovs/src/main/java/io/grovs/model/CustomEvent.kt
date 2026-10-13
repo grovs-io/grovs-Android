@@ -50,10 +50,11 @@ data class CustomEvent(
  */
 object CustomEventRules {
 
-    /** Names owned by the SDK's own telemetry. Consumers may not use them. */
+    /** Names owned by the SDK's own telemetry or by the backend. Consumers may not use them. */
     val RESERVED_NAMES: Set<String> = setOf(
         "view", "open", "install", "reinstall", "app_open",
         "time_spent", "reactivation", "user_referred", "custom", "screen_view",
+        "push_open",
     )
 
     const val MAX_PROPERTIES_BYTES = 8192

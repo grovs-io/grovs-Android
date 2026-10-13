@@ -23,6 +23,13 @@ class CustomEventTest {
     }
 
     @Test
+    fun `push_open is reserved`() {
+        assertTrue(CustomEventRules.isReserved("push_open"))
+        assertTrue(CustomEventRules.isReserved(" Push_Open "))
+        assertFalse(CustomEventRules.isValidName("push_open"))
+    }
+
+    @Test
     fun `reserved name check is case insensitive`() {
         assertTrue(CustomEventRules.isReserved("APP_OPEN"))
         assertTrue(CustomEventRules.isReserved("Screen_View"))
