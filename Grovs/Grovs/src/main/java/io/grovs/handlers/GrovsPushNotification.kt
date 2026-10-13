@@ -13,9 +13,6 @@ import io.grovs.R
 import kotlin.random.Random
 
 internal const val GROVS_NOTIFICATION_CHANNEL_ID = "GrovsChannel"
-internal const val GROVS_CAMPAIGN_ID_KEY = "grovs_campaign_id"
-
-internal fun isGrovsPush(data: Map<String, String>): Boolean = !data[GROVS_CAMPAIGN_ID_KEY].isNullOrEmpty()
 
 /**
  * Posts a Grovs push as a local notification. Kept off the Firebase service so it can run

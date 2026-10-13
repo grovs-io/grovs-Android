@@ -27,6 +27,7 @@ import io.grovs.handlers.ConsentToken
 import io.grovs.handlers.ConsentTransition
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.GrovsPushPayload
 import io.grovs.handlers.IntentOutcome
 import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
@@ -324,6 +325,12 @@ public class Grovs: ActivityProvider {
         fun onNewIntent(intent: Intent?, launcherActivity: Activity? = null) {
             instance.onNewIntent(intent, launcherActivity = launcherActivity)
         }
+
+        /// Whether FCM data (RemoteMessage.data) belongs to a Grovs push campaign.
+        fun isGrovsNotification(data: Map<String, String>): Boolean = GrovsPushPayload.from(data, null) != null
+
+        /// Whether an intent opened by tapping a notification belongs to a Grovs push campaign.
+        fun isGrovsNotification(intent: Intent?): Boolean = GrovsPushPayload.from(intent) != null
 
         /// Register a listener to receive the link and data from which the app was opened.
         ///

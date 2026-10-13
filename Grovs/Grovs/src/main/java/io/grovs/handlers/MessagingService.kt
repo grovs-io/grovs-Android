@@ -31,7 +31,7 @@ class MessagingService: FirebaseMessagingService() {
 }
 
 fun FirebaseMessagingService.handleGrovsNotification(message: RemoteMessage): Boolean {
-    if (!isGrovsPush(message.data)) {
+    if (GrovsPushPayload.from(message.data, message.messageId) == null) {
         return false
     }
 

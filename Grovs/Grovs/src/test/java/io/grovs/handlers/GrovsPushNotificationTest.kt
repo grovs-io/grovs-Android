@@ -8,10 +8,8 @@ import android.content.IntentFilter
 import android.os.Build
 import io.grovs.R
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -55,14 +53,6 @@ class GrovsPushNotificationTest {
             assertNotNull(channel)
             assertEquals(NotificationManager.IMPORTANCE_HIGH, channel.importance)
         }
-    }
-
-    @Test
-    fun `a grovs push is recognised by its campaign id`() {
-        assertTrue(isGrovsPush(mapOf("grovs_campaign_id" to "abc")))
-        assertFalse(isGrovsPush(mapOf("grovs_campaign_id" to "")))
-        assertFalse(isGrovsPush(mapOf("linksquared" to "true")))
-        assertFalse(isGrovsPush(emptyMap()))
     }
 
     @Test
