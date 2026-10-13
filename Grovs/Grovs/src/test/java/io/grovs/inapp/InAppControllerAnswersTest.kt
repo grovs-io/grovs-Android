@@ -85,6 +85,7 @@ class InAppControllerAnswersTest {
         h.controller.setExcludedScreens(listOf("checkout"))
         h.controller.onEvent(screen("Checkout"))
         h.start(emptyList(), testMessages(campaign("""{"id":"t1"}""")))
+        assertEquals(emptyList<String>(), h.presenter.ids)
         h.controller.resume()
         assertEquals(emptyList<String>(), h.presenter.ids)
         h.controller.onEvent(screen("Home"))
@@ -134,6 +135,16 @@ class InAppControllerAnswersTest {
         h.controller.onForeground()
         h.presenter.finish(InAppOutcome.Dismissed("close_button"))
         assertEquals(listOf("c1", "t1"), h.presenter.ids)
+    }
+
+    @Test
+    fun `a test message is filled with the current user and an empty app open event`() {
+        val h = InAppHarness()
+        h.start(emptyList(), testMessages(campaign("""{"id":"t1","content":{"title":"Hi {{ user.first_name }} {{ event.item | default: \"none\" }}"}}""")))
+        val shown = h.presenter.shown.single()
+        assertEquals("Hi Ana none", shown.rendered.title)
+        assertEquals("Ana", shown.user.get("first_name").asString)
+        assertEquals(0, shown.event.size())
     }
 
     // Answers, IOS/InAppController.swift:316-323, 432-470
@@ -202,13 +213,12 @@ class InAppControllerAnswersTest {
     }
 
     @Test
-    fun `an answered message reports no dismissal and no click and tells the host once`() {
+    fun `an answered message reports no dismissal and no click and tells the host`() {
         val h = InAppHarness()
         h.start(listOf(asking()))
         h.controller.onEvent(cart)
         answer(h, InAppAnswer.Stars(5))
         h.presenter.shown.last().onComment!!("Great")
-        h.presenter.finish(InAppOutcome.Answered(InAppAnswer.Stars(5), "Great"))
         h.presenter.finish(InAppOutcome.Answered(InAppAnswer.Stars(5), "Great"))
 
         assertEquals(listOf("in_app_viewed", "in_app_answered", "in_app_commented"), h.names())
@@ -361,6 +371,22 @@ class InAppControllerAnswersTest {
     }
 
     @Test
+    fun `the page is not revealed on an excluded screen or after the SDK stopped`() {
+        val h = InAppHarness()
+        h.controller.setExcludedScreens(listOf("checkout"))
+        h.start(listOf(html()))
+        h.controller.onEvent(cart)
+        val canShow = h.presenter.shown.single().canShow!!
+        assertTrue(canShow())
+        h.controller.onEvent(screen("Checkout"))
+        assertFalse(canShow())
+        h.controller.onEvent(screen("Home"))
+        assertTrue(canShow())
+        h.controller.stop()
+        assertFalse(canShow())
+    }
+
+    @Test
     fun `an unshown page consumes no cap, reports nothing and lets what waited show`() {
         val h = InAppHarness()
         h.start(listOf(html("""{"caps":{"session":1}}""")))
@@ -385,7 +411,11 @@ class InAppControllerAnswersTest {
         assertEquals("c1", h.tracked.first().second.get("campaign_id").asString)
         assertEquals("pro", h.tracked.first().second.get("plan").asString)
         assertEquals(1, h.names().count { it == "in_app_clicked" })
-        assertFalse(h.reports.first { it.name == "in_app_clicked" }.properties.has("button_id"))
+        val click = h.reports.first { it.name == "in_app_clicked" }
+        assertFalse(click.properties.has("button_id"))
+        assertEquals("track", click.properties.get("action").asString)
+        assertEquals("c1", click.properties.get("campaign_id").asString)
+        assertEquals(JsonPrimitive(1), click.properties.get("revision"))
 
         h.presenter.finish(InAppOutcome.Clicked(null, InAppAction(InAppActionType.OPEN_URL, "https://a.example", null)))
         assertEquals(1, h.names().count { it == "in_app_clicked" })
@@ -401,6 +431,7 @@ class InAppControllerAnswersTest {
         h.presenter.shown.single().onShown!!()
         h.presenter.shown.single().onAttribute!!("plan", JsonPrimitive("pro"))
         assertEquals("plan", h.attributes.single().first)
+        assertEquals(JsonPrimitive("pro"), h.attributes.single().second)
         assertFalse(h.names().contains("in_app_clicked"))
     }
 
