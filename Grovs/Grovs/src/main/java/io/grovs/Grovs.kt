@@ -802,6 +802,7 @@ public class Grovs: ActivityProvider {
 
         // A new configuration never inherits the previous one's unresolved link.
         parkedIntent = null
+        reportedPushIntents.clear()
         mainHandler.post { pendingLink.dropIfStale() }
 
         // One network callback per process: a repeated configure() replaces it instead of adding
@@ -1607,6 +1608,7 @@ public class Grovs: ActivityProvider {
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not delivering the push")
             return
         }
+        if (handledPushes.contains(push, intent)) return
         handledPushes.markHandled(push, intent)
         openedLinkDetails = details
         deeplinkListener?.onDeeplinkReceived(details)

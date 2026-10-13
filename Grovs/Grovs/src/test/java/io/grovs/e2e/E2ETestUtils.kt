@@ -378,6 +378,7 @@ object E2ETestUtils {
             }
             try {
                 (grovsField("handledPushes") as? HandledPushes)?.reset()
+                (grovsField("reportedPushIntents") as? MutableSet<*>)?.clear()
             } catch (e: Exception) {
                 errors.add("Failed to reset the handled pushes: ${e.message}")
             }

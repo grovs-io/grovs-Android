@@ -70,6 +70,7 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
         foreground(pushTap())
 
         pumpUntil("the open to be reported") { backend.count(pushOpen) >= 1 }
+        pumpUntil("the push to be delivered") { delivered.isNotEmpty() }
         assertEquals("k9Qx2", pushOpenBody().getString("campaign_id"))
         assertTrue(pushOpenBody().getString("session_id").isNotEmpty())
     }
@@ -357,6 +358,22 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
 
         assertEquals(1, backend.count(pushOpen))
         assertEquals(1, delivered.size)
+    }
+
+    @Test
+    fun `two intent objects carrying the same link push deliver once while the lookup is in flight`() {
+        backend.respond(authenticate, authOk)
+        configure()
+        foreground()
+        pumpUntil("authentication") { manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED }
+        backend.failWithStatus(payload, code = 503, body = "no available server")
+
+        assertTrue(Grovs.handleNotificationOpen(pushTap(messageId = "0:dup")))
+        foreground(pushTap(messageId = "0:dup"))
+        advanceUntil("the push data to be delivered") { delivered.isNotEmpty() }
+        advance(5_000)
+
+        assertEquals("payload=${backend.count(payload)} open=${backend.count(pushOpen)}", 1, delivered.size)
     }
 
     private companion object {
