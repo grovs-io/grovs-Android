@@ -2,6 +2,7 @@ package io.grovs
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -28,6 +29,7 @@ import io.grovs.handlers.ConsentTransition
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.GrovsPushPayload
+import io.grovs.handlers.HandledPushes
 import io.grovs.handlers.IntentOutcome
 import io.grovs.handlers.NavigationScreenTracker
 import io.grovs.handlers.NotificationsManager
@@ -63,6 +65,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.Serializable
 import java.lang.ref.WeakReference
+import java.util.Collections
+import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
 fun interface GrovsDeeplinkListener {
@@ -332,6 +336,10 @@ public class Grovs: ActivityProvider {
         /// Whether an intent opened by tapping a notification belongs to a Grovs push campaign.
         fun isGrovsNotification(intent: Intent?): Boolean = GrovsPushPayload.from(intent) != null
 
+        /// Only needed when a notification tap does not reach the launcher's onStart / onNewIntent,
+        /// for example a splash activity that does not forward its extras. Returns true for a Grovs push.
+        fun handleNotificationOpen(intent: Intent?): Boolean = instance.handleNotificationOpen(intent)
+
         /// Register a listener to receive the link and data from which the app was opened.
         ///
         /// - Parameters:
@@ -510,6 +518,18 @@ public class Grovs: ActivityProvider {
 
     @Volatile
     private var parkedIntent: ParkedIntent? = null
+
+    /// A Grovs push tapped before configure(). One slot, last tap wins.
+    @Volatile
+    private var startupPushIntent: Intent? = null
+
+    private val handledPushes = HandledPushes {
+        application?.getSharedPreferences(HandledPushes.PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    /// One open per tap: onNewIntent and onStart can both see the same intent before it is delivered.
+    private val reportedPushIntents: MutableSet<Intent> =
+        Collections.synchronizedSet(Collections.newSetFromMap(WeakHashMap()))
 
     /// A tapped link whose lookup failed but may heal. Reads the current context and manager
     /// lazily: configure() replaces the manager, and tests replace the context.
@@ -815,6 +835,12 @@ public class Grovs: ActivityProvider {
         application.unregisterActivityLifecycleCallbacks(applicationLifecycleObserver)
         application.registerActivityLifecycleCallbacks(applicationLifecycleObserver)
         observeProcessLifecycle()
+
+        val startupPush = startupPushIntent
+        startupPushIntent = null
+        if (startupPush != null && enabled && apiKey.isNotEmpty()) {
+            mainHandler.post { handleIntent(startupPush, delayEvents = true, cacheIntent = true) }
+        }
     }
 
     /** Lifecycle observers are main-thread only; configure() may run anywhere. */
@@ -1140,6 +1166,16 @@ public class Grovs: ActivityProvider {
         handleIntent(intent, delayEvents = false)
     }
 
+    fun handleNotificationOpen(intent: Intent?): Boolean {
+        if (GrovsPushPayload.from(intent) == null) return false
+        runOnMain { handleIntent(intent, delayEvents = false) }
+        return true
+    }
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() === Looper.getMainLooper()) block() else mainHandler.post(block)
+    }
+
     fun setOnDeeplinkReceivedListener(launcherActivity: Activity?, listener: GrovsDeeplinkListener) {
         launcherActivity?.let {
             launcherActivityReference = WeakReference(launcherActivity)
@@ -1452,9 +1488,12 @@ public class Grovs: ActivityProvider {
         delayEvents: Boolean,
         cacheIntent: Boolean = false,
         replaying: PendingLinkRetry.Parked? = null,
+        reportsPushOpen: Boolean = true,
     ) {
         val intent = intent ?: defaultIntent
+        val push = GrovsPushPayload.from(intent)
         val manager = grovsManager ?: run {
+            if (push != null) startupPushIntent = intent
             DebugLogger.instance.log(LogLevel.ERROR,"The SDK manager is not properly configured. Call Grovs.configure(application: Application, apiKey: String) first.")
             return
         }
@@ -1462,9 +1501,21 @@ public class Grovs: ActivityProvider {
         // point where the intent would be marked handled. The intent stays unconsumed and a later
         // explicit onStart/onNewIntent can still resolve it - enabling on its own never replays it.
         val token = grovsContext.consent.tryAcquire(manager.configuration) ?: run {
+            push?.let { handledPushes.ignore(it, intent) }
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - the intent is left unhandled")
             return
         }
+        val freshPush = push?.takeUnless { handledPushes.contains(it, intent) }
+        if (freshPush != null) {
+            if (reportsPushOpen && reportedPushIntents.add(intent)) {
+                grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
+                    manager.pushOpens.onTap(freshPush.campaignId, token)
+                }
+            }
+            // Nothing to resolve: the data goes out now, even before authentication.
+            if (freshPush.link == null) runOnMain { deliverPush(freshPush, intent, freshPush.details(null), token) }
+        }
+        val linkPush = freshPush?.takeIf { it.link != null }
         // Tap order, taken before the work is queued so two taps in flight keep their order. A
         // replay keeps the sequence of the tap it stands for.
         val sequence = replaying?.sequence ?: pendingLink.nextSequence()
@@ -1492,7 +1543,12 @@ public class Grovs: ActivityProvider {
                 cacheIntent = cacheIntent,
                 sequence = sequence,
                 yieldToNewerTaps = replaying != null,
+                pushLink = linkPush?.link,
             )
+            if (linkPush != null) {
+                onPushLinkOutcome(linkPush, intent, outcome, token, sequence)
+                return@launchOperation
+            }
             val result = outcome.details
             result?.let { deeplinkDetails ->
                 deeplinkDetails.link?.let { link ->
@@ -1523,6 +1579,37 @@ public class Grovs: ActivityProvider {
                 withContext(Dispatchers.Main) { recordTappedLinkOutcome(intent, delayEvents, cacheIntent, token, sequence, outcome) }
             }
         }
+    }
+
+    /**
+     * A tapped push link reaches the listener once: merged over the resolved link, or as push data
+     * alone when the lookup gave nothing. Never parked for retry, or it would arrive twice.
+     */
+    private suspend fun onPushLinkOutcome(
+        push: GrovsPushPayload,
+        intent: Intent,
+        outcome: IntentOutcome,
+        token: ConsentToken,
+        sequence: Long,
+    ) {
+        // A repeated or superseded lookup has no tapped link; whoever superseded it delivers.
+        if (outcome.tappedLink == null) return
+        outcome.details?.let { lastLinkMatched = it.link }
+        withContext(Dispatchers.Main) {
+            pendingLink.clear(sequence)
+            deliverPush(push, intent, push.details(outcome.details), token)
+        }
+    }
+
+    /** Main thread. */
+    private fun deliverPush(push: GrovsPushPayload, intent: Intent, details: DeeplinkDetails, token: ConsentToken) {
+        if (!grovsContext.consent.isCurrent(token)) {
+            DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn - not delivering the push")
+            return
+        }
+        handledPushes.markHandled(push, intent)
+        openedLinkDetails = details
+        deeplinkListener?.onDeeplinkReceived(details)
     }
 
     /**
@@ -1573,7 +1660,7 @@ public class Grovs: ActivityProvider {
             return
         }
         DebugLogger.instance.log(LogLevel.INFO, "Replaying the parked intent after authentication")
-        handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent)
+        handleIntent(parked.intent, delayEvents = parked.delayEvents, cacheIntent = parked.cacheIntent, reportsPushOpen = false)
     }
 
     override fun requireActivity(): Activity? {

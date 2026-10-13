@@ -625,11 +625,12 @@ internal class GrovsManager(
         cacheIntent: Boolean = false,
         sequence: Long = 0L,
         yieldToNewerTaps: Boolean = false,
+        pushLink: String? = null,
     ): IntentOutcome {
         val token = grovsContext.consent.workToken(configuration) ?: return IntentOutcome.NOTHING
         return try {
             grovsContext.consent.runOperation(token) {
-                handleIntentUnderConsent(intent, delayEvents, cacheIntent, token, sequence, yieldToNewerTaps)
+                handleIntentUnderConsent(intent, delayEvents, cacheIntent, token, sequence, yieldToNewerTaps, pushLink)
             }
         } catch (_: ConsentRevokedException) {
             IntentOutcome.NOTHING
@@ -643,6 +644,7 @@ internal class GrovsManager(
         token: ConsentToken,
         sequence: Long,
         yieldToNewerTaps: Boolean,
+        pushLink: String?,
     ): IntentOutcome {
         // Consent was admitted by handleIntent and is current here: runOperation checks [token]
         // before this body runs.
@@ -664,7 +666,7 @@ internal class GrovsManager(
             lastIntentHandledReference = WeakReference(intent)
             newlyCachedIntent = cacheIntent && !repeatedIntent
             if (newlyCachedIntent) handledIntentTokens.add(intent.hashCode())
-            explicitLink = if (repeatedIntent) null else intent.data?.toString()
+            explicitLink = if (repeatedIntent) null else intent.data?.toString() ?: pushLink
             // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.
             if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
             Lookup(

@@ -8,6 +8,7 @@ import androidx.fragment.app.FragmentManager
 import io.grovs.Grovs
 import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
+import io.grovs.handlers.HandledPushes
 import io.grovs.handlers.PendingLinkRetry
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
@@ -376,6 +377,11 @@ object E2ETestUtils {
                 errors.add("Failed to reset the pending link: ${e.message}")
             }
             try {
+                (grovsField("handledPushes") as? HandledPushes)?.reset()
+            } catch (e: Exception) {
+                errors.add("Failed to reset the handled pushes: ${e.message}")
+            }
+            try {
                 (grovsField("authenticationJob") as? Job)?.cancel()
             } catch (e: Exception) {
                 errors.add("Failed to cancel authenticationJob: ${e.message}")
@@ -422,7 +428,8 @@ object E2ETestUtils {
                 "deeplinkListener",
                 "grovsNotificationsListener",
                 "launcherActivityReference",
-                "currentActivityReference"
+                "currentActivityReference",
+                "startupPushIntent"
             ).forEach { fieldName ->
                 try {
                     val field = grovsClass.getDeclaredField(fieldName)
