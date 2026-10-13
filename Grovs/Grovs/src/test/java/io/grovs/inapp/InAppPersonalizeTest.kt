@@ -96,7 +96,7 @@ class InAppPersonalizeTest {
     @Test
     fun linkRuleCases() {
         val cases = InAppShared.json("cases.json").getAsJsonArray("link_rule")
-        assertTrue(cases.size() > 0)
+        assertEquals(38, cases.size())
         for (item in cases) {
             val case = item.asJsonObject
             val allowed = InAppLinkRule.allowed(case.get("input").asString) != null
@@ -110,6 +110,6 @@ class InAppPersonalizeTest {
         assertEquals("myapp://open", InAppLinkRule.allowed("MyApp://open"))
         assertEquals("#top", InAppLinkRule.allowed("#top"))
         assertNull(InAppLinkRule.allowed("https:// acme.example"))
-        assertEquals("https:// acme.example", InAppLinkRule.allowed("https:// acme.example"))
+        assertEquals("https://\u00A0acme.example", InAppLinkRule.allowed("https://\u00A0acme.example"))
     }
 }
