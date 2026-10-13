@@ -63,6 +63,24 @@ class InAppDeviceFactsTest {
     }
 
     @Test
+    fun `a host map that contains itself reads as no user`() {
+        val looped = HashMap<String, Any>()
+        looped["plan"] = "pro"
+        looped["self"] = looped
+        val facts = InAppDeviceFacts(context, attributes = { looped }, activity = { null })
+        assertEquals(0, facts.read().user.size())
+    }
+
+    @Test
+    fun `a host map changed while it is read reads as no user`() {
+        val changing = object : AbstractMap<String, Any>() {
+            override val entries: Set<Map.Entry<String, Any>> get() = throw ConcurrentModificationException()
+        }
+        val facts = InAppDeviceFacts(context, attributes = { changing }, activity = { null })
+        assertEquals(0, facts.read().user.size())
+    }
+
+    @Test
     fun `notifications switched off below API 33 read as denied`() {
         assertEquals(InAppPushPermission.GRANTED, InAppDeviceFacts.notificationsPermission(context))
         shadowOf(context.getSystemService(NotificationManager::class.java)).setNotificationsEnabled(false)

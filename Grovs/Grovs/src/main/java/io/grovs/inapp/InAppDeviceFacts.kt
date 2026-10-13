@@ -39,12 +39,32 @@ internal class InAppDeviceFacts(
         language = language(LocaleListCompat.getAdjustedDefault()[0]?.toLanguageTag()),
         firstSeenAt = null,
         utcOffsetMinutes = TimeZone.getDefault().getOffset(now()) / 60_000,
-        user = InAppJson.fromHost(attributes().orEmpty()).takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject(),
+        user = user(),
         pushPermission = pushPermission(),
         unsupportedTemplates = emptyList(),
         unsupportedActions = unsupportedActions(),
         orientation = orientation(),
     )
+
+    @Volatile
+    private var unreadableLogged = false
+
+    /** The host may change its map on another thread, or put a map inside itself. */
+    private fun user(): JsonObject = try {
+        InAppJson.fromHost(attributes().orEmpty()).takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+    } catch (e: RuntimeException) {
+        unreadable()
+    } catch (e: StackOverflowError) {
+        unreadable()
+    }
+
+    private fun unreadable(): JsonObject {
+        if (!unreadableLogged) {
+            unreadableLogged = true
+            InAppLog.error("The user attributes could not be read for in-app messages; using none.")
+        }
+        return JsonObject()
+    }
 
     private fun orientation(): InAppOrientation =
         if (activity()?.resources?.configuration?.orientation == Configuration.ORIENTATION_LANDSCAPE) {

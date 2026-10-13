@@ -21,6 +21,7 @@ import io.grovs.service.IGrovsService
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -40,10 +41,13 @@ internal class InAppHost(
     storeKey: String,
     images: InAppImages = InAppImages.forDevice(context, storeKey),
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
-    pushPermission: () -> InAppPushPermission = { InAppDeviceFacts.notificationsPermission(context) },
+    pushPermission: () -> InAppPushPermission = { InAppDeviceFacts.notificationsPermission(context.applicationContext) },
+    storeExecutor: ExecutorService = InAppQueuedStore.newExecutor(),
 ) {
     @Volatile
     private var closed = false
+
+    private val store = InAppQueuedStore(InAppFileStore(context.noBackupFilesDir, storeKey), storeExecutor)
 
     /** The SDK session whose app_open in-app has taken. Main thread. */
     private var openedSession: String? = null
@@ -57,7 +61,7 @@ internal class InAppHost(
 
     val controller = InAppController(
         InAppController.Dependencies(
-            store = InAppFileStore(context.noBackupFilesDir, storeKey),
+            store = store,
             presenter = presenter(images),
             images = images,
             device = facts::read,
@@ -85,10 +89,13 @@ internal class InAppHost(
 
     fun stop() = onMain { controller.stop() }
 
-    /** The manager is gone: in-app never runs again here, and what it shows closes. */
+    /** The manager is gone: in-app never runs again here, and what it shows closes. Queued writes still finish. */
     fun close() {
         closed = true
-        onMain { controller.stop() }
+        onMain {
+            controller.stop()
+            store.shutdown()
+        }
     }
 
     fun onForeground() = onMain {
@@ -140,7 +147,9 @@ internal class InAppHost(
     private fun sync(body: JsonObject, done: (ok: Boolean, body: JsonObject?) -> Unit) {
         val answered = AtomicBoolean(false)
         val answer = { ok: Boolean, response: JsonObject? ->
-            if (answered.compareAndSet(false, true)) mainHandler.post { done(ok, response) }
+            if (answered.compareAndSet(false, true)) {
+                mainHandler.post { if (closed) done(false, null) else done(ok, response) }
+            }
         }
         val job = grovsContext.consent.launchOperation(configuration, context = grovsContext.serialDispatcher) {
             val result = try {

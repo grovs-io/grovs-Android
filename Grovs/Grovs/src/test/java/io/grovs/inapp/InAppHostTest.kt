@@ -14,9 +14,11 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -28,6 +30,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.time.Duration
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [28])
@@ -45,6 +48,7 @@ class InAppHostTest {
     private var authenticated = true
     private var activity: Activity? = null
     private var answer: JsonObject = JsonObject()
+    private val storeExecutor = InAppQueuedStore.newExecutor()
 
     class RecordingFailures : io.grovs.GrovsInAppListener {
         val failed = mutableListOf<String>()
@@ -83,7 +87,15 @@ class InAppHostTest {
         presenter = { draw },
         storeKey = "key",
         images = InAppImages(temp.root, loader = { _, done -> done(null) }, decodes = { true }),
+        storeExecutor = storeExecutor,
     )
+
+    private fun onDisk() = InAppFileStore(RuntimeEnvironment.getApplication().noBackupFilesDir, "key")
+
+    private fun drainWrites() {
+        if (storeExecutor.isShutdown) assertTrue(storeExecutor.awaitTermination(5, TimeUnit.SECONDS))
+        else storeExecutor.submit {}.get(5, TimeUnit.SECONDS)
+    }
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
@@ -137,7 +149,8 @@ class InAppHostTest {
         coVerify { customEvents.trackInApp(capture(id), "in_app_viewed", capture(properties)) }
         assertEquals("c1", properties.captured["campaign_id"])
         assertEquals(1L, properties.captured["revision"])
-        assertEquals(InAppKept.load(InAppFileStore(RuntimeEnvironment.getApplication().noBackupFilesDir, "key"))!!.state.views.single().id, id.captured)
+        drainWrites()
+        assertEquals(InAppKept.load(onDisk())!!.state.views.single().id, id.captured)
     }
 
     @Test
@@ -183,6 +196,33 @@ class InAppHostTest {
         host.start()
         idle()
         assertEquals(listOf("c1"), presenter.ids)
+    }
+
+    @Test
+    fun `a sync answer that arrives after close is dropped`() {
+        respond(campaign())
+        val reply = CompletableDeferred<LSResult<JsonObject>>()
+        coEvery { service.inAppSync(any()) } coAnswers { reply.await() }
+        val host = host()
+        host.start()
+        idle()
+        reply.complete(LSResult.Success(answer))
+        Thread { host.close() }.apply { start(); join() }
+        idle()
+        drainWrites()
+        assertNull(onDisk().read(InAppRecord.CAMPAIGNS))
+    }
+
+    @Test
+    fun `close lets queued writes finish and refuses later ones`() {
+        respond(campaign())
+        val host = host()
+        host.start()
+        idle()
+        host.close()
+        idle()
+        assertTrue(storeExecutor.awaitTermination(5, TimeUnit.SECONDS))
+        assertTrue(InAppSynced.load(onDisk())!!.campaigns.isNotEmpty())
     }
 
     @Test
