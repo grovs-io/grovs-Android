@@ -39,6 +39,8 @@
 -dontwarn org.slf4j.impl.StaticLoggerBinder
 -dontwarn io.grovs.handlers.MessagingService
 -dontwarn io.grovs.GrovsMessaging
+-dontwarn com.google.android.play.core.review.**
+-dontwarn io.grovs.inapp.ui.InAppPlayReview
 
 ################################################################################
 # Retrofit

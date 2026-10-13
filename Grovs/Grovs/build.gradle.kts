@@ -333,6 +333,9 @@ tasks.register("printCoverageReport") {
 dependencies {
     compileOnly(libs.firebase.messaging.ktx)
     testImplementation(libs.firebase.messaging.ktx)
+    // Apps that want in-app ratings add Play review themselves; the SDK checks for it at runtime.
+    compileOnly(libs.play.review.ktx)
+    testImplementation(libs.play.review.ktx)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
