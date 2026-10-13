@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="grovs_in_app_root" type="id" />
+    <item name="grovs_in_app_card" type="id" />
+    <item name="grovs_in_app_picture" type="id" />
+    <item name="grovs_in_app_text" type="id" />
+    <item name="grovs_in_app_title" type="id" />
+    <item name="grovs_in_app_message" type="id" />
+    <item name="grovs_in_app_buttons" type="id" />
+    <item name="grovs_in_app_close" type="id" />
+    <item name="grovs_in_app_skirt" type="id" />
+</resources>

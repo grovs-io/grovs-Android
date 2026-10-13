@@ -52,4 +52,12 @@
         <item name="android:textColor">@color/grovs_secondary_text</item>
     </style>
 
+    <style name="GrovsInAppWindow" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowContentOverlay">@null</item>
+    </style>
+
 </resources>
