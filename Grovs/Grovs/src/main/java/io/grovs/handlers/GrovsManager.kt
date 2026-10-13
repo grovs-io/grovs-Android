@@ -207,8 +207,9 @@ internal class GrovsManager(
 
     /// The user attributes the backend last confirmed, or that were adopted from it at
     /// authentication. The attribute sync sends whenever [GrovsContext.userAttributes] differs.
+    /// Starts empty: values set under an earlier configuration were never confirmed to this one.
     @Volatile
-    private var acknowledgedAttributes: UserAttributes = grovsContext.userAttributes.value
+    private var acknowledgedAttributes: UserAttributes = UserAttributes()
 
     /// Bumped to re-offer an unacknowledged value once sending can succeed again: after
     /// authentication and on every new consent grant.
@@ -239,23 +240,9 @@ internal class GrovsManager(
         }
 
     // Views onto the desired state. The attribute sync observes every write, from any thread.
-    var identifier: String?
-        get() = grovsContext.identifier
-        set(value) {
-            hostSetIdentifier = true
-            grovsContext.identifier = value
-        }
+    var identifier: String? by grovsContext::identifier
     var pushToken: String? by grovsContext::pushToken
-    var attributes: Map<String, Any>?
-        get() = grovsContext.attributes
-        set(value) {
-            hostSetAttributes = true
-            grovsContext.attributes = value
-        }
-
-    // Set before the value is written, so a concurrent adoption retries and sees it.
-    @Volatile private var hostSetIdentifier = false
-    @Volatile private var hostSetAttributes = false
+    var attributes: Map<String, Any>? by grovsContext::attributes
 
     suspend fun onAppForegrounded() {
         if (grovsContext.consent.workToken(configuration) == null) return
@@ -979,8 +966,8 @@ internal class GrovsManager(
         acknowledgedAttributes = acknowledgedAttributes.copy(identifier = identifier, attributes = attributes)
         grovsContext.userAttributes.update { current ->
             current.copy(
-                identifier = if (hostSetIdentifier) current.identifier else identifier,
-                attributes = if (hostSetAttributes) current.attributes else attributes,
+                identifier = if (grovsContext.hostSetIdentifier) current.identifier else identifier,
+                attributes = if (grovsContext.hostSetAttributes) current.attributes else attributes,
             )
         }
     }

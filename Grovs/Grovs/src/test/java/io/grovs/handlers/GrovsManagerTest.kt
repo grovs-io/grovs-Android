@@ -875,6 +875,33 @@ class GrovsManagerTest {
     }
 
     @Test
+    fun `an identifier set before a second configure survives the new manager's authentication`() = runTest {
+        grovsManager.identifier = "u1"
+        useAttributeSyncScope(backgroundScope)
+        stubSuccessfulAuthentication(sdkIdentifier = "old")
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        assertEquals("u1", grovsManager.identifier)
+        coVerify(exactly = 1) { mockGrovsService.updateAttributes("u1", null, null) }
+    }
+
+    @Test
+    fun `a push token set before a second configure is sent by the new manager`() = runTest {
+        grovsManager.pushToken = "fcm-token"
+        useAttributeSyncScope(backgroundScope)
+        stubSuccessfulAuthentication(sdkIdentifier = "server-user")
+        coEvery { mockGrovsService.updateAttributes(any(), any(), any()) } returns LSResult.Success(true)
+
+        assertTrue("authenticate() should have succeeded", grovsManager.authenticate())
+        runCurrent()
+
+        coVerify(exactly = 1) { mockGrovsService.updateAttributes("server-user", null, "fcm-token") }
+    }
+
+    @Test
     fun `attribute changes while disabled are held and sent on enable`() = runTest {
         useAttributeSyncScope(backgroundScope)
         grovsManager.authenticationState = GrovsManager.AuthenticationState.AUTHENTICATED

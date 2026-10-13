@@ -29,7 +29,10 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
 
     var identifier: String?
         get() = userAttributes.value.identifier
-        set(value) = userAttributes.update { it.copy(identifier = value) }
+        set(value) {
+            hostSetIdentifier = true
+            userAttributes.update { it.copy(identifier = value) }
+        }
 
     var pushToken: String?
         get() = userAttributes.value.pushToken
@@ -37,7 +40,19 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
 
     var attributes: Map<String, Any>?
         get() = userAttributes.value.attributes
-        set(value) = userAttributes.update { it.copy(attributes = value) }
+        set(value) {
+            hostSetAttributes = true
+            userAttributes.update { it.copy(attributes = value) }
+        }
+
+    // Whether the host set a field in this process, so authentication never replaces it with the
+    // backend's value. Set before the write, so a concurrent adoption retries and sees it.
+    @Volatile
+    internal var hostSetIdentifier = false
+        private set
+    @Volatile
+    internal var hostSetAttributes = false
+        private set
     @Volatile
     internal var isForeground: Boolean = false
 
