@@ -9,4 +9,9 @@
     <item name="grovs_in_app_buttons" type="id" />
     <item name="grovs_in_app_close" type="id" />
     <item name="grovs_in_app_skirt" type="id" />
+    <item name="grovs_in_app_question" type="id" />
+    <item name="grovs_in_app_prompt" type="id" />
+    <item name="grovs_in_app_comment" type="id" />
+    <item name="grovs_in_app_send" type="id" />
+    <item name="grovs_in_app_skip" type="id" />
 </resources>

@@ -5,4 +5,7 @@
     <string name="grovs_in_app_close">Close</string>
     <string name="grovs_in_app_open">Open</string>
     <string name="grovs_in_app_continue">Continue</string>
+    <string name="grovs_in_app_send">Send</string>
+    <string name="grovs_in_app_skip">Skip</string>
+    <string name="grovs_in_app_stars">%1$d of 5</string>
 </resources>

@@ -353,9 +353,11 @@ internal class InAppCardView(
         return row
     }
 
-    /** Title and message as drawn for the current step. */
-    private fun shownText(): Pair<String, String> =
-        (session.presentation.rendered.title ?: "") to (session.presentation.rendered.message ?: "")
+    /** Title and message as drawn for the current step; the thanks takes their place. */
+    private fun shownText(): Pair<String, String> {
+        if (session.step is InAppStep.Thanks) return (campaign.content.question?.thanks ?: "") to ""
+        return (session.presentation.rendered.title ?: "") to (session.presentation.rendered.message ?: "")
+    }
 
     private fun textBlock(): View? {
         val (title, message) = shownText()
@@ -423,9 +425,7 @@ internal class InAppCardView(
         return row
     }
 
-    /** The question's answers; none until questions are drawn. */
-    @Suppress("UNUSED_PARAMETER")
-    private fun questionArea(besideClose: Boolean): View? = null
+    private fun questionArea(besideClose: Boolean): View? = InAppQuestionView(this, session, banner).build(besideClose)
 
     /** A button drawn as the message's own buttons are. */
     fun pill(title: String, background: Int, textColor: Int): TextView = TextView(context).apply {
@@ -526,12 +526,12 @@ internal class InAppCardView(
         applyLayout()
     }
 
-    private companion object {
+    companion object {
         /** The close button (28) and a gap (8), measured from the content's trailing margin. */
         const val CLOSE_CLEARANCE = 36
         /** How far a banner's close reaches below the top of its content. */
-        const val BANNER_CLOSE_REACH = 26
-        const val MAX_IMAGE_SIDE = 2048
+        private const val BANNER_CLOSE_REACH = 26
+        private const val MAX_IMAGE_SIDE = 2048
         const val MIN_TOUCH = 48
     }
 }
