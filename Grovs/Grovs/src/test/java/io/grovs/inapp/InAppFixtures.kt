@@ -61,6 +61,8 @@ internal class FakeInAppPresenter : InAppPresenter {
     var dismissals = 0
     /** When set, there is nowhere to draw. */
     var refuses = false
+    /** When set, [dismiss] leaves the message up, so its completion can arrive later. */
+    var ignoresDismiss = false
     private var completion: ((InAppOutcome) -> Unit)? = null
 
     override fun present(presentation: InAppPresentation, completion: (InAppOutcome) -> Unit): Boolean {
@@ -72,6 +74,7 @@ internal class FakeInAppPresenter : InAppPresenter {
 
     override fun dismiss() {
         dismissals += 1
+        if (ignoresDismiss) return
         finish(InAppOutcome.Dismissed("app"))
     }
 

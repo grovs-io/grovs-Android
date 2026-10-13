@@ -273,4 +273,18 @@ class InAppControllerTest {
         h.controller.onEvent(cart)
         assertTrue(h.debugLines.single(), h.debugLines.single().contains("c2: no_trigger"))
     }
+
+    @Test
+    fun `a completion that arrives after stop and a fresh start reports nothing`() {
+        val h = InAppHarness()
+        h.presenter.ignoresDismiss = true
+        h.start(listOf(campaign()))
+        h.controller.onEvent(cart)
+        val reported = h.reports.size
+        h.controller.stop()
+        h.controller.start()
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertEquals(reported, h.reports.size)
+        assertTrue(h.listener.dismissals.isEmpty())
+    }
 }
