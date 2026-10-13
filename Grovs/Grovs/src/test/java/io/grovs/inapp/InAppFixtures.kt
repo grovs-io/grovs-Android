@@ -24,6 +24,9 @@ internal object InAppFixtures {
 
     fun json(text: String): JsonObject = JsonParser.parseString(text).asJsonObject
 
+    fun iso(millis: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT)
+        .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(millis)
+
     /** Objects merge key by key; arrays and scalars, null included, replace. */
     fun merge(base: JsonElement, changes: JsonElement): JsonElement {
         if (!base.isJsonObject || !changes.isJsonObject) return changes.deepCopy()
@@ -179,8 +182,7 @@ internal class InAppHarness(
         )
     ).also { it.settings = settings }
 
-    fun iso(millis: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT)
-        .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(millis)
+    fun iso(millis: Long): String = InAppFixtures.iso(millis)
 
     fun respond(campaigns: List<JsonObject>, extra: JsonObject = JsonObject()) {
         val body = JsonObject().apply {
