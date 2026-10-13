@@ -85,6 +85,7 @@ class ConsentRetryE2ETest {
             respond("notifications_to_display_automatically", """{"notifications":[]}""")
             respond("events/batch", """{"accepted":50,"rejected":0,"errors":[]}""")
             respond("clipboard_status", """{"clipboard_active":false}""")
+            failWithStatus("in_app/sync", 404)
         }
         driver = DrivenDispatcher()
         context = GrovsContext(serialDispatcher = driver)

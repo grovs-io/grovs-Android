@@ -6,6 +6,11 @@ import android.content.Intent
 import android.os.DeadObjectException
 import com.android.installreferrer.api.InstallReferrerClient
 import com.android.installreferrer.api.InstallReferrerStateListener
+import io.grovs.inapp.InAppHost
+import io.grovs.inapp.InAppImages
+import io.grovs.inapp.InAppPresenter
+import io.grovs.inapp.InAppSettings
+import io.grovs.inapp.NoDrawPresenter
 import io.grovs.model.AppDetails
 import io.grovs.model.CustomEventRules
 import io.grovs.model.DebugLogger
@@ -80,6 +85,10 @@ internal class GrovsManager(
     clipboardHandler: ClipboardHandler? = null,
     /// Where the attribute sync runs. Defaults to the configuration's scope; tests pass one they drive.
     attributesSyncScope: CoroutineScope? = null,
+    /// What the host chose for in-app messages; owned by Grovs so it outlives this manager.
+    inAppSettings: InAppSettings = InAppSettings(),
+    /// Builds what draws in-app messages.
+    inAppPresenter: (InAppImages) -> InAppPresenter = { NoDrawPresenter },
 ) {
     enum class AuthenticationState {
         UNAUTHENTICATED, RETRYING, AUTHENTICATED
@@ -94,11 +103,15 @@ internal class GrovsManager(
 
     private val grovsService: IGrovsService = grovsService ?: GrovsService(context = context, apiKey = apiKey, grovsContext = grovsContext)
     private val appDetails: IAppDetailsHelper by lazy { appDetailsHelper ?: grovsContext.getAppDetails(context = context) }
-    private val eventsManager: IEventsManager = eventsManager ?: EventsManager(context = context, apiKey = apiKey, grovsContext = grovsContext)
+    private val eventsManager: IEventsManager = eventsManager
+        ?: EventsManager(context = context, grovsContext = grovsContext, apiKey = apiKey, grovsService = this.grovsService)
     private val customEventsManager: ICustomEventsManager = customEventsManager
         ?: CustomEventsManager(context = context, grovsContext = grovsContext, grovsService = this.grovsService)
     private val appDetailsHelperForIntent: IAppDetailsHelper by lazy { appDetailsHelper ?: AppDetailsHelper(context) }
-    private val screenTracker: ScreenTracker = ScreenTracker(customEventsManager = this.customEventsManager)
+    private val screenTracker: ScreenTracker = ScreenTracker(
+        customEventsManager = this.customEventsManager,
+        onTracked = { name, properties -> inApp.onTracked(name, properties) },
+    )
 
     // Must be constructed before any launch event is logged: the handler arms itself on a zero opens counter.
     private val clipboardHandler: ClipboardHandler = clipboardHandler ?: ClipboardHandler(
@@ -250,6 +263,28 @@ internal class GrovsManager(
         isAuthenticated = { authenticationState == AuthenticationState.AUTHENTICATED },
     )
 
+    internal val inApp = InAppHost(
+        context = context,
+        grovsContext = grovsContext,
+        configuration = configuration,
+        service = this.grovsService,
+        customEvents = this.customEventsManager,
+        settings = inAppSettings,
+        activity = { activityProvider?.requireActivity() },
+        isAuthenticated = { authenticationState == AuthenticationState.AUTHENTICATED },
+        presenter = inAppPresenter,
+        storeKey = (if (grovsContext.settings.useTestEnvironment) "test_" else "") + apiKey,
+    )
+
+    init {
+        (this.grovsService as? GrovsService)?.onBatchStamps = inApp::onBatchStamps
+    }
+
+    /** After the opening link was handled, as iOS starts in-app once the launch link is resolved. */
+    fun startInApp() = inApp.start()
+
+    fun stopInApp() = inApp.stop()
+
     /** Sends held opens off the caller's path: each report may wait out the executor's retries. */
     fun reportPendingPushOpens() {
         val token = grovsContext.consent.tryAcquire(configuration) ?: return
@@ -266,9 +301,11 @@ internal class GrovsManager(
         eventsManager.onAppForegrounded()
         syncScreenAliasesIfNeeded()
         reportPendingPushOpens()
+        inApp.onForeground()
     }
 
     fun onAppBackgrounded() {
+        inApp.onBackground()
         grovsContext.isForeground = false
         // Custom-event campaigns last the whole session, brief backgrounds included; only the
         // system-event link ends here.
@@ -295,6 +332,7 @@ internal class GrovsManager(
         if (grovsContext.isForeground) (eventsManager as? EventsManager)?.resumeEngagement()
         customEventsManager.flush()
         eventsManager.flush()
+        inApp.start()
     }
 
     private fun isCurrent(lookup: Lookup): Boolean =
@@ -617,6 +655,7 @@ internal class GrovsManager(
         attributionScope.cancel()
         attributesSync.cancel()
         customEventsManager.close()
+        inApp.close()
     }
 
     suspend fun handleIntent(
@@ -774,6 +813,7 @@ internal class GrovsManager(
             return
         }
         customEventsManager.track(name = name, properties = properties, tags = tags, createdAt = createdAt)
+        inApp.onTracked(name, properties)
     }
 
     suspend fun trackScreenView(

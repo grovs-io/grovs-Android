@@ -38,6 +38,10 @@ import io.grovs.handlers.RequestFailure
 import io.grovs.handlers.VisibleFragmentResolver
 import io.grovs.handlers.launchOperation
 import io.grovs.handlers.runOperation
+import io.grovs.inapp.InAppImages
+import io.grovs.inapp.InAppPresenter
+import io.grovs.inapp.InAppSettings
+import io.grovs.inapp.NoDrawPresenter
 import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.LogLevel
@@ -362,7 +366,8 @@ public class Grovs: ActivityProvider {
         /// - Parameters:
         ///   - name: the event name. Must not be blank, and must not be one of the SDK's reserved
         ///     names (view, open, install, reinstall, app_open, time_spent, reactivation,
-        ///     user_referred, custom, screen_view) — those are rejected and logged.
+        ///     user_referred, custom, screen_view, push_open and the in_app_* event names).
+        ///     Those are rejected and logged.
         ///   - properties: arbitrary metadata. Non-finite numbers are dropped; Date, URL and UUID
         ///     are coerced to strings. Dropped entirely if it serializes to over 8KB.
         ///   - tags: up to 20 tags, each up to 255 characters. Merged with any global tags.
@@ -428,6 +433,38 @@ public class Grovs: ActivityProvider {
             instance.setOnAutomaticNotificationsListener(listener = listener)
         }
 
+        /// Follows in-app messages: shown, clicked, dismissed, answered and failed. Called on the
+        /// main thread. The SDK holds the listener strongly; pass null to remove it. Java apps
+        /// extend GrovsInAppListenerAdapter.
+        fun setInAppListener(listener: GrovsInAppListener?) {
+            instance.setInAppListener(listener)
+        }
+
+        /// Holds in-app messages. One that comes due meanwhile waits, and shows on resume if it still qualifies.
+        fun pauseInAppMessages() {
+            instance.pauseInAppMessages()
+        }
+
+        fun resumeInAppMessages() {
+            instance.resumeInAppMessages()
+        }
+
+        /// Drops the in-app messages that wait and stays paused. With dismissCurrent, also closes the one on screen.
+        @JvmOverloads
+        fun discardInAppMessages(dismissCurrent: Boolean = false) {
+            instance.discardInAppMessages(dismissCurrent)
+        }
+
+        /// In-app messages never open over these screens (names compared case-insensitively); they wait until the user leaves.
+        fun setInAppExcludedScreens(screens: List<String>) {
+            instance.setInAppExcludedScreens(screens)
+        }
+
+        /// Logs, for every event, why each in-app campaign did or did not show.
+        fun setInAppDebugLogging(enabled: Boolean) {
+            instance.setInAppDebugLogging(enabled)
+        }
+
         /// Show the notifications screen.
         ///
         /// - Parameters:
@@ -487,6 +524,10 @@ public class Grovs: ActivityProvider {
 
     private var deeplinkListener: GrovsDeeplinkListener? = null
     private var grovsNotificationsListener: GrovsNotificationsListener? = null
+    /// The host's in-app choices, kept across configure() as iOS keeps them in statics.
+    private val inAppSettings = InAppSettings()
+    /// Builds what draws in-app messages for each new manager.
+    private var inAppPresenterFactory: (InAppImages) -> InAppPresenter = { NoDrawPresenter }
 
     private var launcherActivityReference: WeakReference<Activity>? = null
     private var currentActivityReference: WeakReference<Activity>? = null
@@ -823,7 +864,9 @@ public class Grovs: ActivityProvider {
             application = application,
             grovsContext = grovsContext,
             apiKey = apiKey,
-            activityProvider = this)
+            activityProvider = this,
+            inAppSettings = inAppSettings,
+            inAppPresenter = inAppPresenterFactory)
 
         notificationsManager = NotificationsManager(context = application.applicationContext,
             grovsContext = grovsContext,
@@ -891,6 +934,8 @@ public class Grovs: ActivityProvider {
 
         // The controller owns cancellation. Finish only the engagement bookkeeping admitted above.
         if (!enabled) {
+            // A disabled SDK must not leave a message up that still reports taps.
+            manager?.stopInApp()
             if (endingSegment != null && manager != null) {
                 // ATOMIC so the body starts even if the configuration is retired before dispatch: the
                 // permit always closes and the next enable never waits on it. finish runs the body
@@ -1239,6 +1284,30 @@ public class Grovs: ActivityProvider {
         grovsNotificationsListener = listener
     }
 
+    fun setInAppListener(listener: GrovsInAppListener?) = runOnMain { inAppSettings.listener = listener }
+
+    fun pauseInAppMessages() = runOnMain {
+        inAppSettings.paused = true
+        grovsManager?.inApp?.pause()
+    }
+
+    fun resumeInAppMessages() = runOnMain {
+        inAppSettings.paused = false
+        grovsManager?.inApp?.resume()
+    }
+
+    fun discardInAppMessages(dismissCurrent: Boolean) = runOnMain {
+        inAppSettings.paused = true
+        grovsManager?.inApp?.discard(dismissCurrent)
+    }
+
+    fun setInAppExcludedScreens(screens: List<String>) = runOnMain {
+        inAppSettings.excluded = screens.map { it.lowercase() }.toSet()
+        grovsManager?.inApp?.setExcludedScreens(screens)
+    }
+
+    fun setInAppDebugLogging(enabled: Boolean) = runOnMain { inAppSettings.debug = enabled }
+
     fun displayMessagesFragment(onDismissed: (()->Unit)?): Boolean {
         val manager = grovsManager ?: return false
         // Checked before anything is created: a disabled SDK starts no request and shows no
@@ -1470,6 +1539,7 @@ public class Grovs: ActivityProvider {
                     if (response) {
                         manager.start()
                         replayParkedIntent()
+                        manager.startInApp()
                         notificationsManager?.displayAutomaticNotificationsIfNeeded()
                     } else {
                         // Otherwise a user who never leaves the app stays logged out all session.

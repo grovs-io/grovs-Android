@@ -10,6 +10,9 @@ import io.grovs.handlers.GrovsContext
 import io.grovs.handlers.GrovsManager
 import io.grovs.handlers.HandledPushes
 import io.grovs.handlers.PendingLinkRetry
+import io.grovs.inapp.InAppImages
+import io.grovs.inapp.InAppPresenter
+import io.grovs.inapp.InAppSettings
 import io.grovs.utils.GlInfo
 import io.grovs.utils.GlUtils
 import kotlinx.coroutines.CompletableDeferred
@@ -23,6 +26,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.QueueDispatcher
 import okhttp3.mockwebserver.RecordedRequest
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -67,8 +71,16 @@ object E2ETestUtils {
      * Creates and starts a MockWebServer.
      * Call this in @Before methods.
      */
-    fun createMockWebServer(): MockWebServer {
+    /** [answersInAppSync]: the in-app sync after authentication gets a 404 instead of taking a queued response. */
+    fun createMockWebServer(answersInAppSync: Boolean = true): MockWebServer {
         val server = MockWebServer()
+        if (answersInAppSync) {
+            server.dispatcher = object : QueueDispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse =
+                    if (request.path?.contains("in_app/sync") == true) MockResponse().setResponseCode(404)
+                    else super.dispatch(request)
+            }
+        }
         server.start()
         return server
     }
@@ -443,6 +455,18 @@ object E2ETestUtils {
                 }
             }
 
+            try {
+                setInAppPresenter(null)
+                (grovsField("inAppSettings") as? InAppSettings)?.apply {
+                    listener = null
+                    paused = false
+                    excluded = emptySet()
+                    debug = false
+                }
+            } catch (e: Exception) {
+                errors.add("Failed to reset in-app state: ${e.message}")
+            }
+
             // Reset grovsContext to a fresh instance so settings/session state don't leak. The replaced
             // context's consent configuration was already retired, and its cleanup awaited, at the top.
             try {
@@ -646,6 +670,20 @@ object E2ETestUtils {
      * Get the current GrovsManager from the Grovs singleton via reflection.
      */
     fun getGrovsManager(): Any? = grovsField("grovsManager")
+
+    /** The SDK's own presenter factory, kept so a reset can bring it back. */
+    private var defaultInAppPresenter: ((InAppImages) -> InAppPresenter)? = null
+
+    /** The presenter the next configure() hands its manager; null restores the SDK's default. */
+    internal fun setInAppPresenter(presenter: InAppPresenter?) {
+        val instance = getGrovsInstance() ?: return
+        val field = Grovs::class.java.getDeclaredField("inAppPresenterFactory").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val original = defaultInAppPresenter
+            ?: (field.get(instance) as (InAppImages) -> InAppPresenter).also { defaultInAppPresenter = it }
+        val factory: (InAppImages) -> InAppPresenter = if (presenter == null) original else { _ -> presenter }
+        field.set(instance, factory)
+    }
 
     /**
      * Reads the Grovs singleton's pending-link-retry slot via reflection, so tests can inspect it

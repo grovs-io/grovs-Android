@@ -55,6 +55,7 @@ object CustomEventRules {
         "view", "open", "install", "reinstall", "app_open",
         "time_spent", "reactivation", "user_referred", "custom", "screen_view",
         "push_open",
+        "in_app_viewed", "in_app_clicked", "in_app_dismissed", "in_app_answered", "in_app_commented",
     )
 
     const val MAX_PROPERTIES_BYTES = 8192

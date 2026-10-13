@@ -15,7 +15,7 @@ abstract class ServiceTestBase {
     @Before
     fun setUpService() {
         E2ETestUtils.setupMockUserAgent("Grovs SDK service tests")
-        mockWebServer = E2ETestUtils.createMockWebServer()
+        mockWebServer = E2ETestUtils.createMockWebServer(answersInAppSync = false)
         val grovsContext = GrovsContext().also {
             it.settings.baseURL = mockWebServer.url("/").toString()
         }

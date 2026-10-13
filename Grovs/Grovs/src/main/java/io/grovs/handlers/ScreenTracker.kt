@@ -18,6 +18,8 @@ import io.grovs.utils.InstantCompat
  */
 internal class ScreenTracker(
     private val customEventsManager: ICustomEventsManager,
+    /** Told every screen view that survived the dedup window, for in-app triggers. */
+    private val onTracked: (name: String, properties: Map<String, Any>) -> Unit = { _, _ -> },
 ) {
 
     private var aliases: Map<String, String> = emptyMap()
@@ -97,12 +99,14 @@ internal class ScreenTracker(
         lastVisitId = visitId
         lastScreenAt = at
 
+        val screenProperties = properties.orEmpty() + (SCREEN_NAME_PROPERTY to resolved)
         customEventsManager.track(
             name = SCREEN_VIEW_EVENT,
-            properties = properties.orEmpty() + (SCREEN_NAME_PROPERTY to resolved),
+            properties = screenProperties,
             tags = null,
             createdAt = at,
         )
+        onTracked(SCREEN_VIEW_EVENT, screenProperties)
     }
 
     /**

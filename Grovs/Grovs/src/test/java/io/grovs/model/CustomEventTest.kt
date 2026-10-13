@@ -23,6 +23,15 @@ class CustomEventTest {
     }
 
     @Test
+    fun `the in-app event names are reserved`() {
+        listOf("in_app_viewed", "in_app_clicked", "in_app_dismissed", "in_app_answered", "in_app_commented").forEach {
+            assertTrue("$it should be reserved", CustomEventRules.isReserved(it))
+            assertFalse(CustomEventRules.isValidName(it.uppercase()))
+        }
+        assertTrue(CustomEventRules.isValidName("in_app_other"))
+    }
+
+    @Test
     fun `push_open is reserved`() {
         assertTrue(CustomEventRules.isReserved("push_open"))
         assertTrue(CustomEventRules.isReserved(" Push_Open "))
