@@ -3,6 +3,8 @@ package io.grovs.e2e
 import android.content.Intent
 import android.net.Uri
 import io.grovs.Grovs
+import io.grovs.GrovsMessaging
+import io.grovs.handlers.GrovsPushContent
 import io.grovs.handlers.GrovsManager
 import io.grovs.model.DeeplinkDetails
 import org.json.JSONObject
@@ -114,6 +116,26 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
         assertNull(delivered.single().link)
         assertEquals("spring26", delivered.single().data!!["promo"])
         assertNull("not kept for a retry", E2ETestUtils.getPendingLinkRetry()!!.slot)
+    }
+
+    @Test
+    fun `receiving a foreground push is not an open`() {
+        backend.respond(authenticate, authOk)
+        configure()
+        foreground()
+        pumpUntil("authentication") { backend.count(authenticate) >= 1 }
+        pump()
+
+        val handled = GrovsMessaging.handlePush(
+            application, mapOf("grovs_campaign_id" to "k9Qx2", "grovs_link" to link), "0:fg",
+            GrovsPushContent("T", "B", null, null),
+        ) { null }
+        advance(5_000)
+
+        assertTrue(handled)
+        assertEquals(0, backend.count(pushOpen))
+        assertEquals(0, backend.count(payload))
+        assertTrue(delivered.isEmpty())
     }
 
     @Test

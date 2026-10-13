@@ -57,13 +57,6 @@ class GrovsMessagingTest {
     }
 
     @Test
-    fun `receiving a foreground push is not an open`() {
-        GrovsMessaging.handlePush(context, grovsData, "m1", content) { null }
-        // Opens are only reported from a tap intent (PushOpenE2ETest); receiving touches no manager.
-        assertTrue(Grovs.openedLinkDetails == null)
-    }
-
-    @Test
     fun `foreground display can be turned off`() {
         GrovsMessaging.showForegroundNotifications = false
 
