@@ -89,6 +89,32 @@ internal class CustomEventsManager(
         tags: List<String>?,
         createdAt: InstantCompat,
     ) {
+        store(name) { sessionId, link ->
+            CustomEvent(
+                eventName = name,
+                sessionId = sessionId,
+                link = link,
+                createdAt = createdAt,
+                properties = CustomEventRules.sanitizeProperties(properties),
+                tags = CustomEventRules.mergeTags(eventTags = tags, globalTags = globalTags),
+            )
+        }
+    }
+
+    override suspend fun trackInApp(eventId: String, name: String, properties: Map<String, Any>) {
+        store(name) { sessionId, link ->
+            CustomEvent(
+                eventId = eventId,
+                eventName = name,
+                sessionId = sessionId,
+                link = link,
+                createdAt = InstantCompat.now(),
+                properties = properties,
+            )
+        }
+    }
+
+    private suspend fun store(name: String, build: (sessionId: String, link: String?) -> CustomEvent) {
         // Checked against this call's own operation, immediately before the record is built and
         // stored: a call whose consent went away between admission and here collects nothing.
         val token = grovsContext.consent.workToken(configuration) ?: run {
@@ -100,40 +126,12 @@ internal class CustomEventsManager(
         // not stamp the previous campaign onto a new session's events, even before another lookup.
         val sessionId = grovsContext.sessionId
         val attribution = currentAttribution
-        val event = CustomEvent(
-            eventName = name,
-            sessionId = sessionId,
-            link = attribution?.takeIf { it.sessionId == sessionId }?.link,
-            createdAt = createdAt,
-            properties = CustomEventRules.sanitizeProperties(properties),
-            tags = CustomEventRules.mergeTags(eventTags = tags, globalTags = globalTags),
-        )
+        val event = build(sessionId, attribution?.takeIf { it.sessionId == sessionId }?.link)
 
         if (!grovsContext.consent.isCurrent(token)) {
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent withdrawn, dropping event: $name")
             return
         }
-        withContext(token) {
-            grovsContext.consent.storeIfConsented(configuration) { customEventsStorage.addEvent(event) }
-        }
-    }
-
-    override suspend fun trackInApp(eventId: String, name: String, properties: Map<String, Any>) {
-        val token = grovsContext.consent.workToken(configuration) ?: run {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted, dropping event: $name")
-            return
-        }
-        val sessionId = grovsContext.sessionId
-        val attribution = currentAttribution
-        val event = CustomEvent(
-            eventId = eventId,
-            eventName = name,
-            sessionId = sessionId,
-            link = attribution?.takeIf { it.sessionId == sessionId }?.link,
-            createdAt = InstantCompat.now(),
-            properties = properties,
-        )
-        if (!grovsContext.consent.isCurrent(token)) return
         withContext(token) {
             grovsContext.consent.storeIfConsented(configuration) { customEventsStorage.addEvent(event) }
         }

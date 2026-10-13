@@ -86,13 +86,16 @@ class CustomEventsManagerInAppTest {
             context = context, grovsContext = grovsContext, grovsService = mockk<IGrovsService>(relaxed = true),
             customEventsStorage = real, startFlushTimer = false,
         )
-        withStorage.trackInApp("a1", "in_app_answered",
-            mapOf("campaign_id" to "c1", "revision" to 3L, "question_id" to "q1", "type" to "stars", "value" to 4L))
+        try {
+            withStorage.trackInApp("a1", "in_app_answered",
+                mapOf("campaign_id" to "c1", "revision" to 3L, "question_id" to "q1", "type" to "stars", "value" to 4L))
 
-        val gson = GsonBuilder().registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory()).create()
-        val body = gson.toJson(BatchEventsRequest(real.getEvents()))
-        assertTrue(body, body.contains("\"value\":4,") || body.contains("\"value\":4}"))
-        assertTrue(body, body.contains("\"revision\":3,") || body.contains("\"revision\":3}"))
-        withStorage.close()
+            val gson = GsonBuilder().registerTypeAdapterFactory(LSJsonInstantCompatTypeAdapterFactory()).create()
+            val body = gson.toJson(BatchEventsRequest(real.getEvents()))
+            assertTrue(body, body.contains("\"value\":4,") || body.contains("\"value\":4}"))
+            assertTrue(body, body.contains("\"revision\":3,") || body.contains("\"revision\":3}"))
+        } finally {
+            withStorage.close()
+        }
     }
 }
