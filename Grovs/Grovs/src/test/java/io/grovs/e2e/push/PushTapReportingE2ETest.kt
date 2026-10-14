@@ -172,6 +172,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         val fingerprintLookups = backend.count("data_for_device")
         foreground(tapIntent())
         pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
+        settle(5_000)
 
         assertEquals(PushPayloads.LINK, contract.bodies("data_for_device_and_url").single().getString("url"))
         assertEquals(fingerprintLookups, backend.count("data_for_device"))

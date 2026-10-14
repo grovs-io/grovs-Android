@@ -29,8 +29,13 @@ internal class PushParsingE2ETest : ContractTestBase() {
         settle(5_000)
     }
 
+    private fun tapAfterAuthAndOpen(intent: Intent) {
+        tapAfterAuth(intent)
+        pumpUntil("the open") { pushOpens() >= 1 }
+    }
+
     @Test
-    fun `P1 a non-empty grovs_campaign_id makes a Grovs push and a blank one does not`() {
+    fun `P1 a non-empty grovs_campaign_id makes a Grovs push and an empty or missing one does not`() {
         assertTrue(Grovs.isGrovsNotification(PushPayloads.data()))
         assertFalse(Grovs.isGrovsNotification(PushPayloads.data(campaign = "")))
         assertFalse(Grovs.isGrovsNotification(mapOf("promo" to "spring26")))
@@ -56,7 +61,7 @@ internal class PushParsingE2ETest : ContractTestBase() {
 
     @Test
     fun `P2 legacy keys next to grovs_campaign_id are delivered as plain data`() {
-        tapAfterAuth(tapIntent(PushPayloads.data(link = null, custom = mapOf("linksquared" to "abc", "grovs_notification_id" to "12"))))
+        tapAfterAuthAndOpen(tapIntent(PushPayloads.data(link = null, custom = mapOf("linksquared" to "abc", "grovs_notification_id" to "12"))))
 
         assertEquals(1, pushOpens())
         val data = deepLinks.delivered.single().data!!
@@ -66,7 +71,7 @@ internal class PushParsingE2ETest : ContractTestBase() {
 
     @Test
     fun `P3 a blank grovs_link is treated as no link`() {
-        tapAfterAuth(tapIntent(PushPayloads.data(link = "")))
+        tapAfterAuthAndOpen(tapIntent(PushPayloads.data(link = "")))
 
         assertNull(deepLinks.delivered.single().link)
         assertEquals("no link lookup", 0, backend.count("data_for_device_and_url"))
@@ -75,7 +80,7 @@ internal class PushParsingE2ETest : ContractTestBase() {
 
     @Test
     fun `P4 FCM extras never reach the delivered data and grovs and customer keys do`() {
-        tapAfterAuth(tapIntent(PushPayloads.data(link = null)).apply { putExtra("io.grovs.message_id", "x"); putExtra("message_type", "gcm") })
+        tapAfterAuthAndOpen(tapIntent(PushPayloads.data(link = null)).apply { putExtra("io.grovs.message_id", "x"); putExtra("message_type", "gcm") })
 
         val keys = deepLinks.delivered.single().data!!.keys
         val leaked = keys.filter {
@@ -89,7 +94,7 @@ internal class PushParsingE2ETest : ContractTestBase() {
     @Test
     fun `P5 values arrive as the strings the backend sent, including JSON text and empty strings`() {
         val custom = mapOf("n" to 1, "flag" to true, "list" to listOf(1, 2), "obj" to mapOf("a" to 1), "empty" to "")
-        tapAfterAuth(tapIntent(PushPayloads.data(link = null, custom = custom)))
+        tapAfterAuthAndOpen(tapIntent(PushPayloads.data(link = null, custom = custom)))
 
         val data = deepLinks.delivered.single().data!!
         assertEquals("1", data["n"])

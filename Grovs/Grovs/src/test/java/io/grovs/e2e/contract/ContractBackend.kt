@@ -29,7 +29,8 @@ internal class ContractBackend(val backend: ConsentBackend) {
     fun install() {
         backend.answer("authenticate") { seen ->
             val body = JSONObject(seen.body.ifBlank { "{}" })
-            if (!body.has("user_agent") || !body.has("app_version")) {
+            // A required param that is missing, null or blank is refused
+            if (!present(body, "user_agent") || !present(body, "app_version")) {
                 violations += "authenticate without user_agent or app_version: ${seen.body}"
                 json(400, """{"error":"param is missing"}""")
             } else {
@@ -71,6 +72,7 @@ internal class ContractBackend(val backend: ConsentBackend) {
 
     /** Called after every contract test. */
     fun assertKept() {
+        backend.unexpected.forEach { violations += "route the fake does not answer: $it" }
         backend.seen.forEach { seen ->
             if (!BackendContract.isSdkRoute(seen.path)) violations += "route the backend does not have: ${seen.path}"
             listOf("PROJECT-KEY", "PLATFORM", "IDENTIFIER").forEach { name ->
@@ -88,7 +90,7 @@ internal class ContractBackend(val backend: ConsentBackend) {
 
     // push_open: the device check comes first (403), then the push outcome
     private fun pushOpen(seen: ConsentBackend.Seen): MockResponse {
-        val visitor = BackendContract.header(seen.request, "LINKSQUARED")
+        val visitor = BackendContract.header(seen.request, "LINKSQUARED")?.takeUnless { it.isBlank() }
             ?: return json(403, """{"error":"Invalid linksquared id"}""")
         val body = runCatching { JSONObject(seen.body) }.getOrElse { JSONObject() }
         val campaign = body.opt("campaign_id")?.takeUnless { it === JSONObject.NULL }?.toString().orEmpty()
@@ -131,8 +133,8 @@ internal class ContractBackend(val backend: ConsentBackend) {
     }
 
     private fun eventError(event: JSONObject): String? {
-        val system = event.optString("event", "")
-        val name = event.optString("event_name", "")
+        val system = presentString(event, "event")
+        val name = presentString(event, "event_name")
         return when {
             system.isNotEmpty() -> if (system in BackendContract.SYSTEM_EVENTS) null else "unknown event type '$system'"
             name.isEmpty() -> "missing event or event_name"
@@ -141,6 +143,12 @@ internal class ContractBackend(val backend: ConsentBackend) {
             else -> null
         }
     }
+
+    /** JSON null and blank strings count as absent. */
+    private fun presentString(json: JSONObject, key: String): String =
+        if (json.isNull(key)) "" else json.opt(key).toString().trim()
+
+    private fun present(json: JSONObject, key: String) = presentString(json, key).isNotEmpty()
 
     /** In-app is switched off here, so every message event is refused. */
     private fun inAppError(name: String, event: JSONObject): String? = "event_name '$name' is reserved"

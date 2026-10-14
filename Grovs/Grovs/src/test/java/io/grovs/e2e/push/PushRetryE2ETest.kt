@@ -62,6 +62,7 @@ internal class PushRetryE2ETest : ContractTestBase() {
             settle(60_000)
             foreground(Intent())
         }
+        advanceUntil("12 opens") { pushOpens() >= REPORT_ATTEMPTS * IN_REQUEST_ATTEMPTS }
         settle(60_000)
 
         assertEquals(REPORT_ATTEMPTS * IN_REQUEST_ATTEMPTS, pushOpens())
@@ -71,6 +72,7 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.failWithStatus("push_open", code = code, body = body)
         authenticated()
         foreground(tap)
+        pumpUntil("the open") { pushOpens() >= 1 }
         settle(30_000)
         repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals("$code is final: one request, no retry", 1, pushOpens())
@@ -87,6 +89,7 @@ internal class PushRetryE2ETest : ContractTestBase() {
         contract.knownPushCampaigns = emptySet()
         authenticated()
         foreground(tap)
+        pumpUntil("the open") { pushOpens() >= 1 }
         settle(30_000)
         repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())
@@ -97,6 +100,7 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.respond("push_open", BackendContract.PUSH_OPEN_ALREADY)
         authenticated()
         foreground(tap)
+        pumpUntil("the open") { pushOpens() >= 1 }
         settle(30_000)
         repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())
@@ -107,6 +111,7 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.respond("push_open", "{}")
         authenticated()
         foreground(tap)
+        pumpUntil("the open") { pushOpens() >= 1 }
         settle(30_000)
         repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())

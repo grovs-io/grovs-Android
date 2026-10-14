@@ -31,7 +31,7 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         check("disabled")
         Grovs.setSDK(true)
         foreground()
-        pumpUntil("authentication") { backend.count("authenticate") >= 1 }
+        pumpUntil("authentication") { manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED }
         pump()
         check("authenticated")
     }
@@ -60,6 +60,8 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         assertEquals("$state: not inline", 0, onMain.size)
         pump()
         assertEquals("$state: once", listOf(true), onMain.toList())
+        settle(2_000)
+        assertEquals("$state: still once", listOf(true), onMain.toList())
     }
 
     @Test
@@ -70,6 +72,8 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         assertEquals("$state: not inline", 0, results.size)
         pump()
         assertEquals("$state: once", listOf<Int?>(0), results.toList())
+        settle(2_000)
+        assertEquals("$state: still once", listOf<Int?>(0), results.toList())
         assertEquals(listOf(true), onMain.toList())
     }
 
@@ -104,6 +108,12 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         Grovs.setOnAutomaticNotificationsListener(object : GrovsNotificationsListener {
             override fun onAutomaticNotificationClosed(isLast: Boolean) { calls += isLast }
         })
+        // NotificationMessageSerializer shape of the removed inbox (backend a438dd0^)
+        backend.respond(
+            "notifications_to_display_automatically",
+            """{"notifications":[{"id":1,"read":false,"title":"Hello","subtitle":"Sub","auto_display":true,""" +
+                """"access_url":"https://example.com/n/1","updated_at":"2026-10-14T10:00:00Z"}]}""",
+        )
         authenticated()
         background()
         foreground()

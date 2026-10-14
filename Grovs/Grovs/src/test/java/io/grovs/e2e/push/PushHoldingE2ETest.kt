@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import io.grovs.Grovs
 import io.grovs.e2e.contract.ContractTestBase
+import io.grovs.handlers.GrovsManager
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
 import org.junit.Assert.assertEquals
@@ -52,6 +53,8 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         foreground()
         settle(10_000)
 
+        pumpUntil("authentication") { manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED }
+        assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
         assertEquals(0, pushOpens())
         assertTrue(deepLinks.delivered.isEmpty())
     }

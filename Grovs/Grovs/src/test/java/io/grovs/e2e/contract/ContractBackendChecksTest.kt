@@ -68,6 +68,38 @@ class ContractBackendChecksTest {
     }
 
     @Test
+    fun `a route the fake does not answer breaks the contract`() {
+        call("create_link").close()
+        assertBroken("route the fake does not answer: create_link")
+    }
+
+    @Test
+    fun `a JSON null event name counts as missing`() {
+        val response = call("events/batch", """{"events":[{"event":null,"event_name":null}]}""")
+        val body = response.body!!.string()
+        assertTrue(body, body.contains("missing event or event_name"))
+        assertBroken("missing event or event_name")
+    }
+
+    @Test
+    fun `a blank user agent on authenticate is refused`() {
+        val response = call("authenticate", """{"user_agent":" ","app_version":"1"}""")
+        assertEquals(400, response.code)
+        response.close()
+        assertBroken("authenticate without user_agent or app_version")
+    }
+
+    @Test
+    fun `a push open with a blank device header answers 403`() {
+        val denied = call(
+            "push_open", """{"campaign_id":"x"}""",
+            mapOf("PROJECT-KEY" to "k", "PLATFORM" to "android", "IDENTIFIER" to "id", "LINKSQUARED" to " "),
+        )
+        assertEquals(403, denied.code)
+        denied.close()
+    }
+
+    @Test
     fun `an inbox call breaks the contract`() {
         call("number_of_unread_notifications").close()
         assertBroken("inbox routes called")
@@ -106,7 +138,7 @@ class ContractBackendChecksTest {
     }
 
     @Test
-    fun `a numeric campaign id is accepted and a missing device header answers 403 first`() {
+    fun `a numeric campaign id of an unknown campaign answers 404 and a missing device header answers 403 first`() {
         val ok = call("push_open", """{"campaign_id":12}""")
         assertEquals(404, ok.code)
         ok.close()

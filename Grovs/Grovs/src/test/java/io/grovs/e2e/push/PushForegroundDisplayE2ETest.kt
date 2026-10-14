@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ResolveInfo
-import android.os.Build
 import android.os.Bundle
 import io.grovs.GrovsMessaging
 import io.grovs.e2e.contract.ContractTestBase
@@ -183,9 +182,10 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
     fun `P35 a redelivered push replaces its notification`() {
         authenticated()
         receive(PushPayloads.remoteMessage(messageId = "0:same"))
-        receive(PushPayloads.remoteMessage(messageId = "0:same"))
+        receive(PushPayloads.remoteMessage(title = "Autumn sale", messageId = "0:same"))
 
         assertEquals(1, posted().size)
+        assertEquals("Autumn sale", posted().single().extras.getString(Notification.EXTRA_TITLE))
     }
 
     @Test
@@ -221,6 +221,5 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
 
         val shown = posted().single()
         assertFalse(shown.sound?.toString()?.contains("no_such_sound") == true)
-        assertEquals(Build.VERSION_CODES.M, Build.VERSION.SDK_INT)
     }
 }
