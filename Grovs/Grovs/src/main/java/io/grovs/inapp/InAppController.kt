@@ -254,8 +254,8 @@ internal class InAppController(private val deps: Dependencies) {
         delayed = Delayed(timer, priority)
     }
 
-    /** Whenever the screen may have become free: what waited first, then a test sent from the dashboard. */
-    private fun showWaiting() {
+    /** Whenever the screen may have become free: what waited first, then a test sent from the dashboard. Main thread. */
+    internal fun showWaiting() {
         showHeld()
         showTest()
     }

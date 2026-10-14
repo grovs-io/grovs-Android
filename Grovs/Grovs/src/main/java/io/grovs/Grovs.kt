@@ -1322,6 +1322,8 @@ public class Grovs: ActivityProvider {
         return InAppDialogPresenter({ currentActivityReference?.get() }, images, inAppActions(app))
             .also {
                 it.register(app)
+                // Read when the review ends, so it reaches the current manager and never a closed one.
+                it.onIdle = { grovsManager?.inApp?.screenFree() }
                 inAppPresenter = it
             }
     }

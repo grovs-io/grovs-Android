@@ -124,6 +124,9 @@ internal class InAppHost(
 
     fun setExcludedScreens(screens: List<String>) = onMain { controller.setExcludedScreens(screens) }
 
+    /** The presenter finished something the controller does not see, such as the review prompt. */
+    fun screenFree() = onMain { if (!closed) controller.showWaiting() }
+
     private fun canRun(): Boolean =
         !closed && isAuthenticated() && grovsContext.consent.tryAcquire(configuration) != null
 
