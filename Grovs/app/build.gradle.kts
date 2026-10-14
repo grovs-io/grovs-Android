@@ -30,6 +30,13 @@ android {
                 "proguard-rules.pro"
             )
         }
+        // R8 on, signed with the debug key: checks that the SDK's consumer rules hold in a shrunk app.
+        create("minified") {
+            initWith(getByName("release"))
+            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8

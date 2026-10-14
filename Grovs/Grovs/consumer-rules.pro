@@ -21,6 +21,13 @@
 -keep interface io.grovs.GrovsNotificationsListener {
    <methods>;
 }
+-keep interface io.grovs.GrovsInAppListener {
+   <methods>;
+}
+-keep class io.grovs.GrovsInAppListenerAdapter {
+   public <init>();
+   public <methods>;
+}
 
 
 ################################################################################
@@ -40,6 +47,7 @@
 -dontwarn io.grovs.handlers.MessagingService
 -dontwarn io.grovs.GrovsMessaging
 -dontwarn com.google.android.play.core.review.**
+-dontwarn com.google.android.play.core.ktx.**
 -dontwarn io.grovs.inapp.ui.InAppPlayReview
 -keepnames class com.google.android.play.core.review.ReviewManagerFactory
 
@@ -131,7 +139,6 @@
 -keep,allowobfuscation,allowshrinking class * extends com.google.gson.reflect.TypeToken
 
 # In-app html messages: the page calls this method by name.
--keepattributes JavascriptInterface
 -keepclassmembers class io.grovs.inapp.ui.InAppJavascriptChannel {
     @android.webkit.JavascriptInterface <methods>;
 }
