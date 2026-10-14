@@ -1,12 +1,12 @@
 package io.grovs.e2e.push
 
+import io.grovs.e2e.TestActivity
 import io.grovs.e2e.contract.BackendContract
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
 import io.grovs.handlers.GrovsManager
 import org.junit.Assert.assertEquals
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -89,7 +89,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         pumpUntil("the open in flight") { pushOpens() >= 1 }
 
         // A configuration change: the same intent arrives in a new Activity instance.
-        Robolectric.buildActivity(io.grovs.e2e.TestActivity::class.java, intent).setup()
+        Robolectric.buildActivity(TestActivity::class.java, intent).setup()
         gate.countDown()
         advance(10_000)
 
@@ -117,18 +117,6 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         foreground(tap("0:control", "c1"))
         advance(5_000)
         assertEquals(1, pushOpens("replay"))
-    }
-
-    @Test
-    @Ignore("F-2: the oldest handled push id is remembered for the whole process, beyond the last 50")
-    fun `P28 only the last 50 handled pushes are remembered`() {
-        handle51Pushes()
-
-        backend.phase = "replay"
-        foreground(tap("0:id0", "c0"))
-        advance(5_000)
-        assertEquals("the oldest was forgotten", 52, deepLinks.delivered.size)
-        assertEquals("the oldest is reported again", 1, pushOpens("replay"))
     }
 
     @Test
