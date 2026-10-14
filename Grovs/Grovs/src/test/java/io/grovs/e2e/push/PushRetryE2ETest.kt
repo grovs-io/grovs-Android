@@ -7,7 +7,10 @@ import io.grovs.e2e.contract.BackendContract.REPORT_ATTEMPTS
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
+import io.grovs.utils.InstantCompat
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -37,6 +40,31 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.failWithStatus("push_open", code = 503, body = "down")
         firstReportFailsThenRecovers()
         assertEquals(1, pushOpens("recovered"))
+    }
+
+    @Test
+    fun `P21 a retried open keeps the session of the tap`() {
+        backend.failWithStatus("push_open", code = 503, body = "down")
+        authenticated()
+        foreground(tap)
+        advanceUntil("the first report's tries") { pushOpens() >= IN_REQUEST_ATTEMPTS }
+        settle(30_000)
+        val tapSession = contract.bodies("push_open").first().getString("session_id")
+
+        background()
+        settle(2_000)
+        // The session timeout is measured on the wall clock, which the test cannot move.
+        val context = manager().grovsContext
+        context.javaClass.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+            .set(context, InstantCompat.ofEpochMilli(System.currentTimeMillis() - 31 * 60_000L))
+        contract.install()
+        backend.phase = "recovered"
+        foreground(Intent())
+        pumpUntil("the retried open is reported") { pushOpens("recovered") >= 1 }
+
+        assertNotEquals("a new session started", tapSession, context.sessionId)
+        val retried = backend.seen.filter { it.path == "push_open" && it.phase == "recovered" }
+        assertEquals(tapSession, JSONObject(retried.single().body).getString("session_id"))
     }
 
     @Test

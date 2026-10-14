@@ -15,12 +15,13 @@ internal class PushOpenReporter(
     private val consent: ConsentController,
     private val isAuthenticated: () -> Boolean,
 ) {
-    private class Pending(val failures: Int, val token: ConsentToken)
+    private class Pending(val sessionId: String, val failures: Int, val token: ConsentToken)
 
     private val pending = LinkedHashMap<String, Pending>()
 
-    suspend fun onTap(campaignId: String, token: ConsentToken) {
-        hold(campaignId, Pending(failures = 0, token = token))
+    /** [sessionId] is the session of the tap; a retry keeps it even after a new session starts. */
+    suspend fun onTap(campaignId: String, sessionId: String, token: ConsentToken) {
+        hold(campaignId, Pending(sessionId, failures = 0, token = token))
         reportPending()
     }
 
@@ -36,7 +37,7 @@ internal class PushOpenReporter(
 
     private suspend fun report(campaignId: String, open: Pending) {
         if (!consent.isCurrent(open.token)) return
-        val result = service.pushOpen(campaignId)
+        val result = service.pushOpen(campaignId, open.sessionId)
         if (result !is LSResult.Error) {
             DebugLogger.instance.log(LogLevel.INFO, "Push open reported for campaign $campaignId")
             return
@@ -48,7 +49,7 @@ internal class PushOpenReporter(
             !consent.isCurrent(open.token) -> Unit
             failures >= MAX_ATTEMPTS ->
                 DebugLogger.instance.log(LogLevel.ERROR, "Push open for campaign $campaignId dropped after $failures attempts")
-            else -> hold(campaignId, Pending(failures, open.token))
+            else -> hold(campaignId, Pending(open.sessionId, failures, open.token))
         }
     }
 

@@ -1506,8 +1506,9 @@ public class Grovs: ActivityProvider {
         val freshPush = push?.takeUnless { handledPushes.contains(it, intent) }
         if (freshPush != null) {
             if (reportsPushOpen && reportedPushIntents.add(intent)) {
+                val tapSession = grovsContext.sessionId
                 grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
-                    manager.pushOpens.onTap(freshPush.campaignId, token)
+                    manager.pushOpens.onTap(freshPush.campaignId, tapSession, token)
                 }
             }
             // Nothing to resolve: the data goes out now, even before authentication.

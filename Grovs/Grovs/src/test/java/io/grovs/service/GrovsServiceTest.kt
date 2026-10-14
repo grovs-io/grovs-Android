@@ -276,12 +276,12 @@ class GrovsServiceTest {
 
     @Test
     fun `push_open posts campaign_id and session_id`() = runTest {
-        val result = grovsService.pushOpen("k9Qx2")
+        val result = grovsService.pushOpen("k9Qx2", "tap-session")
 
         assertResultSuccess(result, context = "after a 200")
         val request = mockGrovsApi.pushOpenCalls.single()
         assertEqualsWithContext("k9Qx2", request.campaignId, "campaign_id", "push_open body")
-        assertEqualsWithContext(grovsContext.sessionId, request.sessionId, "session_id", "push_open body")
+        assertEqualsWithContext("tap-session", request.sessionId, "session_id", "push_open body")
     }
 
     @Test
@@ -291,7 +291,7 @@ class GrovsServiceTest {
             """{"error":"Push campaign not found"}""".toResponseBody("application/json".toMediaType()),
         )
 
-        val result = grovsService.pushOpen("unknown")
+        val result = grovsService.pushOpen("unknown", "tap-session")
 
         assertTrueWithContext(
             (result as? LSResult.Error)?.exception is HttpStatusException,

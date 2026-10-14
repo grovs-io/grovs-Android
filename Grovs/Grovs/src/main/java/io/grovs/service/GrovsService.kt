@@ -370,9 +370,9 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         }
     }
 
-    override suspend fun pushOpen(campaignId: String): LSResult<Boolean> =
+    override suspend fun pushOpen(campaignId: String, sessionId: String): LSResult<Boolean> =
         requestExecutor.retrying("Push open") { token ->
-            val request = PushOpenRequest(campaignId = campaignId, sessionId = grovsContext.sessionId)
+            val request = PushOpenRequest(campaignId = campaignId, sessionId = sessionId)
             grovsApi.pushOpen(request, token).toStatusResult("Push open", gson)
         }
 

@@ -108,5 +108,5 @@ interface IGrovsService {
     suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean>
 
     /** Reports that the user opened a push campaign. The backend counts it once per visitor. */
-    suspend fun pushOpen(campaignId: String): LSResult<Boolean>
+    suspend fun pushOpen(campaignId: String, sessionId: String): LSResult<Boolean>
 }
