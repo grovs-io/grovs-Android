@@ -491,10 +491,11 @@ public class Grovs: ActivityProvider {
     var openedLinkDetails: DeeplinkDetails? by flowDelegate(null)
 
     /// The identifier for the current user, normally a userID. This will be visible in the grovs dashboard.
+    /// Set before configure(), it is kept and sent once the SDK is authenticated.
     private var identifier: String?
-        get() = grovsManager?.identifier
+        get() = grovsManager?.identifier ?: grovsContext.identifier
         set(value) {
-            grovsManager?.identifier = value
+            grovsManager?.let { it.identifier = value } ?: run { grovsContext.identifier = value }
         }
 
     /// The push token for the user. This property allows getting and setting the push notification token.
@@ -506,10 +507,11 @@ public class Grovs: ActivityProvider {
         }
 
     /// The attributes for the current user. This will be visible in the grovs dashboard.
+    /// Set before configure(), they are kept and sent once the SDK is authenticated.
     private var attributes: Map<String, Any>?
-        get() = grovsManager?.attributes
+        get() = grovsManager?.attributes ?: grovsContext.attributes
         set(value) {
-            grovsManager?.attributes = value
+            grovsManager?.let { it.attributes = value } ?: run { grovsContext.attributes = value }
         }
 
     private var grovsManager: GrovsManager? = null

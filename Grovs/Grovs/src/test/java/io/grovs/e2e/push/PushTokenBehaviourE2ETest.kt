@@ -90,6 +90,50 @@ internal class PushTokenBehaviourE2ETest : ContractTestBase() {
     }
 
     @Test
+    fun `P41 host identity set before configure wins over the server's`() {
+        serverIdentity()
+        Grovs.identifier = "host-user"
+        Grovs.attributes = mapOf("plan" to "free")
+        authenticated()
+        pumpUntil("attributes sent") { attributeBodies().isNotEmpty() }
+
+        val body = attributeBodies().first()
+        assertEquals("host-user", body.getString("sdk_identifier"))
+        assertEquals("free", body.getJSONObject("sdk_attributes").getString("plan"))
+    }
+
+    @Test
+    fun `P41 the last identity set before configure wins`() {
+        serverIdentity()
+        Grovs.identifier = "first-user"
+        Grovs.attributes = mapOf("plan" to "trial")
+        Grovs.identifier = "last-user"
+        Grovs.attributes = mapOf("plan" to "free")
+        authenticated()
+        pumpUntil("attributes sent") { attributeBodies().isNotEmpty() }
+
+        val body = attributeBodies().first()
+        assertEquals("last-user", body.getString("sdk_identifier"))
+        assertEquals("free", body.getJSONObject("sdk_attributes").getString("plan"))
+    }
+
+    @Test
+    fun `P41 identity set before a disabled configure is sent only once enabled`() {
+        Grovs.identifier = "host-user"
+        Grovs.attributes = mapOf("plan" to "free")
+        configure(enabled = false)
+        foreground()
+        settle(10_000)
+        assertTrue("nothing sent while disabled", attributeBodies().isEmpty())
+
+        Grovs.setSDK(true)
+        foreground()
+        pumpUntil("attributes sent") { attributeBodies().isNotEmpty() }
+        assertEquals("host-user", attributeBodies().first().getString("sdk_identifier"))
+        assertEquals("free", attributeBodies().first().getJSONObject("sdk_attributes").getString("plan"))
+    }
+
+    @Test
     fun `P42 push_open cannot be tracked by the host`() {
         authenticated()
         Grovs.track("push_open")
