@@ -6,8 +6,6 @@ import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -184,17 +182,17 @@ class ScreenTrackerTest {
     }
 
     @Test
-    fun `the SDK's own notification screens are skipped`() {
-        assertTrue(tracker.shouldSkip("NotificationsMainFragment"))
-        assertTrue(tracker.shouldSkip("NotificationsListFragment"))
-        assertTrue(tracker.shouldSkip("NotificationDetailsFragment"))
-        assertTrue(tracker.shouldSkip("AutoDisplayedNotificationFragment"))
-    }
+    fun `host screens named like the removed inbox screens are tracked`() = runTest {
+        tracker.trackScreen("NotificationsListFragment")
 
-    @Test
-    fun `consumer screens are not skipped`() {
-        assertFalse(tracker.shouldSkip("HomeActivity"))
-        assertFalse(tracker.shouldSkip("CheckoutFragment"))
+        coVerify(exactly = 1) {
+            customEvents.track(
+                name = "screen_view",
+                properties = mapOf("screen_name" to "NotificationsListFragment"),
+                tags = null,
+                createdAt = any(),
+            )
+        }
     }
 
 }

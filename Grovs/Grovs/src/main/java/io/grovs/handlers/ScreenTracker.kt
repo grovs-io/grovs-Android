@@ -35,18 +35,7 @@ internal class ScreenTracker(
 
         /** Suppresses the same screen being reported twice in quick succession. */
         const val DEDUP_WINDOW_MS = 1_000L
-
-        /** The SDK's own UI must never appear in a consumer's screen analytics. */
-        private val SDK_SCREENS = setOf(
-            "NotificationsMainFragment",
-            "NotificationsListFragment",
-            "NotificationDetailsFragment",
-            "AutoDisplayedNotificationFragment",
-        )
     }
-
-    /** True if this class is the SDK's own UI and must not be tracked. */
-    fun shouldSkip(className: String): Boolean = SDK_SCREENS.contains(className)
 
     /** Maps class names to friendly dashboard names. Syncing to the backend is handled by [GrovsManager]. */
     fun setAliases(aliases: Map<String, String>) {
@@ -81,7 +70,6 @@ internal class ScreenTracker(
             resetDedup()
             lastConsentGeneration = consentGeneration
         }
-        if (shouldSkip(rawName)) return
 
         val resolved = aliases[rawName] ?: rawName
         val key = if (dedupKey != null && !aliases.containsKey(rawName)) dedupKey else resolved
