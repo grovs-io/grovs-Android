@@ -5,8 +5,8 @@ import android.app.Application
 import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.res.Configuration
-import android.webkit.WebView
 import android.view.inputmethod.InputMethodManager
+import android.webkit.WebView
 import android.widget.EditText
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -32,7 +32,7 @@ internal class InAppDialogPresenter(
     private val activity: () -> Activity?,
     private val images: InAppImages,
     private val actions: InAppActions,
-    private val makeWebView: (Context) -> WebView = { WebView(it) },
+    private val makeWebView: (Context) -> WebView = InAppHtmlView.NEW_WEB_VIEW,
 ) : InAppActivityCallbacks(), InAppPresenter, ComponentCallbacks {
     /** Called when something the controller does not see ends, so what waits may show. */
     var onIdle: () -> Unit = {}
@@ -79,8 +79,11 @@ internal class InAppDialogPresenter(
     }
 
     override fun dismiss() {
-        session?.leave("app")
-        page?.leave("app")
+        // A report may present again; what it presents must survive this dismissal.
+        val native = session
+        val html = page
+        native?.leave("app")
+        html?.leave("app")
     }
 
     /** Closes the window, reports, and only then does what the outcome asks for. */
@@ -234,6 +237,9 @@ internal class InAppDialogPresenter(
     private fun attachPage(target: Activity, current: InAppHtmlView): Boolean {
         if (target.isFinishing || target.isDestroyed) return false
         val shown = InAppWindow(target, current.attach(target), current.edge, onBack = current::onBack, onInsets = current::applyInsets)
+        // Takes no touch or focus from the app until bind() applies the page's own state.
+        shown.setTouchable(false)
+        shown.setFocusable(false)
         if (!shown.show(current.lightStatusIcons)) {
             current.detach()
             return false
@@ -246,6 +252,7 @@ internal class InAppDialogPresenter(
 
     /** Drops the page's window without an outcome; the page and its WebView wait for the next Activity. */
     private fun detachPage() {
+        pageWindow?.let(::hideKeyboard)
         page?.detach()
         pageWindow?.close()
         pageWindow = null

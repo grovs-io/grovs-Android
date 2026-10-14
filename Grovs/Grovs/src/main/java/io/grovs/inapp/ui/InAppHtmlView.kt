@@ -58,9 +58,10 @@ internal class InAppHtmlView(
     private val actions: InAppActions,
     private val finish: (InAppOutcome) -> Unit,
     schedule: (delayMillis: Long, work: () -> Unit) -> InAppCancellable = InAppMainTimer::after,
-    private val makeWebView: (Context) -> WebView = { WebView(it) },
+    private val makeWebView: (Context) -> WebView = NEW_WEB_VIEW,
 ) {
     companion object {
+        val NEW_WEB_VIEW: (Context) -> WebView = { WebView(it) }
         private const val MODAL_MARGIN_DP = 16f
         private const val PAGE_BACKGROUND = "(function(){var s=function(e){return e?getComputedStyle(e).backgroundColor:'';};" +
             "var b=s(document.body);return !b||/^rgba\\(.*,\\s*0\\)$/.test(b)?s(document.documentElement):b;})()"

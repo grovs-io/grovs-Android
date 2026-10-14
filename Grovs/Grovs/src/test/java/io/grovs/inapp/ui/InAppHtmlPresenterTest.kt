@@ -228,4 +228,22 @@ class InAppHtmlPresenterTest {
         assertNull(presenter.shownPageWindow)
         assertTrue(outcomes.isEmpty())
     }
+
+    @Test
+    fun aPagePresentedFromTheNativeDismissalReportWins() {
+        val reentrant = InAppPresentation(InAppHtmlFixtures.campaign("modal"), InAppHtmlFixtures.RENDERED)
+        var presentedAgain = false
+        assertTrue(presenter.present(InAppUiFixtures.presentation(InAppUiFixtures.campaign())) {
+            outcomes += it
+            presentedAgain = presenter.present(reentrant) { outcome -> outcomes += outcome }
+        })
+        idle()
+        assertFalse(presenter.present(InAppUiFixtures.presentation(InAppUiFixtures.campaign())) { outcomes += it })
+        idle()
+        assertTrue(presentedAgain)
+        assertEquals(listOf<InAppOutcome>(InAppOutcome.Dismissed("app")), outcomes)
+        assertNotNull(presenter.shownPage)
+        assertTrue(presenter.shownPageWindow!!.dialog.isShowing)
+        assertNull(presenter.shownSession)
+    }
 }
