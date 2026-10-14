@@ -227,6 +227,7 @@ class ConsentBackend : Closeable {
             val body: String,
             val recoveredBody: String,
         ) : Mode()
+        class Compute(val answer: (Seen) -> MockResponse) : Mode()
     }
 
     val server = MockWebServer()
@@ -243,7 +244,8 @@ class ConsentBackend : Closeable {
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
                 val path = request.requestUrl!!.encodedPath.removePrefix(SDK_PATH)
-                seen += Seen(phase, path, request.method!!, request.body.clone().readUtf8(), request)
+                val entry = Seen(phase, path, request.method!!, request.body.clone().readUtf8(), request)
+                seen += entry
                 return when (val mode = routes[path]) {
                     null -> {
                         unexpected += path
@@ -268,6 +270,7 @@ class ConsentBackend : Closeable {
                     } else {
                         ok(mode.recoveredBody)
                     }
+                    is Mode.Compute -> mode.answer(entry)
                 }
             }
         }
@@ -280,6 +283,9 @@ class ConsentBackend : Closeable {
     val baseUrl: String get() = server.url("/").toString()
 
     fun respond(path: String, body: String) { routes[path] = Mode.Respond(body) }
+
+    /** Answers each request on [path] with whatever [answer] builds from it. */
+    fun answer(path: String, answer: (Seen) -> MockResponse) { routes[path] = Mode.Compute(answer) }
 
     /** A genuine transport failure: the whole request is read, then the connection is dropped. */
     fun fail(path: String) { routes[path] = Mode.Disconnect }
