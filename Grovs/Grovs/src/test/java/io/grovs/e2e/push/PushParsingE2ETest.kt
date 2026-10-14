@@ -29,16 +29,20 @@ internal class PushParsingE2ETest : ContractTestBase() {
         advance(5_000)
     }
 
-    @Ignore("F-1: a whitespace-only grovs_campaign_id is treated as a Grovs push")
     @Test
     fun `P1 a non-empty grovs_campaign_id makes a Grovs push and a blank one does not`() {
         assertTrue(Grovs.isGrovsNotification(PushPayloads.data()))
         assertFalse(Grovs.isGrovsNotification(PushPayloads.data(campaign = "")))
-        assertFalse(Grovs.isGrovsNotification(PushPayloads.data(campaign = "   ")))
         assertFalse(Grovs.isGrovsNotification(mapOf("promo" to "spring26")))
 
         tapAfterAuth(tapIntent(PushPayloads.data(campaign = "")))
         assertEquals(0, pushOpens())
+    }
+
+    @Ignore("F-1: a whitespace-only grovs_campaign_id is treated as a Grovs push")
+    @Test
+    fun `P1 a whitespace-only grovs_campaign_id is not a Grovs push`() {
+        assertFalse(Grovs.isGrovsNotification(PushPayloads.data(campaign = "   ")))
     }
 
     @Test
