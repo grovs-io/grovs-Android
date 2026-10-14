@@ -85,8 +85,8 @@ abstract class DrivenBackendTestBase {
     }
 
     /** Runs due work until [condition] holds. Does not move virtual time. */
-    protected fun pumpUntil(description: String, condition: () -> Boolean) =
-        driver.runUntil(description, onEachPass = { idleMain(); driver.runCurrent() }, condition = condition)
+    protected fun pumpUntil(description: String, timeoutMs: Long = 5_000, condition: () -> Boolean) =
+        driver.runUntil(description, timeoutMs, onEachPass = { idleMain(); driver.runCurrent() }, condition = condition)
 
     /** Moves virtual time in one second steps until [condition] holds. */
     protected fun advanceUntil(description: String, timeoutMs: Long = 300_000, condition: () -> Boolean) {

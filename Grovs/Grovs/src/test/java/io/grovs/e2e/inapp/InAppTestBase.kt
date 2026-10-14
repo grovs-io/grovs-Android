@@ -24,12 +24,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import org.junit.After
 import org.junit.Before
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.shadows.ShadowDialog
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -43,6 +46,9 @@ internal abstract class InAppTestBase : ContractTestBase() {
 
     /** The key the SDK names its in-app folders by: test environment plus the configured api key. */
     protected val storeKey = "test_test-api-key"
+
+    /** A first sync under full-suite load can take well over the default 5 s wall-clock wait. */
+    private val syncTimeoutMs = 20_000L
 
     @Before
     fun enableInApp() {
@@ -123,7 +129,7 @@ internal abstract class InAppTestBase : ContractTestBase() {
      */
     protected fun restart(whileDead: () -> Unit = {}) {
         // A sync still running would be counted as the new process's sync.
-        pumpUntil("the running sync to finish") { !sdkSyncing() }
+        awaitSync("the running sync to finish") { !sdkSyncing() }
         val syncs = inApp.syncBodies.size
         backgroundApp()
         simulateProcessDeath()
@@ -140,8 +146,19 @@ internal abstract class InAppTestBase : ContractTestBase() {
      * finished with its answer (applied it, or given up on a failure).
      */
     protected fun awaitSyncHandled(description: String, syncsBefore: Int) {
-        pumpUntil(description) { inApp.syncBodies.size > syncsBefore && !sdkSyncing() }
+        awaitSync(description) { inApp.syncBodies.size > syncsBefore && !sdkSyncing() }
         pump()
+    }
+
+    /** Waits up to [syncTimeoutMs]; a timeout says where the sync stood. */
+    private fun awaitSync(description: String, condition: () -> Boolean) {
+        try {
+            pumpUntil(description, syncTimeoutMs, condition)
+        } catch (e: AssertionError) {
+            val state = "syncs: ${inApp.syncBodies.size}, syncing: ${runCatching { sdkSyncing() }.getOrNull()}, " +
+                "auth: ${runCatching { manager().authenticationState }.getOrNull()}"
+            throw AssertionError("${e.message} ($state)", e)
+        }
     }
 
     // The request reaches the server before the SDK reads the answer; the controller's flag is the only signal it is done.
@@ -149,18 +166,25 @@ internal abstract class InAppTestBase : ContractTestBase() {
         InAppController::class.java.getDeclaredField("syncing").apply { isAccessible = true }
             .getBoolean(manager().inApp.controller)
 
-    /** The first sync answers after [delayMs] of real time. Sleeps on the server thread, never on the test thread. */
-    protected fun slowFirstSync(delayMs: Long) {
+    private val firstSyncGate = CountDownLatch(1)
+
+    @After
+    fun releaseHeldSync() = firstSyncGate.countDown()
+
+    /** The first sync is held on the server until [releaseFirstSync], so the SDK decides app_open while it is in flight. */
+    protected fun holdFirstSync() {
         val first = AtomicBoolean(true)
         backend.answer("in_app/sync") { seen ->
-            if (first.getAndSet(false)) Thread.sleep(delayMs)
+            if (first.getAndSet(false)) firstSyncGate.await(20, TimeUnit.SECONDS)
             inApp.syncAnswer(InAppBackend.parse(seen.body.ifBlank { "{}" }))
         }
     }
 
+    protected fun releaseFirstSync() = firstSyncGate.countDown()
+
     // InAppSynced is the stored sync; store writes run on the SDK's own executor, so it is the only completion signal.
     protected fun awaitStoredSync(description: String = "a stored in-app sync") {
-        pumpUntil(description) { InAppSynced.load(store()) != null }
+        awaitSync(description) { InAppSynced.load(store()) != null }
         pump()
     }
 
@@ -170,9 +194,6 @@ internal abstract class InAppTestBase : ContractTestBase() {
 
     /** The folder the SDK keeps its in-app state in; seeding or damaging it fakes an old run. */
     protected fun storeFolder() = File(application.noBackupFilesDir, "grovs/in_app/${InAppHash.short(storeKey)}")
-
-    /** The files the in-app store holds right now. */
-    protected fun storeFiles(): List<File> = storeFolder().listFiles()?.filter { it.isFile }?.sortedBy { it.name }.orEmpty()
 
     // Native messages
 

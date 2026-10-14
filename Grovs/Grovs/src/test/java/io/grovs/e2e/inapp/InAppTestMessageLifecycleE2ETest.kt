@@ -5,13 +5,11 @@ import android.widget.TextView
 import com.google.gson.JsonObject
 import io.grovs.Grovs
 import io.grovs.R
-import io.grovs.e2e.contract.InAppBackend
 import io.grovs.e2e.contract.InAppCampaigns
 import io.grovs.e2e.contract.InAppCampaigns.appOpen
 import io.grovs.e2e.contract.InAppCampaigns.button
 import io.grovs.e2e.contract.InAppCampaigns.event
 import io.grovs.handlers.GrovsManager
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -19,18 +17,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 internal class InAppTestMessageLifecycleE2ETest : InAppTestBase() {
-
-    private val syncGate = CountDownLatch(1)
-
-    @After
-    fun openSyncGate() = syncGate.countDown()
 
     private fun testMessage(id: String) = InAppCampaigns.campaign().id(id).title("Test $id")
 
@@ -48,15 +38,6 @@ internal class InAppTestMessageLifecycleE2ETest : InAppTestBase() {
     private fun trackAndFlush(name: String) {
         Grovs.track(name)
         reportedWhen(name)
-    }
-
-    /** The first sync is held on the server until [syncGate] opens, so the SDK decides app_open while it is in flight. */
-    private fun holdFirstSync() {
-        val first = AtomicBoolean(true)
-        backend.answer("in_app/sync") { seen ->
-            if (first.getAndSet(false)) syncGate.await(20, TimeUnit.SECONDS)
-            inApp.syncAnswer(InAppBackend.parse(seen.body.ifBlank { "{}" }))
-        }
     }
 
     // I52-I53: a test message "shows the message on every device of that person at its next sync within
@@ -99,11 +80,12 @@ internal class InAppTestMessageLifecycleE2ETest : InAppTestBase() {
     fun `I52 a test message received in the background shows on return`() {
         start()
         backgroundApp()
+        val syncsBefore = inApp.syncBodies.size
         sendTest(testMessage("t1").build())
         trackAndFlush("background_event")
         // The SDK spreads the sync over a random 0 to 10 s after the stamps changed.
         idleUntil("the background sync to take the test", 11_000) { inApp.testMessages.isEmpty() }
-        awaitSyncHandled("the background sync", 0)
+        awaitSyncHandled("the background sync", syncsBefore)
         assertNull("nothing shows while in the background", presenter().shownWindow)
 
         val syncs = inApp.syncBodies.size
@@ -191,7 +173,7 @@ internal class InAppTestMessageLifecycleE2ETest : InAppTestBase() {
         pumpUntil("the first sync in flight") { backend.count("in_app/sync") >= 1 }
         idleFor(1_500)
         assertTrue("held while the sync runs", recorder.shown.isEmpty())
-        syncGate.countDown()
+        releaseFirstSync()
         pumpUntil("app_open decided on the synced campaign") { recorder.shown == listOf("c1") }
     }
 
@@ -204,7 +186,7 @@ internal class InAppTestMessageLifecycleE2ETest : InAppTestBase() {
         resumeHost()
         pumpUntil("the first sync in flight") { backend.count("in_app/sync") >= 1 }
         idleFor(2_500)
-        syncGate.countDown()
+        releaseFirstSync()
         awaitStoredSync("the slow sync lands")
         settle(2_000)
         assertTrue("app_open was decided on the empty store", "open" !in recorder.shown)
