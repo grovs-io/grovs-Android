@@ -12,15 +12,26 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 
-/** Which campaigns have their images on the device; a campaign shows only once all of them are. */
+/**
+ * Which campaigns have their images on the device; a campaign shows only once all of them are.
+ * What is stored is kept in memory, so deciding what to show never touches the disk.
+ */
 internal class InAppImages(
     private val folder: File,
     private val loader: (url: String, done: (ByteArray?) -> Unit) -> Unit,
     private val decodes: (ByteArray) -> Boolean,
+    private val background: Executor = deletions,
 ) {
     private val loading = mutableSetOf<String>()
+    /** File names in [folder], read from it on first use. Guarded by itself. */
+    private val stored: MutableSet<String> by lazy {
+        folder.listFiles()?.mapTo(mutableSetOf()) { it.name } ?: mutableSetOf()
+    }
 
     /** Starts loading what is missing. Failures are retried by the next call, after the next sync. */
     fun preload(campaigns: List<JsonElement>) {
@@ -36,20 +47,31 @@ internal class InAppImages(
         }
     }
 
-    fun has(url: String): Boolean = path(url).exists()
+    fun has(url: String): Boolean = name(url).let { name -> synchronized(stored) { name in stored } }
 
     fun ready(campaign: JsonElement): Boolean = images(campaign).all(::has)
 
     /** The stored picture for [url], for the presenter to decode; null when it is not on disk. */
-    fun file(url: String?): File? = url?.let(::path)?.takeIf { it.exists() }
+    fun file(url: String?): File? = url?.takeIf(::has)?.let(::path)
 
     /** Removes pictures no stored campaign names any more. */
     fun keepOnly(campaigns: List<JsonElement>) {
-        val wanted = campaigns.flatMap(::images).map { path(it).name }.toSet()
-        folder.listFiles()?.filter { it.name !in wanted }?.forEach { it.delete() }
+        val wanted = campaigns.flatMap(::images).map(::name).toSet()
+        synchronized(stored) { stored.retainAll(wanted) }
+        try {
+            background.execute {
+                // A picture stored after this call started is kept.
+                val unknown = synchronized(stored) { folder.listFiles()?.filter { it.name !in stored } }
+                unknown?.forEach { it.delete() }
+            }
+        } catch (e: RejectedExecutionException) {
+            InAppLog.error("Could not remove old in-app pictures")
+        }
     }
 
-    private fun path(url: String) = File(folder, InAppHash.sha256Hex(url))
+    private fun name(url: String) = InAppHash.sha256Hex(url)
+
+    private fun path(url: String) = File(folder, name(url))
 
     private fun store(url: String, data: ByteArray) {
         if (!folder.isDirectory && !folder.mkdirs()) return
@@ -62,6 +84,7 @@ internal class InAppImages(
         try {
             stream.write(data)
             file.finishWrite(stream)
+            synchronized(stored) { stored.add(name(url)) }
         } catch (e: IOException) {
             file.failWrite(stream)
         }
@@ -70,6 +93,10 @@ internal class InAppImages(
     companion object {
         /** Larger than any picture a message needs; a bigger file is not kept. */
         const val MAX_BYTES = 5 * 1024 * 1024
+
+        private val deletions: Executor by lazy {
+            Executors.newSingleThreadExecutor { work -> Thread(work, "grovs-in-app-images").apply { isDaemon = true } }
+        }
 
         /**
          * Not the SDK's client: no project or device header may reach an image host.

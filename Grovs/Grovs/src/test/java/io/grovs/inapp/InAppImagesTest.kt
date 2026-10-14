@@ -9,6 +9,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.File
+import java.util.concurrent.Executor
 
 class InAppImagesTest {
 
@@ -84,5 +86,43 @@ class InAppImagesTest {
         images.keepOnly(listOf(b))
         assertFalse(images.has("https://a/a.png"))
         assertTrue(images.has("https://a/b.png"))
+    }
+
+    @Test
+    fun `keepOnly deletes the files on the background, not on the caller`() {
+        val queued = mutableListOf<Runnable>()
+        val images = InAppImages(temp.root, loader = { _, done -> done(byteArrayOf(1)) }, decodes = { true }, background = Executor { queued.add(it) })
+        val a = campaign("cover", "https://a/a.png")
+        val b = campaign("cover", "https://a/b.png")
+        images.preload(listOf(a, b))
+        images.keepOnly(listOf(b))
+        assertFalse(images.has("https://a/a.png"))
+        assertEquals(2, temp.root.listFiles()!!.size)
+
+        queued.forEach { it.run() }
+        assertEquals(listOf(File(temp.root, InAppHash.sha256Hex("https://a/b.png"))), temp.root.listFiles()!!.toList())
+        assertTrue(images.has("https://a/b.png"))
+    }
+
+    @Test
+    fun `has and ready follow what the loader stored without asking the disk again`() {
+        val images = InAppImages(temp.root, loader = { _, done -> done(byteArrayOf(1)) }, decodes = { true })
+        val raw = campaign("cover", "https://a/p.png", "https://a/l.png")
+        assertFalse(images.has("https://a/p.png"))
+        images.preload(listOf(raw))
+        assertTrue(images.has("https://a/p.png"))
+        assertTrue(images.ready(raw))
+
+        temp.root.listFiles()!!.forEach { it.delete() }
+        assertTrue("readiness is kept in memory", images.ready(raw))
+    }
+
+    @Test
+    fun `pictures stored by an earlier launch count as ready`() {
+        val raw = campaign("cover", "https://a/p.png")
+        InAppImages(temp.root, loader = { _, done -> done(byteArrayOf(1)) }, decodes = { true }).preload(listOf(raw))
+        val later = InAppImages(temp.root, loader = { _, done -> done(null) }, decodes = { true })
+        assertTrue(later.ready(raw))
+        assertNotNull(later.file("https://a/p.png"))
     }
 }
