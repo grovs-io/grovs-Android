@@ -57,11 +57,19 @@ internal class InAppScheduleE2ETest : InAppTestBase() {
     }
 
     @Test fun `I16 a daily window includes from and excludes to`() {
-        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
         val utc = TimeZone.getTimeZone("UTC")
+        TimeZone.setDefault(utc)
+        // Put the corrected clock 2 seconds past a minute boundary, so "from" and "to" equal the current minute.
+        val now = System.currentTimeMillis()
+        val boundary = (now / 60_000 + 1) * 60_000
+        serverAhead(boundary + 2_000 - now)
+        val boundaryClock = Calendar.getInstance(utc).apply { timeInMillis = boundary }
+        val minute = hhmm(boundaryClock)
+        val before = hhmm(Calendar.getInstance(utc).apply { timeInMillis = boundary - 120 * 60_000 })
+        val after = hhmm(Calendar.getInstance(utc).apply { timeInMillis = boundary + 120 * 60_000 })
         start(
-            InAppCampaigns.campaign().id("open").schedule("2026-09-01T00:00:00Z", from = hhmm(localIn(utc, 0)), to = hhmm(localIn(utc, 120))).build(),
-            InAppCampaigns.campaign().id("closed").triggers(event("e2")).schedule("2026-09-01T00:00:00Z", from = hhmm(localIn(utc, -120)), to = hhmm(localIn(utc, 0))).build(),
+            InAppCampaigns.campaign().id("open").schedule("2026-09-01T00:00:00Z", from = minute, to = after).build(),
+            InAppCampaigns.campaign().id("closed").triggers(event("e2")).schedule("2026-09-01T00:00:00Z", from = before, to = minute).build(),
             control,
         )
         Grovs.track("cart_viewed"); pumpUntil("inside [from, to)") { recorder.shown == listOf("open") }
