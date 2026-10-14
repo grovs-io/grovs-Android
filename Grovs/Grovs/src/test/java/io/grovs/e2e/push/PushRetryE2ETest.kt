@@ -24,11 +24,12 @@ internal class PushRetryE2ETest : ContractTestBase() {
         authenticated()
         foreground(tap)
         advanceUntil("the first report's tries") { pushOpens() >= IN_REQUEST_ATTEMPTS }
-        advance(30_000)
+        settle(30_000)
         contract.install()
         backend.phase = "recovered"
         foreground(Intent())
-        advance(10_000)
+        pumpUntil("the retried open is reported") { pushOpens("recovered") >= 1 }
+        settle(10_000)
     }
 
     @Test
@@ -58,10 +59,10 @@ internal class PushRetryE2ETest : ContractTestBase() {
         authenticated()
         foreground(tap)
         repeat(REPORT_ATTEMPTS + 2) {
-            advance(60_000)
+            settle(60_000)
             foreground(Intent())
         }
-        advance(60_000)
+        settle(60_000)
 
         assertEquals(REPORT_ATTEMPTS * IN_REQUEST_ATTEMPTS, pushOpens())
     }
@@ -70,8 +71,8 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.failWithStatus("push_open", code = code, body = body)
         authenticated()
         foreground(tap)
-        advance(30_000)
-        repeat(2) { foreground(Intent()); advance(30_000) }
+        settle(30_000)
+        repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals("$code is final: one request, no retry", 1, pushOpens())
     }
 
@@ -86,8 +87,8 @@ internal class PushRetryE2ETest : ContractTestBase() {
         contract.knownPushCampaigns = emptySet()
         authenticated()
         foreground(tap)
-        advance(30_000)
-        repeat(2) { foreground(Intent()); advance(30_000) }
+        settle(30_000)
+        repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())
     }
 
@@ -96,8 +97,8 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.respond("push_open", BackendContract.PUSH_OPEN_ALREADY)
         authenticated()
         foreground(tap)
-        advance(30_000)
-        repeat(2) { foreground(Intent()); advance(30_000) }
+        settle(30_000)
+        repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())
     }
 
@@ -106,8 +107,8 @@ internal class PushRetryE2ETest : ContractTestBase() {
         backend.respond("push_open", "{}")
         authenticated()
         foreground(tap)
-        advance(30_000)
-        repeat(2) { foreground(Intent()); advance(30_000) }
+        settle(30_000)
+        repeat(2) { foreground(Intent()); settle(30_000) }
         assertEquals(1, pushOpens())
     }
 }

@@ -25,7 +25,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         backend.failWithStatus("authenticate", code = 500, body = """{"error":"down"}""")
         configure()
         pumpUntil("the first authentication attempt") { backend.count("authenticate") >= 1 }
-        advance(60_000)
+        settle(60_000)
     }
 
     private fun recoverAuthentication() {
@@ -41,7 +41,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
     fun `P7 a tap posts one push_open with the campaign, the session and the device headers`() {
         authenticated()
         foreground(tapIntent())
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(1, pushOpens())
         val body = contract.bodies("push_open").single()
@@ -91,7 +91,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         val lookups = backend.count("data_for_device_and_url")
         foreground()
         foreground()
-        advance(60_000)
+        settle(60_000)
 
         assertNull(deepLinks.delivered.single().link)
         assertEquals("spring26", deepLinks.delivered.single().data!!["promo"])
@@ -103,7 +103,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         authenticated()
         foreground(tapIntent())
         pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
-        advance(5_000)
+        settle(5_000)
 
         assertNull(deepLinks.delivered.single().link)
         assertEquals(1, deepLinks.delivered.size)
@@ -126,7 +126,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
     fun `P12 a non-Grovs intent reports nothing`() {
         authenticated()
         foreground(Intent(Intent.ACTION_VIEW, Uri.parse(PushPayloads.LINK)).putExtra("promo", "x"))
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(0, pushOpens())
     }
@@ -135,7 +135,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
     fun `P13 receiving a push in the foreground is not an open`() {
         authenticated()
         assertTrue(GrovsMessaging.handleMessage(application, PushPayloads.remoteMessage()))
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(0, pushOpens())
         assertEquals(0, backend.count("data_for_device_and_url"))
@@ -153,7 +153,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         }
         thread.start()
         thread.join(5_000)
-        advance(5_000)
+        settle(5_000)
 
         assertTrue(grovs)
         assertFalse(foreign)
@@ -166,7 +166,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
         authenticated()
         pumpUntil("the launch lookup") { backend.count("data_for_device") >= 1 }
-        advance(2_000)
+        settle(2_000)
         val fingerprintLookups = backend.count("data_for_device")
         foreground(tapIntent())
         pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }

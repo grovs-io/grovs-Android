@@ -26,7 +26,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         backend.failWithStatus("authenticate", code = 500, body = """{"error":"down"}""")
         configure()
         pumpUntil("the failed attempt") { backend.count("authenticate") >= 1 }
-        advance(60_000)
+        settle(60_000)
     }
 
     private fun authRecovers() {
@@ -34,7 +34,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         // Skips the auth backoff wait, which has no public trigger.
         manager().authenticationBackoffElapsedMs = { Long.MAX_VALUE }
         foreground(Intent())
-        advance(30_000)
+        settle(30_000)
     }
 
     private fun assertAuthenticated() {
@@ -47,9 +47,9 @@ internal class PushConsentE2ETest : ContractTestBase() {
         configure(enabled = false)
         foreground(tap)
         Grovs.setSDK(true)
-        advance(10_000)
+        settle(10_000)
         foreground()
-        advance(10_000)
+        settle(10_000)
 
         assertAuthenticated()
         assertEquals(0, pushOpens())
@@ -78,13 +78,13 @@ internal class PushConsentE2ETest : ContractTestBase() {
         pumpUntil("the open in flight") { pushOpens() >= 1 }
         Grovs.setSDK(false)
         gate.countDown()
-        advance(30_000)
+        settle(30_000)
         val sent = pushOpens()
         assertEquals("no in-request retry after consent was withdrawn", 1, sent)
         Grovs.setSDK(true)
         contract.install()
         foreground(Intent())
-        advance(30_000)
+        settle(30_000)
 
         assertAuthenticated()
         assertEquals("no report after consent came back", sent, pushOpens())
@@ -97,7 +97,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         contract.install()
         configure()
         foreground(Intent())
-        advance(30_000)
+        settle(30_000)
 
         assertAuthenticated()
         assertEquals(0, pushOpens())

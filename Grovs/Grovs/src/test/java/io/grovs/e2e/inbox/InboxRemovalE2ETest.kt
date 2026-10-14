@@ -46,7 +46,7 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         runBlocking { Grovs.numberOfUnreadMessages() }
         background()
         foreground()
-        advance(60_000)
+        settle(60_000)
 
         assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
         assertTrue("tracked event reached the backend", contract.batchEvents().any { it.optString("event") == "checkout_done" || it.optString("event_name") == "checkout_done" })
@@ -107,7 +107,7 @@ internal class InboxRemovalE2ETest : ContractTestBase() {
         authenticated()
         background()
         foreground()
-        advance(60_000)
+        settle(60_000)
 
         assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
         assertTrue(calls.isEmpty())

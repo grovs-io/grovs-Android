@@ -25,7 +25,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
     fun `P16 a tap before configure is replayed by an enabled configure`() {
         assertTrue(Grovs.handleNotificationOpen(noLink()))
         authenticated()
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
@@ -37,7 +37,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         Grovs.handleNotificationOpen(noLink("first", "0:a"))
         Grovs.handleNotificationOpen(noLink("second", "0:b"))
         authenticated()
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(listOf("second"), contract.bodies("push_open").map { it.getString("campaign_id") })
     }
@@ -48,7 +48,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         configure(enabled = false)
         Grovs.setSDK(true)
         foreground()
-        advance(10_000)
+        settle(10_000)
 
         assertEquals(0, pushOpens())
         assertTrue(deepLinks.delivered.isEmpty())
@@ -58,7 +58,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
     fun `P17 a non-Grovs intent before configure is not held`() {
         assertFalse(Grovs.handleNotificationOpen(Intent(Intent.ACTION_VIEW, Uri.parse(PushPayloads.LINK))))
         authenticated()
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(0, backend.count("data_for_device_and_url"))
         assertEquals(0, pushOpens())
@@ -74,7 +74,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
 
         gate.countDown()
         pumpUntil("the open") { pushOpens() >= 1 }
-        advance(5_000)
+        settle(5_000)
         assertEquals(1, pushOpens())
     }
 
@@ -87,7 +87,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         foreground(noLink())
         gate.countDown()
         pumpUntil("the open") { pushOpens() >= 1 }
-        advance(10_000)
+        settle(10_000)
 
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
@@ -99,7 +99,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         configure()
         foreground(noLink())
         pumpUntil("the failed attempt") { backend.count("authenticate") >= 1 }
-        advance(60_000)
+        settle(60_000)
         assertEquals(0, pushOpens())
 
         contract.install()
@@ -107,7 +107,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         manager().authenticationBackoffElapsedMs = { Long.MAX_VALUE }
         foreground(Intent())
         pumpUntil("the open") { pushOpens() >= 1 }
-        advance(5_000)
+        settle(5_000)
         assertEquals(1, pushOpens())
     }
 
@@ -120,7 +120,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         foreground(noLink(messageId = "0:c"))
         gate.countDown()
         pumpUntil("the open") { pushOpens() >= 1 }
-        advance(10_000)
+        settle(10_000)
 
         assertEquals(1, pushOpens())
     }

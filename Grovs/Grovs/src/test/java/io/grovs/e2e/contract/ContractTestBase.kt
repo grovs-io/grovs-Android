@@ -26,6 +26,12 @@ internal abstract class ContractTestBase : DrivenBackendTestBase() {
     protected fun pushOpens(phase: String? = null): Int =
         if (phase == null) backend.count("push_open") else backend.count("push_open", phase)
 
+    /** Moves virtual time, then gives the real network a moment so replies are in before asserting. */
+    protected fun settle(totalMs: Long) {
+        advance(totalMs)
+        repeat(3) { Thread.sleep(50); pump() }
+    }
+
     /** Configures, starts the launcher and waits for authentication. */
     protected fun authenticated() {
         configure()

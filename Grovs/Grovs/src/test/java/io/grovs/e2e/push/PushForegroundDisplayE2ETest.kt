@@ -59,7 +59,7 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
 
     private fun receive(message: com.google.firebase.messaging.RemoteMessage = PushPayloads.remoteMessage()): Boolean {
         val handled = GrovsMessaging.handleMessage(application, message)
-        advance(10_000)
+        settle(10_000)
         return handled
     }
 
@@ -171,7 +171,7 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
         val tap = shadowOf(posted().single().contentIntent).savedIntent
 
         foreground(tap)
-        advance(5_000)
+        settle(5_000)
 
         assertEquals(application.packageName, tap.component?.packageName)
         assertEquals(1, pushOpens())

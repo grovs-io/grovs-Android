@@ -26,10 +26,10 @@ internal class PushDedupeE2ETest : ContractTestBase() {
     fun `P27 the same launcher intent seen again reports and delivers once`() {
         authenticated()
         foreground(tap())
-        advance(5_000)
+        settle(5_000)
         foreground()
         foreground()
-        advance(5_000)
+        settle(5_000)
 
         pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
@@ -37,7 +37,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
 
         // Control: a push with a new id is still reported in the same state.
         foreground(tap("0:control"))
-        advance(5_000)
+        settle(5_000)
         pumpUntil("2 push open(s) reported") { pushOpens() >= 2 }
         assertEquals(2, pushOpens())
     }
@@ -46,16 +46,16 @@ internal class PushDedupeE2ETest : ContractTestBase() {
     fun `P27 a new intent with a handled message id is ignored`() {
         authenticated()
         foreground(tap("0:same"))
-        advance(5_000)
+        settle(5_000)
         foreground(tap("0:same"))
-        advance(5_000)
+        settle(5_000)
 
         pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
 
         foreground(tap("0:control"))
-        advance(5_000)
+        settle(5_000)
         pumpUntil("2 push open(s) reported") { pushOpens() >= 2 }
         assertEquals(2, pushOpens())
     }
@@ -64,7 +64,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
     fun `P27 a handled push redelivered after process death is ignored`() {
         authenticated()
         foreground(tap("0:kept"))
-        advance(5_000)
+        settle(5_000)
 
         simulateProcessDeath()
         backend.phase = "after-restart"
@@ -73,14 +73,14 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         pumpUntil("authentication after the restart") {
             manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED
         }
-        advance(10_000)
+        settle(10_000)
 
         assertEquals(0, pushOpens("after-restart"))
         assertEquals(1, deepLinks.delivered.size)
 
         foreground(tap("0:control"))
         pumpUntil("control push reported") { pushOpens("after-restart") > 0 }
-        advance(5_000)
+        settle(5_000)
         assertEquals(1, pushOpens("after-restart"))
     }
 
@@ -96,7 +96,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         // A configuration change: the same intent arrives in a new Activity instance.
         Robolectric.buildActivity(TestActivity::class.java, intent).setup()
         gate.countDown()
-        advance(10_000)
+        settle(10_000)
 
         pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
@@ -107,7 +107,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         contract.knownPushCampaigns = (0..50).map { "c$it" }.toSet()
         authenticated()
         (0..50).forEach { foreground(tap("0:id$it", "c$it")); pump() }
-        advance(10_000)
+        settle(10_000)
         pumpUntil("51 push open(s) reported") { pushOpens() >= 51 }
         assertEquals(51, pushOpens())
     }
@@ -118,11 +118,11 @@ internal class PushDedupeE2ETest : ContractTestBase() {
 
         backend.phase = "replay"
         foreground(tap("0:id50", "c50"))
-        advance(5_000)
+        settle(5_000)
         assertEquals("the newest is still remembered", 0, pushOpens("replay"))
 
         foreground(tap("0:control", "c1"))
-        advance(5_000)
+        settle(5_000)
         pumpUntil("1 push open(s) reported") { pushOpens("replay") >= 1 }
         assertEquals(1, pushOpens("replay"))
     }
@@ -139,11 +139,11 @@ internal class PushDedupeE2ETest : ContractTestBase() {
             manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED
         }
         foreground(tap("0:id50", "c50"))
-        advance(5_000)
+        settle(5_000)
         assertEquals("the newest is still remembered", 0, pushOpens("after-restart"))
 
         foreground(tap("0:id0", "c0"))
-        advance(5_000)
+        settle(5_000)
         pumpUntil("1 push open(s) reported") { pushOpens("after-restart") >= 1 }
         assertEquals("the oldest was forgotten", 1, pushOpens("after-restart"))
     }

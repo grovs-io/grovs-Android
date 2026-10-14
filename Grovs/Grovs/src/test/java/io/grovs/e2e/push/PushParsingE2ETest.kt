@@ -26,7 +26,7 @@ internal class PushParsingE2ETest : ContractTestBase() {
     private fun tapAfterAuth(intent: Intent) {
         authenticated()
         foreground(intent)
-        advance(5_000)
+        settle(5_000)
     }
 
     @Test
