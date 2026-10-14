@@ -25,7 +25,6 @@ internal object InAppHtmlDocument {
     private const val URL_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!\$&'()*+,;=:@/?#%"
     private val HEX = "0123456789ABCDEF".toCharArray()
     private val viewportTag = Regex("<meta[^>]*name\\s*=\\s*[\"']?viewport", RegexOption.IGNORE_CASE)
-    private val doctype = Regex("^(?:\\s|\uFEFF|<!--[^-]*(?:-(?!->)[^-]*)*-->)*<!doctype[^>]*>", RegexOption.IGNORE_CASE)
     private val metaTag = Regex("<meta[^>]*>", RegexOption.IGNORE_CASE)
     private val themeName = Regex("name\\s*=\\s*[\"']?theme-color[\"'\\s>/]", RegexOption.IGNORE_CASE)
     private val contentValue = Regex("content\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", RegexOption.IGNORE_CASE)
@@ -40,9 +39,40 @@ internal object InAppHtmlDocument {
      */
     fun document(html: String, script: String): String {
         val tag = if (viewportTag.containsMatchIn(html)) "" else VIEWPORT
-        val match = doctype.find(html) ?: return "<!doctype html>" + tag + script + html
-        val end = match.range.last + 1
+        val end = doctypeEnd(html)
+        if (end < 0) return "<!doctype html>" + tag + script + html
         return html.substring(0, end) + tag + script + html.substring(end)
+    }
+
+    /** Where a leading doctype ends, skipping whitespace, a BOM and comments as a browser reads them; -1 when there is none. */
+    private fun doctypeEnd(html: String): Int {
+        var i = 0
+        while (i < html.length) {
+            val c = html[i]
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\u000C' || c == '\uFEFF') {
+                i++
+            } else if (html.startsWith("<!--", i)) {
+                i += 4
+                if (html.startsWith(">", i)) {
+                    i += 1
+                } else if (html.startsWith("->", i)) {
+                    i += 2
+                } else {
+                    val close = html.indexOf("-->", i)
+                    val bang = html.indexOf("--!>", i)
+                    i = when {
+                        close < 0 && bang < 0 -> return -1
+                        bang < 0 || (close in 0 until bang) -> close + 3
+                        else -> bang + 4
+                    }
+                }
+            } else {
+                break
+            }
+        }
+        if (!html.regionMatches(i, "<!doctype", 0, 9, ignoreCase = true)) return -1
+        val close = html.indexOf('>', i)
+        return if (close < 0) -1 else close + 1
     }
 
     /** The handoff the bridge takes and deletes, then the bridge. `post` is bound here, before any author script runs. */

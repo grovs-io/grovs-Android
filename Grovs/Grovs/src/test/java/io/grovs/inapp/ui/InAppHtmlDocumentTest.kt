@@ -34,6 +34,22 @@ class InAppHtmlDocumentTest {
     }
 
     @Test
+    fun commentsEndTheWayBrowsersEndThem() {
+        for (open in listOf("<!-->", "<!--->", "<!-- a --!>")) {
+            val page = "$open<script>e()</script><!-- --><!doctype html><p>y</p>"
+            assertEquals("<!doctype html>$viewport<s>$page", InAppHtmlDocument.document(page, "<s>"))
+        }
+        val closed = "<!--->\n<!DOCTYPE html><p>y</p>"
+        assertEquals("<!--->\n<!DOCTYPE html>$viewport<s><p>y</p>", InAppHtmlDocument.document(closed, "<s>"))
+    }
+
+    @Test
+    fun anUnterminatedCommentIsLinearAndPrepends() {
+        val page = "<!--" + "-".repeat(1_000_000)
+        assertEquals("<!doctype html>$viewport<s>$page", InAppHtmlDocument.document(page, "<s>"))
+    }
+
+    @Test
     fun alphaIsIgnoredTheSameForHexAndRgba() {
         assertEquals(0xFF112233.toInt(), InAppHtmlDocument.parseColor("#11223380"))
         assertEquals(0xFF112233.toInt(), InAppHtmlDocument.parseColor("rgba(17, 34, 51, 0.5)"))
