@@ -10,6 +10,7 @@ import io.grovs.Grovs
 import io.grovs.e2e.E2ETestUtils
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.InAppBackend
+import io.grovs.inapp.InAppController
 import io.grovs.inapp.InAppFileStore
 import io.grovs.inapp.InAppHash
 import io.grovs.inapp.InAppSynced
@@ -83,18 +84,18 @@ internal abstract class InAppTestBase : ContractTestBase() {
         idleFor(1_000)
     }
 
-    /** The app goes to the background and comes back with a fresh launcher; waits for the sync that follows. */
+    /** The app goes to the background and comes back with a fresh launcher; returns once the SDK has used the sync answer. */
     protected fun reopen() {
         val syncs = inApp.syncBodies.size
         backgroundApp()
         foreground(Intent())
         resumeHost()
-        pumpUntil("a sync after reopening") { inApp.syncBodies.size > syncs }
+        awaitSyncHandled("a sync after reopening", syncs)
     }
 
     /**
      * Cold start: the app goes to the background, the process dies, the SDK is configured again with the same listener and the
-     * launcher comes back. Stored files survive. Waits for the sync that follows, whatever its answer.
+     * launcher comes back. Stored files survive. Returns once the SDK has used the sync answer, whatever it was.
      */
     protected fun restart() {
         val syncs = inApp.syncBodies.size
@@ -104,8 +105,22 @@ internal abstract class InAppTestBase : ContractTestBase() {
         configure()
         foreground(Intent())
         resumeHost()
-        pumpUntil("a sync after restarting") { inApp.syncBodies.size > syncs }
+        awaitSyncHandled("a sync after restarting", syncs)
     }
+
+    /**
+     * Waits until the server got a sync request beyond the first [syncsBefore] and the SDK has
+     * finished with its answer (applied it, or given up on a failure).
+     */
+    protected fun awaitSyncHandled(description: String, syncsBefore: Int) {
+        pumpUntil(description) { inApp.syncBodies.size > syncsBefore && !sdkSyncing() }
+        pump()
+    }
+
+    // The request reaches the server before the SDK reads the answer; the controller's flag is the only signal it is done.
+    private fun sdkSyncing(): Boolean =
+        InAppController::class.java.getDeclaredField("syncing").apply { isAccessible = true }
+            .getBoolean(manager().inApp.controller)
 
     /** The first sync answers after [delayMs] of real time. Sleeps on the server thread, never on the test thread. */
     protected fun slowFirstSync(delayMs: Long) {
