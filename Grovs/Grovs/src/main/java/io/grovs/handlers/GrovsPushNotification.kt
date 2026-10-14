@@ -84,10 +84,12 @@ private fun channelFor(context: Context, metaData: Bundle?): String {
 
 /** The Grovs icon meta-data may be `android:resource` (an id) or `android:value` (a drawable name). */
 private fun smallIcon(context: Context, metaData: Bundle?): Int {
-    val grovsIcon = metaData?.getInt(GROVS_SMALL_ICON, 0)?.takeIf { it != 0 }
-        ?: metaData?.getString(GROVS_SMALL_ICON)
-            ?.let { context.resources.getIdentifier(it, "drawable", context.packageName) }
-            ?.takeIf { it != 0 }
+    @Suppress("DEPRECATION")
+    val grovsIcon = when (val icon = metaData?.get(GROVS_SMALL_ICON)) {
+        is Int -> icon
+        is String -> context.resources.getIdentifier(icon, "drawable", context.packageName)
+        else -> null
+    }?.takeIf { it != 0 }
     return grovsIcon
         ?: metaData?.getInt(FCM_DEFAULT_ICON, 0)?.takeIf { it != 0 }
         ?: R.drawable.ic_grovs_notification_default_small

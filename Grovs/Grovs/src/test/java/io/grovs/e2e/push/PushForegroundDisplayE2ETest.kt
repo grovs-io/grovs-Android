@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowLog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
@@ -125,6 +126,18 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
 
         assertNotEquals(0, drawableId("grovs_in_app_star"))
         assertEquals(drawableId("grovs_in_app_star"), posted().single().smallIcon.resId)
+    }
+
+    @Test
+    fun `P32 a Grovs small icon given as a name is read without a type warning`() {
+        setMetaData("io.grovs.NotificationIconSmall", "grovs_in_app_star")
+        authenticated()
+        ShadowLog.clear()
+        receive()
+
+        assertEquals(drawableId("grovs_in_app_star"), posted().single().smallIcon.resId)
+        val warnings = ShadowLog.getLogs().filter { it.tag == "Bundle" && it.msg.contains("io.grovs.NotificationIconSmall") }
+        assertTrue("type warnings: ${warnings.map { it.msg }}", warnings.isEmpty())
     }
 
     @Test
