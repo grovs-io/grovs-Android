@@ -20,7 +20,12 @@ internal class InAppQueuedStore(
     override fun write(text: String, record: InAppRecord): Boolean {
         try {
             executor.execute {
-                if (!files.write(text, record)) InAppLog.error("Could not save the in-app ${record.fileName}")
+                val saved = try {
+                    files.write(text, record)
+                } catch (e: Exception) {
+                    false
+                }
+                if (!saved) InAppLog.error("Could not save the in-app ${record.fileName}")
             }
         } catch (e: RejectedExecutionException) {
             return false

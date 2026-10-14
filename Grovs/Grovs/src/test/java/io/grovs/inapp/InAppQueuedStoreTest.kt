@@ -58,4 +58,31 @@ class InAppQueuedStoreTest {
         assertEquals("before", files.records[InAppRecord.STATE])
         assertEquals("before", store.read(InAppRecord.STATE))
     }
+    @Test
+    fun `a write that throws does not crash the app and later writes still land`() {
+        val crashes = mutableListOf<Throwable>()
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { _, e -> synchronized(crashes) { crashes.add(e) } }
+        try {
+            var throws = true
+            val failing = object : InAppStoring {
+                override fun read(record: InAppRecord): String? = files.read(record)
+                override fun write(text: String, record: InAppRecord): Boolean {
+                    if (throws) throw SecurityException("no access")
+                    return files.write(text, record)
+                }
+            }
+            val single = InAppQueuedStore.newExecutor()
+            val queued = InAppQueuedStore(failing, single)
+            assertTrue(queued.write("first", InAppRecord.STATE))
+            single.submit { throws = false }.get(5, TimeUnit.SECONDS)
+            assertTrue(queued.write("second", InAppRecord.STATE))
+            single.shutdown()
+            assertTrue(single.awaitTermination(5, TimeUnit.SECONDS))
+            assertEquals("second", files.records[InAppRecord.STATE])
+            assertEquals(emptyList<Throwable>(), synchronized(crashes) { crashes.toList() })
+        } finally {
+            Thread.setDefaultUncaughtExceptionHandler(previous)
+        }
+    }
 }
