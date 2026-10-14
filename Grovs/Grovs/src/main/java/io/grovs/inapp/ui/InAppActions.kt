@@ -88,7 +88,8 @@ internal class InAppActions(
         InAppActionType.REQUEST_PUSH_PERMISSION.wire.takeUnless { canRequestPushPermission() },
     )
 
-    fun requestPushPermission(done: (result: String) -> Unit) {
+    /** A page's own request (`openSettingsWhenDenied = false`) is only answered, as on iOS; a button may open the settings. */
+    fun requestPushPermission(openSettingsWhenDenied: Boolean = true, done: (result: String) -> Unit) {
         if (!canRequestPushPermission()) return done("unsupported")
         val host = activity()
         val askable = sdkInt >= 33 && !permissionGranted() && host != null &&
@@ -100,7 +101,7 @@ internal class InAppActions(
                 requestPermission(host!!) { granted -> done(if (granted && notificationsOn()) "granted" else "denied") }
             }
             else -> {
-                openNotificationSettings()
+                if (openSettingsWhenDenied) openNotificationSettings()
                 done("denied")
             }
         }
