@@ -1,0 +1,232 @@
+package io.grovs.e2e.inapp
+
+import android.content.Intent
+import android.graphics.Bitmap
+import android.os.Looper
+import android.view.View
+import androidx.appcompat.app.AlertDialog
+import com.google.gson.JsonObject
+import io.grovs.Grovs
+import io.grovs.e2e.E2ETestUtils
+import io.grovs.e2e.contract.ContractTestBase
+import io.grovs.e2e.contract.InAppBackend
+import io.grovs.inapp.InAppFileStore
+import io.grovs.inapp.InAppHash
+import io.grovs.inapp.InAppSynced
+import io.grovs.inapp.ui.InAppDialogPresenter
+import io.grovs.inapp.ui.InAppHtmlDocument
+import io.grovs.inapp.ui.InAppHtmlView
+import io.grovs.inapp.ui.InAppJavascriptChannel
+import io.grovs.inapp.ui.InAppWindow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import org.json.JSONObject
+import org.junit.Before
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.shadows.ShadowDialog
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * Drives the real in-app presenter against [InAppBackend]. The base campaign is "c1", shown by
+ * `Grovs.track("cart_viewed")`. Every test still fails when the SDK breaks the backend contract.
+ */
+internal abstract class InAppTestBase : ContractTestBase() {
+
+    protected val inApp = InAppBackend()
+    protected val recorder = InAppCallbackRecorder()
+
+    /** The key the SDK names its in-app folders by: test environment plus the configured api key. */
+    protected val storeKey = "test_test-api-key"
+
+    @Before
+    fun enableInApp() {
+        application.noBackupFilesDir.resolve("grovs/in_app").deleteRecursively()
+        application.cacheDir.resolve("grovs-in-app").deleteRecursively()
+        contract.inApp = inApp
+        Grovs.setInAppListener(recorder)
+    }
+
+    // Start and restart
+
+    /** Puts [campaigns] on the server, authenticates, resumes the launcher and waits until the first sync is stored. */
+    protected fun start(vararg campaigns: JsonObject) {
+        inApp.campaigns += campaigns
+        authenticated()
+        resumeHost()
+        awaitStoredSync("the first in-app sync to be stored")
+    }
+
+    /** [start]s with [campaign], tracks [event] and waits until it is on screen. */
+    protected fun showOne(campaign: JsonObject, event: String = "cart_viewed") {
+        start(campaign)
+        Grovs.track(event)
+        pumpUntil("the message to show") { recorder.shown.size == 1 }
+    }
+
+    /** Taps the close button and waits for the dismissal callback. */
+    protected fun closeShown() {
+        val dismissed = recorder.dismissed.size
+        tapClose()
+        pumpUntil("the message to close") { recorder.dismissed.size > dismissed }
+    }
+
+    /**
+     * Home button, then long enough on the main looper for ProcessLifecycleOwner to report the stop
+     * (it waits 700 ms to rule out a configuration change). [background] alone is not yet a background.
+     */
+    protected fun backgroundApp() {
+        background()
+        idleFor(1_000)
+    }
+
+    /** The app goes to the background and comes back with a fresh launcher; waits for the sync that follows. */
+    protected fun reopen() {
+        val syncs = inApp.syncBodies.size
+        backgroundApp()
+        foreground(Intent())
+        resumeHost()
+        pumpUntil("a sync after reopening") { inApp.syncBodies.size > syncs }
+    }
+
+    /**
+     * Cold start: the app goes to the background, the process dies, the SDK is configured again with the same listener and the
+     * launcher comes back. Stored files survive. Waits for the sync that follows, whatever its answer.
+     */
+    protected fun restart() {
+        val syncs = inApp.syncBodies.size
+        backgroundApp()
+        simulateProcessDeath()
+        Grovs.setInAppListener(recorder)
+        configure()
+        foreground(Intent())
+        resumeHost()
+        pumpUntil("a sync after restarting") { inApp.syncBodies.size > syncs }
+    }
+
+    /** The first sync answers after [delayMs] of real time. Sleeps on the server thread, never on the test thread. */
+    protected fun slowFirstSync(delayMs: Long) {
+        val first = AtomicBoolean(true)
+        backend.answer("in_app/sync") { seen ->
+            if (first.getAndSet(false)) Thread.sleep(delayMs)
+            inApp.syncAnswer(InAppBackend.parse(seen.body.ifBlank { "{}" }))
+        }
+    }
+
+    // InAppSynced is the stored sync; store writes run on the SDK's own executor, so it is the only completion signal.
+    protected fun awaitStoredSync(description: String = "a stored in-app sync") {
+        pumpUntil(description) { InAppSynced.load(store()) != null }
+        pump()
+    }
+
+    // Store
+
+    protected fun store() = InAppFileStore(application.noBackupFilesDir, storeKey)
+
+    /** The folder the SDK keeps its in-app state in; seeding or damaging it fakes an old run. */
+    protected fun storeFolder() = File(application.noBackupFilesDir, "grovs/in_app/${InAppHash.short(storeKey)}")
+
+    /** The files the in-app store holds right now. */
+    protected fun storeFiles(): List<File> = storeFolder().listFiles()?.filter { it.isFile }?.sortedBy { it.name }.orEmpty()
+
+    // Native messages
+
+    // The presenter has no public handle; the private field is the only way to reach the drawn views.
+    protected fun presenter(): InAppDialogPresenter =
+        Grovs::class.java.getDeclaredField("inAppPresenter").apply { isAccessible = true }
+            .get(E2ETestUtils.getGrovsInstance()) as InAppDialogPresenter
+
+    /** The campaign id of the last message shown. */
+    protected fun shownId(): String? = recorder.shown.lastOrNull()
+
+    protected fun window(): InAppWindow = presenter().shownWindow ?: error("no native message on screen")
+    protected fun root(): View = window().dialog.window!!.decorView
+    protected fun <T : View> view(id: Int): T = root().findViewById<T>(id) ?: error("view $id not found")
+    protected fun tapTag(tag: String) { (root().findViewWithTag<View>(tag) ?: error("no view tagged $tag")).performClick(); pump() }
+    protected fun tapButton(id: String) = tapTag("grovs-in-app-button-$id")
+    /** A star ("1".."5") or a choice option id. */
+    protected fun tapAnswer(id: String) = tapTag("grovs-in-app-answer-$id")
+    protected fun tapClose() { view<View>(io.grovs.R.id.grovs_in_app_close).performClick(); pump() }
+    protected fun pressBack() { window().dialog.onBackPressedDispatcher.onBackPressed(); pump() }
+    /** The alert template's dialog. */
+    protected fun alert(): AlertDialog = ShadowDialog.getLatestDialog() as AlertDialog
+
+    // HTML messages
+
+    protected fun page(): InAppHtmlView = presenter().shownPage ?: error("no html page on screen")
+
+    // The page's bridge channel and per-show token are the only way to speak as the page without a real WebView.
+    protected fun fromPage(type: String, args: String = "{}", id: String = "1") {
+        val page = page()
+        val channel = shadowOf(page.webView!!).getJavascriptInterface(InAppHtmlDocument.CHANNEL) as InAppJavascriptChannel
+        channel.postMessage("""{"v":1,"token":"${page.session.token}","id":"$id","type":"$type","args":$args}""")
+        pump()
+    }
+
+    /** The last script the SDK ran in the page. */
+    protected fun lastToPage(): String? = shadowOf(page().webView!!).lastEvaluatedJavascript
+
+    /** The page says it is ready and how tall it is, which puts it on screen. */
+    protected fun showPage(height: Int = 80) {
+        fromPage("ready", """{"missing":false}""", "r")
+        fromPage("height", """{"value":$height}""", "h")
+    }
+
+    // Main looper time (the SDK's in-app timers)
+
+    protected fun idleFor(ms: Long) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms)); pump() }
+
+    /** Moves main looper time in 100 ms steps until [condition] holds, failing after [maxMs]. */
+    protected fun idleUntil(description: String, maxMs: Long, condition: () -> Boolean) {
+        var waited = 0L
+        while (!condition() && waited < maxMs) { idleFor(100); waited += 100 }
+        if (!condition()) throw AssertionError("timed out waiting for $description")
+    }
+
+    // Reported events
+
+    /** Every event with this name the backend received so far, without flushing. */
+    protected fun sent(name: String): List<JSONObject> = contract.batchEvents().filter { it.optString("event_name") == name }
+
+    /** Flushes queued events and returns every sent event with this name. For negative checks, after a positive control. */
+    protected fun reported(name: String): List<JSONObject> {
+        flushEvents()
+        return sent(name)
+    }
+
+    /** Flushes until at least [count] events with this name reached the backend, then returns all of them. */
+    protected fun reportedWhen(name: String, count: Int = 1, timeoutMs: Long = 5_000): List<JSONObject> {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (sent(name).size < count) {
+            if (System.currentTimeMillis() > deadline) {
+                throw AssertionError("timed out waiting for $count $name, sent: ${contract.batchEvents().map { it.optString("event_name") }}")
+            }
+            flushEvents()
+        }
+        return sent(name)
+    }
+
+    /** Sends the queued events now and waits for the request to finish. */
+    protected fun flushEvents() {
+        E2ETestUtils.awaitEventsReleased()
+        val flush = CoroutineScope(driver + SupervisorJob()).launch { manager().flushCustomEvents() }
+        pumpUntil("the event flush") { flush.isCompleted }
+        pump()
+    }
+
+    // Clock and images
+
+    // The sync answer's server_time is how the SDK corrects its clock.
+    /** The server clock runs [ms] ahead, which moves the SDK's corrected "now" at the next sync. */
+    protected fun serverAhead(ms: Long) { inApp.serverNowMs = { System.currentTimeMillis() + ms } }
+
+    // Image downloads need https, which MockWebServer cannot serve here; a cached file counts as ready.
+    protected fun seedImage(url: String) {
+        val dir = File(application.cacheDir, "grovs-in-app/${InAppHash.short(storeKey)}").apply { mkdirs() }
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(dir, InAppHash.sha256Hex(url)).writeBytes(png.toByteArray())
+    }
+}

@@ -39,6 +39,7 @@ abstract class DrivenBackendTestBase {
 
     private var host: ActivityController<TestActivity>? = null
     private var hostStarted = false
+    private var hostResumed = false
 
     @Before
     fun setUpHarness() {
@@ -125,6 +126,7 @@ abstract class DrivenBackendTestBase {
      */
     protected fun foreground(intent: Intent? = null) {
         if (hostStarted) {
+            pauseHost()
             host?.stop()
             pump()
             hostStarted = false
@@ -144,9 +146,33 @@ abstract class DrivenBackendTestBase {
     /** The started launcher, for tests that re-deliver its own intent. */
     protected fun launcher(): TestActivity = host!!.get()
 
-    /** Home button: the started-activity count drops to zero, so the SDK sees a background. */
+    /** The launcher's controller, for configuration changes. Use [resumeHost] and [background] to move its lifecycle. */
+    protected fun hostController(): ActivityController<TestActivity> = host!!
+
+    /** Resumes the started launcher, as a visible app is. [background] and [foreground] pause it first. */
+    protected fun resumeHost() {
+        check(hostStarted) { "start the launcher with foreground() first" }
+        if (!hostResumed) {
+            host?.resume()
+            hostResumed = true
+        }
+        pump()
+    }
+
+    private fun pauseHost() {
+        if (hostResumed) {
+            host?.pause()
+            hostResumed = false
+        }
+    }
+
+    /**
+     * Home button: the started-activity count drops to zero, so the SDK sees a background. With
+     * another activity started on top, it only pauses and stops the launcher.
+     */
     protected fun background() {
         if (hostStarted) {
+            pauseHost()
             host?.stop()
             hostStarted = false
         }

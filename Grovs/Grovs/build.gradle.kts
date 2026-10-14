@@ -380,6 +380,7 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.mockwebserver)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.json.schema.validator)
     androidTestImplementation(libs.mockk.android)
     androidTestImplementation(libs.coroutines.test)
     androidTestImplementation(libs.androidx.test.core.ktx)

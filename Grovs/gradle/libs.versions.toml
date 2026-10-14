@@ -31,6 +31,7 @@ androidxTestRules = "1.5.0"
 androidxTestRunner = "1.5.2"
 fragmentTesting = "1.6.2"
 playReview = "2.0.2"
+jsonSchemaValidator = "1.0.87"
 
 [libraries]
 androidx-constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
@@ -78,6 +79,7 @@ androidx-test-rules = { group = "androidx.test", name = "rules", version.ref = "
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 fragment-testing = { group = "androidx.fragment", name = "fragment-testing", version.ref = "fragmentTesting" }
 play-review-ktx = { group = "com.google.android.play", name = "review-ktx", version.ref = "playReview" }
+json-schema-validator = { group = "com.networknt", name = "json-schema-validator", version.ref = "jsonSchemaValidator" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
