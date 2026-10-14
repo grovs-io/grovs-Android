@@ -135,30 +135,50 @@ class InAppHtmlDeviceTest {
         return last
     }
 
-    private fun tapScreen(x: Float, y: Float) {
+    /**
+     * The system refuses a tap that would land on another app's window. A system window over ours (the
+     * notification shade, a "not responding" dialog) is closed once, and the point is read again since closing
+     * it can move the page; a window that stays is named in the failure.
+     */
+    private fun tapScreen(point: () -> Pair<Float, Float>) {
+        if (inject(onMain(point))) return
+        shell("am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS")
+        Thread.sleep(1_000)
+        val (x, y) = onMain(point)
+        if (!inject(x to y)) throw AssertionError("the tap at $x,$y would reach another app's window: ${windowsAboveOurs()}")
+    }
+
+    private fun inject(point: Pair<Float, Float>): Boolean {
+        val (x, y) = point
         val down = SystemClock.uptimeMillis()
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
-        instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 50, MotionEvent.ACTION_UP, x, y, 0))
+        return try {
+            instrumentation.sendPointerSync(MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0))
+            instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 50, MotionEvent.ACTION_UP, x, y, 0))
+            true
+        } catch (e: IllegalArgumentException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
-    private fun tapPage(view: InAppHtmlView, xDp: Float, yDp: Float) {
-        val (x, y) = onMain {
-            val web = view.webView!!
-            val at = IntArray(2)
-            web.getLocationOnScreen(at)
-            val density = web.resources.displayMetrics.density
-            (at[0] + xDp * density) to (at[1] + yDp * density)
-        }
-        tapScreen(x, y)
+    private fun windowsAboveOurs(): List<String> = shell("dumpsys window windows").split("  Window #").drop(1)
+        .takeWhile { "package=${context.packageName} " !in it }
+        .filter { "isOnScreen=true" in it }
+        .map { it.substringAfter(" u0 ").substringBefore("}") }
+
+    private fun tapPage(view: InAppHtmlView, xDp: Float, yDp: Float) = tapScreen {
+        val web = view.webView!!
+        val at = IntArray(2)
+        web.getLocationOnScreen(at)
+        val density = web.resources.displayMetrics.density
+        (at[0] + xDp * density) to (at[1] + yDp * density)
     }
 
-    private fun tapView(target: View) {
-        val (x, y) = onMain {
-            val at = IntArray(2)
-            target.getLocationOnScreen(at)
-            (at[0] + target.width / 2f) to (at[1] + target.height / 2f)
-        }
-        tapScreen(x, y)
+    private fun tapView(target: View) = tapScreen {
+        val at = IntArray(2)
+        target.getLocationOnScreen(at)
+        (at[0] + target.width / 2f) to (at[1] + target.height / 2f)
     }
 
     private fun noOutcomeFor(millis: Long) = assertNull(outcomes.poll(millis, TimeUnit.MILLISECONDS))
