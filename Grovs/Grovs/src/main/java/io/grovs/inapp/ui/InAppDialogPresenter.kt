@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.res.Configuration
+import android.webkit.WebView
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.core.view.WindowCompat
@@ -31,6 +32,7 @@ internal class InAppDialogPresenter(
     private val activity: () -> Activity?,
     private val images: InAppImages,
     private val actions: InAppActions,
+    private val makeWebView: (Context) -> WebView = { WebView(it) },
 ) : InAppActivityCallbacks(), InAppPresenter, ComponentCallbacks {
     /** Called when something the controller does not see ends, so what waits may show. */
     var onIdle: () -> Unit = {}
@@ -41,9 +43,14 @@ internal class InAppDialogPresenter(
     private var host: WeakReference<Activity>? = null
     /** The shown window raised the keyboard for its comment box. */
     private var typing = false
+    private var page: InAppHtmlView? = null
+    private var pageWindow: InAppWindow? = null
+    private var pageHost: WeakReference<Activity>? = null
 
     internal val shownSession: InAppMessageSession? get() = session
     internal val shownWindow: InAppWindow? get() = window
+    internal val shownPage: InAppHtmlView? get() = page
+    internal val shownPageWindow: InAppWindow? get() = pageWindow
 
     fun register(application: Application) {
         application.registerActivityLifecycleCallbacks(this)
@@ -58,8 +65,8 @@ internal class InAppDialogPresenter(
     override fun present(presentation: InAppPresentation, completion: (InAppOutcome) -> Unit): Boolean {
         dismiss()
         // The dismissal's report may already have shown something else.
-        if (session != null) return false
-        if (presentation.campaign.template == InAppTemplate.HTML) return false
+        if (session != null || page != null) return false
+        if (presentation.campaign.template == InAppTemplate.HTML) return presentPage(presentation, completion)
         val target = activity() ?: return false
         if (!fits(presentation.campaign.content.orientation, target.resources.configuration)) return false
         val next = InAppMessageSession(presentation) { outcome -> finish(presentation, outcome, completion) }
@@ -73,6 +80,7 @@ internal class InAppDialogPresenter(
 
     override fun dismiss() {
         session?.leave("app")
+        page?.leave("app")
     }
 
     /** Closes the window, reports, and only then does what the outcome asks for. */
@@ -179,6 +187,7 @@ internal class InAppDialogPresenter(
     }
 
     override fun onActivityResumed(activity: Activity) {
+        page?.let { return resumePage(activity, it) }
         val current = session ?: return
         if (host?.get() === activity && (window != null || alert != null)) return
         detach()
@@ -188,17 +197,74 @@ internal class InAppDialogPresenter(
 
     override fun onActivityStopped(activity: Activity) {
         if (host?.get() === activity) detach()
+        if (pageHost?.get() === activity) detachPage()
     }
 
     override fun onActivityDestroyed(activity: Activity) {
         if (host?.get() === activity) detach()
+        if (pageHost?.get() === activity) detachPage()
     }
 
     /** A message held to one orientation closes when the device turns away; the device is never turned for it. */
     override fun onConfigurationChanged(newConfig: Configuration) {
+        page?.let {
+            if (pageHost != null && !fits(it.orientation, newConfig)) it.leave("orientation")
+            return
+        }
         val current = session ?: return
         if (host == null) return
         if (!fits(current.campaign.content.orientation, newConfig)) current.leave("orientation")
+    }
+
+    // html: one page in its own window, following the Activity like the native session.
+
+    private fun presentPage(presentation: InAppPresentation, completion: (InAppOutcome) -> Unit): Boolean {
+        val target = activity() ?: return false
+        if (!fits(presentation.campaign.content.orientation, target.resources.configuration)) return false
+        val next = InAppHtmlView(presentation, actions, finish = { outcome -> finishPage(presentation, outcome, completion) }, makeWebView = makeWebView)
+        page = next
+        if (!attachPage(target, next)) {
+            page = null
+            next.discard()
+            return false
+        }
+        return true
+    }
+
+    private fun attachPage(target: Activity, current: InAppHtmlView): Boolean {
+        if (target.isFinishing || target.isDestroyed) return false
+        val shown = InAppWindow(target, current.attach(target), current.edge, onBack = current::onBack, onInsets = current::applyInsets)
+        if (!shown.show(current.lightStatusIcons)) {
+            current.detach()
+            return false
+        }
+        current.bind(shown)
+        pageWindow = shown
+        pageHost = WeakReference(target)
+        return true
+    }
+
+    /** Drops the page's window without an outcome; the page and its WebView wait for the next Activity. */
+    private fun detachPage() {
+        page?.detach()
+        pageWindow?.close()
+        pageWindow = null
+        pageHost = null
+    }
+
+    private fun resumePage(activity: Activity, current: InAppHtmlView) {
+        if (pageHost?.get() === activity && pageWindow != null) return
+        detachPage()
+        if (!fits(current.orientation, activity.resources.configuration)) return current.leave("orientation")
+        attachPage(activity, current)
+    }
+
+    /** Closes the window, reports, and only then does what the page asked for. */
+    private fun finishPage(presentation: InAppPresentation, outcome: InAppOutcome, completion: (InAppOutcome) -> Unit) {
+        detachPage()
+        page = null
+        completion(outcome)
+        if (outcome is InAppOutcome.Clicked) perform(outcome.action, presentation)
     }
 
     @Deprecated("Deprecated in Java")

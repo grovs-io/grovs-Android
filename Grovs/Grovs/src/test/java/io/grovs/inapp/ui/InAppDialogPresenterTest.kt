@@ -94,8 +94,11 @@ class InAppDialogPresenterTest {
     }
 
     @Test
-    fun anHtmlCampaignIsNotDrawnHere() {
-        assertFalse(present("""{"template":"html","content":{"html":"<p>Hi</p>","layout":"modal"}}"""))
+    fun anHtmlCampaignIsDrawnByThePageNotTheCard() {
+        assertTrue(present("""{"template":"html","content":{"html":"<p>Hi</p>","layout":"modal"}}"""))
+        assertNotNull(presenter.shownPage)
+        assertNull(presenter.shownWindow)
+        assertNull(presenter.shownSession)
     }
 
     @Test
