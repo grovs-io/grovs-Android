@@ -105,7 +105,7 @@ android {
 
     buildFeatures {
         buildConfig = true
-        viewBinding = true
+        viewBinding = false
     }
 
     compileOptions {
@@ -339,7 +339,6 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
-    implementation(libs.material)
 
     implementation(libs.retrofit)
     implementation(libs.gson)
@@ -351,12 +350,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.livedata.core.ktx)
 
-    implementation(libs.androidx.constraintlayout)
-
     //noinspection GradleDynamicVersion
     implementation(libs.installreferrer)
-    implementation(libs.androidx.navigation.fragment.ktx)
-    implementation(libs.androidx.navigation.ui.ktx)
+    implementation(libs.androidx.navigation.runtime.ktx)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.androidx.webkit)
 
@@ -378,6 +374,8 @@ dependencies {
     testImplementation("androidx.navigation:navigation-compose:2.8.3")
     testImplementation("androidx.navigation:navigation-testing:2.8.3")
     testImplementation("androidx.viewpager2:viewpager2:1.1.0")
+    testImplementation(libs.material)
+    testImplementation(libs.androidx.navigation.fragment.ktx)
     
     // Instrumented test dependencies
     androidTestImplementation(libs.androidx.junit)
