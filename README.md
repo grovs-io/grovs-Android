@@ -33,7 +33,7 @@ The Grovs Android SDK provides deep linking, app links, link generation, in-app 
 
 - **Deep linking & app links**: route users to the right in-app screen, even after install
 - **Smart link generation**: create trackable links with metadata, custom redirects, and UTM parameters
-- **In-app messaging**: display messages and announcements from the Grovs dashboard
+- **In-app messages**: show dashboard campaigns inside the app on app open, a screen view or a custom event, with targeting, limits, schedules, questions and custom HTML
 - **Push notifications**: receive push notifications for dashboard-sent messages via Firebase Cloud Messaging
 - **Analytics**: track custom events, automatic and manual screen views, and Jetpack Navigation destinations
 - **Revenue tracking**: log Google Play Billing and custom purchases with automatic attribution
@@ -511,6 +511,71 @@ On Android 8 and later a custom campaign sound plays only if that channel has th
 
 > Push notifications require a physical device or an emulator with Google Play Services.
 
+### In-app messages
+
+In-app campaigns are built and launched in the Grovs dashboard. The SDK syncs them, decides when each one shows (its trigger, conditions, limits and schedule), draws it over the current screen and reports views, taps and answers. You do not need any code for this.
+
+Optional hooks:
+
+```kotlin
+Grovs.setInAppListener(object : GrovsInAppListener {
+    override fun shouldShowInAppMessage(campaignId: String): Boolean = !isCheckoutOpen
+
+    override fun onInAppMessageShown(campaignId: String) {}
+
+    // buttonId is null for a tap on the message; payload is set only for key_value actions.
+    override fun onInAppMessageClicked(campaignId: String, buttonId: String?, payload: Map<String, Any?>?) {}
+
+    // reason: close_button, backdrop, swipe, app or orientation.
+    override fun onInAppMessageDismissed(campaignId: String, reason: String) {}
+
+    // value is an Int for stars, the option id for a choice. Called instead of the dismissal.
+    override fun onInAppMessageAnswered(campaignId: String, value: Any, comment: String?) {}
+
+    // The message could not be drawn (no visible activity). It is tried again at its next trigger.
+    override fun onInAppMessageFailed(campaignId: String, message: String) {}
+})
+```
+
+Every method has a default, so override only what you need. Callbacks arrive on the main thread. The SDK holds the listener strongly; call `Grovs.setInAppListener(null)` to release it.
+
+From Java, extend `GrovsInAppListenerAdapter`:
+
+```java
+Grovs.Companion.setInAppListener(new GrovsInAppListenerAdapter() {
+    @Override
+    public void onInAppMessageShown(@NonNull String campaignId) {
+        Log.d("Grovs", "Shown " + campaignId);
+    }
+});
+```
+
+Control when messages may appear:
+
+```kotlin
+Grovs.pauseInAppMessages()                         // nothing new shows; a waiting message is kept
+Grovs.resumeInAppMessages()                        // shows the waiting message if it still qualifies
+Grovs.discardInAppMessages(dismissCurrent = true)  // drops waiting messages, stays paused
+Grovs.setInAppExcludedScreens(listOf("CheckoutActivity", "PaymentFragment"))
+Grovs.setInAppDebugLogging(true)                   // logs why each campaign was skipped
+```
+
+`discardInAppMessages()` can also be called with no argument from Kotlin or Java; `dismissCurrent` defaults to `false`. These settings can be called before `configure`. Excluded screens use the same names as screen views, compared without case. A message waits until the user leaves an excluded screen. Debug logging writes at INFO, so also call `Grovs.setDebug(LogLevel.INFO)`.
+
+**Optional: app ratings.** Star questions and the "Rate the app" action use Google Play In-App Review. Add it to your app to enable them:
+
+```groovy
+implementation("com.google.android.play:review-ktx:2.0.2")
+```
+
+Without it, campaigns with a "Rate the app" action are skipped and the review step after a high star rating is left out. Play shows the review dialog only for apps installed from Play, and at most a few times per user.
+
+**Push permission button.** The SDK does not declare `POST_NOTIFICATIONS`; that is left to your app. On Android 13 and later, campaigns with an "Ask for push permission" button are not supported unless your app declares it:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
 ### Display messages
 
 ```kotlin
@@ -597,6 +662,11 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 | `GrovsMessaging.handleMessage(context, message)` | Handle a push from your own messaging service. Returns `true` if it was a Grovs push |
 | `GrovsMessaging.onNewToken(token)` | Pass a refreshed FCM token to Grovs from your own messaging service |
 | `GrovsMessaging.showForegroundNotifications` | Set to `false` to stop the SDK showing pushes while the app is open (default `true`) |
+| `setInAppListener(listener)` | Get in-app message callbacks (`GrovsInAppListener`; Java: `GrovsInAppListenerAdapter`) |
+| `pauseInAppMessages()` / `resumeInAppMessages()` | Hold in-app messages and let them show again |
+| `discardInAppMessages(dismissCurrent)` | Drop waiting in-app messages, optionally closing the one on screen |
+| `setInAppExcludedScreens(screens)` | Screens where in-app messages never appear |
+| `setInAppDebugLogging(enabled)` | Log why each in-app campaign was or was not shown |
 | `setOnAutomaticNotificationsListener(listener)` | Get notified when an automatically displayed message closes |
 | `numberOfUnreadMessages(...)` | Get unread message count (callback or coroutine) |
 | `logInAppPurchase(originalJson)` | Log a Google Play Billing purchase |

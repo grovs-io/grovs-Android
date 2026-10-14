@@ -5,7 +5,9 @@ import io.grovs.handlers.GrovsContext
 import io.grovs.settings.GrovsSettings
 import kotlinx.coroutines.CoroutineDispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PublicApiCompatibilityTest {
@@ -133,5 +135,31 @@ class PublicApiCompatibilityTest {
                 remoteMessage,
             )
         )
+    }
+
+    @Test
+    fun `in-app message api is present`() {
+        val companion = Grovs.Companion.javaClass
+        val listener = GrovsInAppListener::class.java
+        assertNotNull(companion.getDeclaredMethod("setInAppListener", listener))
+        assertNotNull(companion.getDeclaredMethod("pauseInAppMessages"))
+        assertNotNull(companion.getDeclaredMethod("resumeInAppMessages"))
+        assertNotNull(companion.getDeclaredMethod("discardInAppMessages"))
+        assertNotNull(companion.getDeclaredMethod("discardInAppMessages", booleanType))
+        assertNotNull(companion.getDeclaredMethod("setInAppExcludedScreens", List::class.java))
+        assertNotNull(companion.getDeclaredMethod("setInAppDebugLogging", booleanType))
+
+        assertNotNull(listener.getDeclaredMethod("shouldShowInAppMessage", String::class.java))
+        assertNotNull(listener.getDeclaredMethod("onInAppMessageShown", String::class.java))
+        assertNotNull(listener.getDeclaredMethod("onInAppMessageClicked", String::class.java, String::class.java, Map::class.java))
+        assertNotNull(listener.getDeclaredMethod("onInAppMessageDismissed", String::class.java, String::class.java))
+        assertNotNull(listener.getDeclaredMethod("onInAppMessageAnswered", String::class.java, Any::class.java, String::class.java))
+        assertNotNull(listener.getDeclaredMethod("onInAppMessageFailed", String::class.java, String::class.java))
+
+        // Java apps extend the adapter, since JVM 1.8 interface defaults are not Java defaults.
+        val adapter = GrovsInAppListenerAdapter::class.java
+        assertTrue(listener.isAssignableFrom(adapter))
+        assertFalse(java.lang.reflect.Modifier.isFinal(adapter.modifiers))
+        assertNotNull(adapter.getConstructor())
     }
 }
