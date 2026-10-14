@@ -10,7 +10,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -44,10 +43,20 @@ internal class PushParsingE2ETest : ContractTestBase() {
         assertEquals(0, pushOpens())
     }
 
-    @Ignore("F-1: a whitespace-only grovs_campaign_id is treated as a Grovs push")
     @Test
     fun `P1 a whitespace-only grovs_campaign_id is not a Grovs push`() {
         assertFalse(Grovs.isGrovsNotification(PushPayloads.data(campaign = "   ")))
+    }
+
+    @Test
+    fun `P1 a tap with a whitespace-only grovs_campaign_id reports no open`() {
+        tapAfterAuth(tapIntent(PushPayloads.data(campaign = "   "), messageId = "0:blank"))
+        assertEquals(0, pushOpens())
+
+        foreground(tapIntent(messageId = "0:normal"))
+        pumpUntil("the normal open") { pushOpens() >= 1 }
+        assertEquals(1, pushOpens())
+        assertEquals(PushPayloads.CAMPAIGN, contract.bodies("push_open").single().getString("campaign_id"))
     }
 
     @Test

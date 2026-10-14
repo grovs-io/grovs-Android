@@ -34,7 +34,7 @@ internal data class GrovsPushPayload(
         private val FCM_KEYS = setOf("from", "collapse_key", "message_type")
 
         fun from(data: Map<String, String>, messageId: String?): GrovsPushPayload? {
-            val campaignId = data[CAMPAIGN_ID]?.takeIf { it.isNotEmpty() } ?: return null
+            val campaignId = data[CAMPAIGN_ID]?.takeIf { it.isNotBlank() } ?: return null
             val campaignData = data.filterKeys { !isTransportKey(it) }
             return GrovsPushPayload(
                 campaignId = campaignId,
