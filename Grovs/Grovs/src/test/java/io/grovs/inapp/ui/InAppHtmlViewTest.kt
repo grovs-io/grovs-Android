@@ -13,13 +13,17 @@ import android.view.ViewGroup
 import android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
 import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
 import android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+import android.webkit.CookieManager
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.google.gson.JsonObject
 import io.grovs.R
 import io.grovs.inapp.FakeTimer
@@ -42,6 +46,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.fakes.RoboWebSettings
 
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28, 34])
@@ -122,7 +127,8 @@ class InAppHtmlViewTest {
 
     @Test
     fun theWebViewKeepsNothingAndOpensNoWindows() {
-        val settings = present().view.webView!!.settings
+        val web = present().view.webView!!
+        val settings = web.settings
         assertTrue(settings.javaScriptEnabled)
         assertFalse(settings.domStorageEnabled)
         assertFalse(settings.allowFileAccess)
@@ -130,6 +136,10 @@ class InAppHtmlViewTest {
         assertFalse(settings.javaScriptCanOpenWindowsAutomatically)
         assertFalse(settings.supportMultipleWindows())
         assertTrue(settings.mediaPlaybackRequiresUserGesture)
+        assertEquals(WebSettings.MIXED_CONTENT_NEVER_ALLOW, settings.mixedContentMode)
+        assertTrue(settings.useWideViewPort)
+        assertFalse((settings as RoboWebSettings).geolocationEnabled)
+        assertFalse(CookieManager.getInstance().acceptThirdPartyCookies(web))
     }
 
     @Test
@@ -312,7 +322,7 @@ class InAppHtmlViewTest {
     @Test
     fun aWebViewThatCannotBeCreatedEndsUnshown() {
         val shown = present(makeWebView = { throw IllegalStateException("WebView is updating") })
-        assertNotNull(shown.view.root)
+        assertTrue("it was still drawn, so the presenter got content", shown.window.dialog.isShowing)
         assertNull(shown.view.webView)
         assertEquals(InAppOutcome.Unshown("app"), outcomes.single())
     }
@@ -369,6 +379,9 @@ class InAppHtmlViewTest {
         shown.view.leave("app")
         assertTrue(client.onRenderProcessGone(web, mockk<RenderProcessGoneDetail>(relaxed = true)))
         assertEquals(InAppOutcome.Unshown("app"), outcomes.single())
+        assertTrue("destroyed at once", shadowOf(web).wasDestroyCalled())
+        idle()
+        assertNotNull("never touched again", shadowOf(web).getJavascriptInterface(InAppHtmlDocument.CHANNEL))
     }
 
     @Test
@@ -401,6 +414,81 @@ class InAppHtmlViewTest {
         assertNull(client.shouldInterceptRequest(web, request("https://embed.example/x", mainFrame = false)))
         assertNull(client.shouldInterceptRequest(web, request("data:text/html,x", mainFrame = true)))
         assertTrue(outcomes.isEmpty())
+    }
+
+    @Test
+    fun aModalStaysAboveTheKeyboardAndGrowsBackWhenItCloses() {
+        val shown = present()
+        show(shown.view)
+        val web = shown.view.webView!!
+        val root = shown.view.root!!
+        val safe = Insets.of(0, 24, 0, 0)
+        post(shown.view, "height", obj("value" to 5000))
+        shown.view.applyInsets(safe, 200)
+        idle()
+        val height = if (root.height > 0) root.height else activity.resources.displayMetrics.heightPixels
+        val withKeyboard = web.layoutParams.height
+        assertTrue("$withKeyboard fits in ${height - root.paddingTop - root.paddingBottom}",
+            withKeyboard <= height - root.paddingTop - root.paddingBottom)
+        shown.view.applyInsets(safe, 0)
+        idle()
+        assertTrue("grows back", web.layoutParams.height > withKeyboard)
+    }
+
+    @Test
+    fun aBannerIsAtMost45PercentOnAShortScreen() {
+        val shown = present("banner_top")
+        show(shown.view)
+        post(shown.view, "height", obj("value" to 5000))
+        assertEquals(safeHeight() * 0.45f, shown.view.webView!!.layoutParams.height.toFloat(), 2f)
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h800dp")
+    fun aBannerIsAtMost30PercentOnATallScreen() {
+        val shown = present("banner_bottom")
+        show(shown.view)
+        post(shown.view, "height", obj("value" to 5000))
+        assertEquals(safeHeight() * 0.3f, shown.view.webView!!.layoutParams.height.toFloat(), 2f)
+    }
+
+    private fun safeHeight(): Float {
+        val decor = activity.window.decorView
+        val height = if (decor.height > 0) decor.height else activity.resources.displayMetrics.heightPixels
+        val bars = ViewCompat.getRootWindowInsets(decor)
+            ?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        return (height - (bars?.top ?: 0) - (bars?.bottom ?: 0)).toFloat()
+    }
+
+    @Test
+    fun aSecondMainFramePageStartIsStopped() {
+        var stops = 0
+        val shown = present(makeWebView = { context ->
+            object : WebView(context) {
+                override fun stopLoading() {
+                    stops++
+                    super.stopLoading()
+                }
+            }
+        })
+        val web = shown.view.webView!!
+        val client = shadowOf(web).webViewClient
+        client.onPageStarted(web, "about:blank", null)
+        assertEquals("the page's own load runs", 0, stops)
+        client.onPageStarted(web, "https://a.example", null)
+        assertEquals(1, stops)
+        assertTrue(outcomes.isEmpty())
+    }
+
+    @Test
+    fun aFinishedMessageMakesNoNewWebViewAndKeepsNoActivity() {
+        var made = 0
+        val shown = present(makeWebView = { made++; WebView(it) })
+        shown.view.leave("app")
+        assertNull(shown.view.root)
+        shown.view.attach(activity)
+        assertEquals(1, made)
+        assertNull(shown.view.webView)
     }
 
     @Test

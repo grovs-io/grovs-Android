@@ -61,6 +61,7 @@ internal class InAppHtmlView(
     private val makeWebView: (Context) -> WebView = { WebView(it) },
 ) {
     companion object {
+        private const val MODAL_MARGIN_DP = 16f
         private const val PAGE_BACKGROUND = "(function(){var s=function(e){return e?getComputedStyle(e).backgroundColor:'';};" +
             "var b=s(document.body);return !b||/^rgba\\(.*,\\s*0\\)$/.test(b)?s(document.documentElement):b;})()"
     }
@@ -74,6 +75,7 @@ internal class InAppHtmlView(
     private val main = Handler(Looper.getMainLooper())
     private var removeTransport: (() -> Unit)? = null
     private var rendererGone = false
+    private var retiring: WebView? = null
     private var activity: Activity? = null
     private var window: InAppWindow? = null
     private var card: InAppHtmlCard? = null
@@ -81,6 +83,8 @@ internal class InAppHtmlView(
     private var pageColor: Int? = null
     private var contentHeightDp = 0f
     private var availableDp = 0f
+    private var safeBottom = 0
+    private var imeBottom = 0
     // A banner leaves the app its keyboard until the person touches the page.
     private var focusable = !layout.isBanner
 
@@ -133,7 +137,7 @@ internal class InAppHtmlView(
         }
         if (layout != InAppLayout.FULL) card.elevation = dp(10f).toFloat()
 
-        val web = webView ?: createWebView(activity)
+        val web = webView ?: if (session.isFinished) null else createWebView(activity)
         if (web != null) {
             (web.parent as? ViewGroup)?.removeView(web)
             (web.context as? MutableContextWrapper)?.baseContext = activity
@@ -183,8 +187,10 @@ internal class InAppHtmlView(
     fun applyInsets(safe: Insets, imeBottom: Int) {
         val root = root ?: return
         val card = card ?: return
+        safeBottom = safe.bottom
+        this.imeBottom = imeBottom
         val bottom = maxOf(safe.bottom, imeBottom)
-        val margin = dp(16f)
+        val margin = dp(MODAL_MARGIN_DP)
         when (layout) {
             InAppLayout.FULL -> (card.layoutParams as FrameLayout.LayoutParams).setMargins(safe.left, safe.top, safe.right, bottom)
             InAppLayout.MODAL -> root.setPadding(safe.left + margin, safe.top + margin, safe.right + margin, bottom + margin)
@@ -192,6 +198,7 @@ internal class InAppHtmlView(
             InAppLayout.BANNER_BOTTOM -> card.setPadding(safe.left, 0, safe.right, bottom)
         }
         card.requestLayout()
+        applyHeight()
     }
 
     /** The presenter could not draw it: everything goes, and nobody is told. */
@@ -298,6 +305,9 @@ internal class InAppHtmlView(
                 rendererGone = true
                 session.leave("app")
                 teardown()
+            } else if (view === retiring) {
+                retiring = null
+                view.destroy()
             }
             return true
         }
@@ -306,6 +316,11 @@ internal class InAppHtmlView(
     private fun noContent() = WebResourceResponse("text/plain", "utf-8", 204, "No Content", emptyMap(), ByteArrayInputStream(ByteArray(0)))
 
     private fun teardown() {
+        // A finished message keeps nothing of its Activity.
+        root = null
+        card = null
+        window = null
+        activity = null
         val web = webView ?: return
         webView = null
         web.setOnTouchListener(null)
@@ -319,8 +334,11 @@ internal class InAppHtmlView(
             return
         }
         web.stopLoading()
-        // Next turn: this may run inside one of the page's own callbacks.
+        retiring = web
+        // Next turn: this may run inside one of the page's own callbacks. A renderer that dies first destroys it instead.
         main.post {
+            if (retiring !== web) return@post
+            retiring = null
             remove?.invoke()
             web.destroy()
         }
@@ -381,12 +399,19 @@ internal class InAppHtmlView(
         val web = webView ?: return
         if (layout == InAppLayout.FULL || availableDp <= 0f) return
         val wanted = if (contentHeightDp > 0f) contentHeightDp else Float.MAX_VALUE
-        val target = dp(InAppHtmlDocument.clamp(wanted, layout, availableDp) ?: return)
+        val target = dp(InAppHtmlDocument.clamp(wanted, layout, roomDp()) ?: return)
         val params = web.layoutParams ?: return
         if (params.height != target) {
             params.height = target
             web.layoutParams = params
         }
+    }
+
+    /** A modal sits inside its margins and above the keyboard; the keyboard does not count as a turn, so it is kept apart. */
+    private fun roomDp(): Float {
+        if (layout != InAppLayout.MODAL) return availableDp
+        val keyboardDp = maxOf(imeBottom - safeBottom, 0) / density()
+        return availableDp - keyboardDp - 2 * MODAL_MARGIN_DP
     }
 
     private fun safeHeightDp(activity: Activity): Float {
@@ -439,10 +464,9 @@ internal class InAppHtmlView(
     private fun isDark(activity: Activity) =
         (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-    private fun dp(value: Float): Int {
-        val density = (activity ?: webView?.context)?.resources?.displayMetrics?.density ?: 1f
-        return (value * density).roundToInt()
-    }
+    private fun density(): Float = (activity ?: webView?.context)?.resources?.displayMetrics?.density ?: 1f
+
+    private fun dp(value: Float): Int = (value * density()).roundToInt()
 }
 
 /** The page's card: a width cap for the modal, and a fling watcher for banners that never takes the page's touches. */
