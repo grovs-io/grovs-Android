@@ -108,12 +108,18 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     /// Called when the app moves to the foreground. Starts a new session if the app was
     /// backgrounded for longer than the timeout.
     fun rotateSessionIfNeeded() {
-        val since = backgroundedAt ?: return
+        rotateSessionIfExpired()
         backgroundedAt = null
+    }
 
+    /// Starts a new session if the background has outlasted the timeout. A shorter background
+    /// keeps its clock running, so a later foreground still measures it.
+    fun rotateSessionIfExpired() {
+        val since = backgroundedAt ?: return
         val elapsed = InstantCompat.now().toEpochMilli() - since.toEpochMilli()
         if (elapsed > SESSION_TIMEOUT_MS) {
             sessionId = UUID.randomUUID().toString()
+            backgroundedAt = null
         }
     }
 

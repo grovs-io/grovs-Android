@@ -12,6 +12,7 @@ import io.grovs.utils.InstantCompat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,6 +73,30 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
 
         assertNotEquals("a new session started", oldSession, context.sessionId)
         assertEquals(context.sessionId, contract.bodies("push_open").single().getString("session_id"))
+    }
+
+    @Test
+    fun `P7 a push handled in the background keeps the clock for the next session`() {
+        authenticated()
+        val oldSession = manager().grovsContext.sessionId
+        background()
+        settle(2_000)
+        val context = manager().grovsContext
+        val backgroundedAt = context.javaClass.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+        // The session timeout is measured on the wall clock, which the test cannot move.
+        backgroundedAt.set(context, InstantCompat.ofEpochMilli(System.currentTimeMillis() - 10 * 60_000L))
+        assertTrue(Grovs.handleNotificationOpen(tapIntent(PushPayloads.data(link = null))))
+        settle(2_000)
+        assertEquals("the open is reported", 1, pushOpens())
+        assertEquals("a short background keeps the session", oldSession, context.sessionId)
+
+        val since = backgroundedAt.get(context) as InstantCompat?
+        assertNotNull("the background clock is kept", since)
+        backgroundedAt.set(context, InstantCompat.ofEpochMilli(since!!.toEpochMilli() - 51 * 60_000L))
+        foreground()
+        pump()
+
+        assertNotEquals("a new session started", oldSession, context.sessionId)
     }
 
     @Test

@@ -1510,7 +1510,7 @@ public class Grovs: ActivityProvider {
         if (freshPush != null) {
             if (reportsPushOpen && reportedPushIntents.add(intent)) {
                 // This runs in the activity's onStart, before the app foreground rotates the session.
-                grovsContext.rotateSessionIfNeeded()
+                grovsContext.rotateSessionIfExpired()
                 val tapSession = grovsContext.sessionId
                 grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
                     manager.pushOpens.onTap(freshPush.campaignId, tapSession, token)
