@@ -24,6 +24,9 @@ internal class ContractBackend(val backend: ConsentBackend) {
     @Volatile var authBody: String = authenticateBody()
     @Volatile var batchInApp: String? = BackendContract.OFF_STAMPS
 
+    /** Null keeps in-app switched off. */
+    @Volatile var inApp: InAppBackend? = null
+
     private val opened = ConcurrentHashMap.newKeySet<String>()
 
     fun install() {
@@ -46,7 +49,10 @@ internal class ContractBackend(val backend: ConsentBackend) {
         backend.answer("events/batch") { seen -> batch(seen) }
         backend.answer("event/custom") { seen -> customEvent(seen) }
         backend.answer("visitor_attributes") { seen -> visitorAttributes(seen) }
-        backend.respond("in_app/sync", offSync())
+        backend.answer("in_app/sync") { seen ->
+            val body = runCatching { InAppBackend.parse(seen.body.ifBlank { "{}" }) }.getOrElse { com.google.gson.JsonObject() }
+            inApp?.syncAnswer(body) ?: json(200, offSync())
+        }
         backend.respond("notifications_for_device", """{"notifications":[]}""")
         backend.respond("number_of_unread_notifications", """{"number_of_unread_notifications":0}""")
         backend.respond("mark_notification_as_read", """{"message":"Marked as read"}""")
@@ -109,20 +115,23 @@ internal class ContractBackend(val backend: ConsentBackend) {
         if (events !is JSONArray) { violations += "batch without an events array"; return json(400, """{"error":"events must be an array"}""") }
         if (events.length() == 0) { violations += "empty batch"; return json(400, """{"error":"events must not be empty"}""") }
         if (events.length() > BackendContract.MAX_BATCH) { violations += "batch of ${events.length()}"; return json(400, """{"error":"max 50 events per batch"}""") }
+        val visitor = BackendContract.header(seen.request, "LINKSQUARED").orEmpty()
         val ids = mutableSetOf<String>()
         val errors = JSONArray()
         var accepted = 0
         for (i in 0 until events.length()) {
             val event = events.getJSONObject(i)
             // An id counts as seen only after the event passed validation
-            val error = eventError(event) ?: sdkEventId(event)?.let { if (ids.add(it)) null else "duplicate event_id in batch" }
+            val error = eventError(event, visitor) ?: sdkEventId(event)?.let { if (ids.add(it)) null else "duplicate event_id in batch" }
             if (error == null) accepted++ else {
                 rejected += Rejection(event, error)
                 errors.put(JSONObject().put("index", i).put("error", error))
             }
         }
         val answer = JSONObject().put("accepted", accepted).put("rejected", events.length() - accepted).put("errors", errors)
-        batchInApp?.let { answer.put("in_app", JSONObject(it)) }
+        val inApp = inApp
+        val stamps = if (inApp != null) inApp.batchStamps() else batchInApp
+        stamps?.let { answer.put("in_app", JSONObject(it)) }
         return json(200, answer.toString())
     }
 
@@ -132,14 +141,14 @@ internal class ContractBackend(val backend: ConsentBackend) {
         return if (id is String || id is Number) id.toString().trim().take(255).trim().ifEmpty { null } else null
     }
 
-    private fun eventError(event: JSONObject): String? {
+    private fun eventError(event: JSONObject, visitor: String): String? {
         val system = presentString(event, "event")
         val name = presentString(event, "event_name")
         return when {
             system.isNotEmpty() -> if (system in BackendContract.SYSTEM_EVENTS) null else "unknown event type '$system'"
             name.isEmpty() -> "missing event or event_name"
             name in BackendContract.SERVER_RESERVED -> "event_name '$name' is reserved"
-            name in BackendContract.MESSAGE_EVENTS -> inAppError(name, event)
+            name in BackendContract.MESSAGE_EVENTS -> inAppError(name, event, visitor)
             else -> null
         }
     }
@@ -150,8 +159,12 @@ internal class ContractBackend(val backend: ConsentBackend) {
 
     private fun present(json: JSONObject, key: String) = presentString(json, key).isNotEmpty()
 
-    /** In-app is switched off here, so every message event is refused. */
-    private fun inAppError(name: String, event: JSONObject): String? = "event_name '$name' is reserved"
+    /** Every in-app refusal is reported with the reserved text. */
+    private fun inAppError(name: String, event: JSONObject, visitor: String): String? {
+        val reserved = "event_name '$name' is reserved"
+        val inApp = inApp ?: return reserved
+        return inApp.eventError(name, event, visitor)?.let { reserved }
+    }
 
     // event/custom
     private fun customEvent(seen: ConsentBackend.Seen): MockResponse {
