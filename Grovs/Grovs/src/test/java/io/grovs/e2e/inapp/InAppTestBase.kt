@@ -61,6 +61,16 @@ internal abstract class InAppTestBase : ContractTestBase() {
         awaitStoredSync("the first in-app sync to be stored")
     }
 
+    /**
+     * [start]s, then lets the foreground hook finish. It syncs too, unless the first sync is still running, so a
+     * test that counts syncs needs this quiet moment first.
+     */
+    protected fun startSettled(vararg campaigns: JsonObject) {
+        start(*campaigns)
+        repeat(10) { Thread.sleep(100); pump() }
+        pumpUntil("the SDK to stop syncing") { !sdkSyncing() }
+    }
+
     /** [start]s with [campaign], tracks [event] and waits until it is on screen. */
     protected fun showOne(campaign: JsonObject, event: String = "cart_viewed") {
         start(campaign)
@@ -194,10 +204,10 @@ internal abstract class InAppTestBase : ContractTestBase() {
 
     protected fun idleFor(ms: Long) { shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(ms)); pump() }
 
-    /** Moves main looper time in 100 ms steps until [condition] holds, failing after [maxMs]. */
+    /** Moves main looper time in 100 ms steps until [condition] holds, failing after [maxMs]. Each step gives the network a moment. */
     protected fun idleUntil(description: String, maxMs: Long, condition: () -> Boolean) {
         var waited = 0L
-        while (!condition() && waited < maxMs) { idleFor(100); waited += 100 }
+        while (!condition() && waited < maxMs) { idleFor(100); Thread.sleep(5); waited += 100 }
         if (!condition()) throw AssertionError("timed out waiting for $description")
     }
 
