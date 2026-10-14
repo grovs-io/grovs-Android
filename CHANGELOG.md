@@ -42,5 +42,5 @@
 - App ratings use Google Play In-App Review only when the app adds `com.google.android.play:review-ktx`. Without it, "Rate the app" campaigns are skipped.
 - The SDK does not declare `POST_NOTIFICATIONS`. On Android 13 and later, campaigns that ask for push permission are not supported unless the app declares it.
 - New dependency: `androidx.webkit:webkit`.
-- `BatchEventsResponse` has a new `inApp` field, so its constructor and `copy` signatures changed, and `IGrovsService` has a new `inAppSync` method. This only affects code that constructs or implements these types.
+- `BatchEventsResponse` has a new `inApp` field, so its constructor and `copy` signatures changed, and `IGrovsService` has new `inAppSync` and `pushOpen(campaignId, sessionId)` methods. This only affects code that constructs or implements these types.
 - Known limitation: an HTML message whose script loops forever keeps the app's shared WebView renderer busy after the message is closed.

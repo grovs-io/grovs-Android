@@ -815,7 +815,7 @@ internal class GrovsManager(
         if (!CustomEventRules.isValidName(name)) {
             DebugLogger.instance.log(
                 LogLevel.ERROR,
-                "Cannot track \"$name\": the name is blank or reserved by the SDK. " +
+                "Cannot track \"$name\": the name is blank or reserved by Grovs. " +
                     "Reserved names: ${CustomEventRules.RESERVED_NAMES.joinToString()}"
             )
             return
