@@ -128,6 +128,16 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
     }
 
     @Test
+    fun `P32 a Grovs small icon given as a resource id wins over the FCM default icon`() {
+        setMetaData("io.grovs.NotificationIconSmall", android.R.drawable.star_on)
+        setMetaData("com.google.firebase.messaging.default_notification_icon", android.R.drawable.ic_dialog_info)
+        authenticated()
+        receive()
+
+        assertEquals(android.R.drawable.star_on, posted().single().smallIcon.resId)
+    }
+
+    @Test
     fun `P32 the FCM default icon is used when there is no Grovs icon`() {
         setMetaData("com.google.firebase.messaging.default_notification_icon", android.R.drawable.ic_dialog_info)
         authenticated()
