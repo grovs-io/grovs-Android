@@ -2,6 +2,7 @@ package io.grovs.model
 
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
+import io.grovs.inapp.InAppBridge
 import io.grovs.utils.InstantCompat
 import kotlinx.coroutines.CancellationException
 import java.io.OutputStream
@@ -50,13 +51,8 @@ data class CustomEvent(
  */
 object CustomEventRules {
 
-    /** Names owned by the SDK's own telemetry or by the backend. Consumers may not use them. */
-    val RESERVED_NAMES: Set<String> = setOf(
-        "view", "open", "install", "reinstall", "app_open",
-        "time_spent", "reactivation", "user_referred", "custom", "screen_view",
-        "push_open",
-        "in_app_viewed", "in_app_clicked", "in_app_dismissed", "in_app_answered", "in_app_commented",
-    )
+    /** Names the backend reserves for its own events. Consumers may not use them. */
+    val RESERVED_NAMES: Set<String> = InAppBridge.RESERVED_EVENTS
 
     const val MAX_PROPERTIES_BYTES = 8192
     const val MAX_TAGS = 20

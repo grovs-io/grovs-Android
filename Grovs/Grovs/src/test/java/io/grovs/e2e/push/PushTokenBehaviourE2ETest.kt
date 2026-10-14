@@ -101,4 +101,18 @@ internal class PushTokenBehaviourE2ETest : ContractTestBase() {
         assertFalse(contract.batchEvents().any { it.optString("event_name") == "push_open" })
         assertEquals(0, pushOpens())
     }
+
+    @Test
+    fun `P42 every name the backend reserves cannot be tracked by the host`() {
+        val newlyReserved = listOf("in_app_held", "push_delivered", "push_held", "journey_entered", "journey_held", "journey_path")
+        authenticated()
+        newlyReserved.forEach { Grovs.track(it) }
+        Grovs.track("checkout_done")
+        advanceUntil("the allowed event to be sent") {
+            contract.batchEvents().any { it.optString("event_name") == "checkout_done" }
+        }
+
+        val sent = contract.batchEvents().map { it.optString("event_name") }
+        assertTrue("reserved names reached the backend: $sent", sent.none { it in newlyReserved })
+    }
 }
