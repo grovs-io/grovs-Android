@@ -88,6 +88,11 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     var backgroundedAt: InstantCompat? = null
         private set
 
+    /// The session the app was in when it was last backgrounded, so a foreground can tell whether
+    /// the session changed even when an earlier caller already rotated it.
+    var sessionAtBackground: String? = null
+        private set
+
     companion object {
         /// A background longer than this starts a new session.
         const val SESSION_TIMEOUT_MINUTES = 30L
@@ -97,6 +102,7 @@ class GrovsContext @OptIn(ExperimentalCoroutinesApi::class) constructor(
     /// Called when the app moves to the background.
     fun markBackgrounded() {
         backgroundedAt = InstantCompat.now()
+        sessionAtBackground = sessionId
     }
 
     /// Called when the app moves to the foreground. Starts a new session if the app was

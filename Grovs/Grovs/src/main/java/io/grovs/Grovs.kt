@@ -722,7 +722,8 @@ public class Grovs: ActivityProvider {
         DebugLogger.instance.log(LogLevel.INFO, "App is in the foreground")
 
         grovsContext.isForeground = true
-        val previousSession = grovsContext.sessionId
+        // A tap handled in the activity's onStart may already have rotated the session.
+        val previousSession = grovsContext.sessionAtBackground ?: grovsContext.sessionId
         grovsContext.rotateSessionIfNeeded()
         val sessionRotated = grovsContext.sessionId != previousSession
 
@@ -1508,6 +1509,8 @@ public class Grovs: ActivityProvider {
         val freshPush = push?.takeUnless { handledPushes.contains(it, intent) }
         if (freshPush != null) {
             if (reportsPushOpen && reportedPushIntents.add(intent)) {
+                // This runs in the activity's onStart, before the app foreground rotates the session.
+                grovsContext.rotateSessionIfNeeded()
                 val tapSession = grovsContext.sessionId
                 grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
                     manager.pushOpens.onTap(freshPush.campaignId, tapSession, token)

@@ -67,6 +67,18 @@ class PushOpenReporterTest {
     }
 
     @Test
+    fun `a held retry keeps the first tap's session when the campaign is tapped again`() = runTest {
+        authenticated = true
+        coEvery { service.pushOpen("c1", "s1") } returnsMany listOf(LSResult.Error(IOException("down")), LSResult.Success(true))
+
+        reporter.onTap("c1", "s1", token())
+        reporter.onTap("c1", "s2", token())
+
+        coVerify(exactly = 2) { service.pushOpen("c1", "s1") }
+        coVerify(exactly = 0) { service.pushOpen("c1", "s2") }
+    }
+
+    @Test
     fun `a terminal status drops the open`() = runTest {
         authenticated = true
         coEvery { service.pushOpen("c1", "s1") } returns LSResult.Error(HttpStatusException(404, "not found"))

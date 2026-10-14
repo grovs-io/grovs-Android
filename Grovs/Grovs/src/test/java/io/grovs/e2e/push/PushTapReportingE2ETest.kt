@@ -8,8 +8,10 @@ import io.grovs.e2e.contract.BackendContract
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
+import io.grovs.utils.InstantCompat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,6 +55,23 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
             assertFalse("$it missing", BackendContract.header(request, it).isNullOrBlank())
         }
         assertEquals("test-grovs-id", BackendContract.header(request, "LINKSQUARED"))
+    }
+
+    @Test
+    fun `P7 a tap that starts a new session reports the open with the new session`() {
+        authenticated()
+        val oldSession = manager().grovsContext.sessionId
+        background()
+        settle(2_000)
+        // The session timeout is measured on the wall clock, which the test cannot move.
+        val context = manager().grovsContext
+        context.javaClass.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+            .set(context, InstantCompat.ofEpochMilli(System.currentTimeMillis() - 31 * 60_000L))
+        foreground(tapIntent(PushPayloads.data(link = null)))
+        pumpUntil("the open") { pushOpens() >= 1 }
+
+        assertNotEquals("a new session started", oldSession, context.sessionId)
+        assertEquals(context.sessionId, contract.bodies("push_open").single().getString("session_id"))
     }
 
     @Test
