@@ -507,11 +507,26 @@ class MyMessagingService : FirebaseMessagingService() {
 
 On Android 8 and later a custom campaign sound plays only if that channel has the sound. To stop the SDK showing pushes while the app is open, set `GrovsMessaging.showForegroundNotifications = false`.
 
+**8. Small icon.** For pushes received while the app is open, the SDK uses the `io.grovs.NotificationIconSmall` icon, then the Firebase default icon (`com.google.firebase.messaging.default_notification_icon`, which Firebase also uses in the background), then its own. Give the icon as a resource or as a drawable name:
+
+```xml
+<meta-data
+    android:name="io.grovs.NotificationIconSmall"
+    android:resource="@drawable/ic_notify" />
+
+<!-- or -->
+<meta-data
+    android:name="io.grovs.NotificationIconSmall"
+    android:value="ic_notify" />
+```
+
 > Push notifications require a physical device or an emulator with Google Play Services.
 
 ### In-app messages
 
 In-app campaigns are built and launched in the Grovs dashboard. The SDK syncs them, decides when each one shows (its trigger, conditions, limits and schedule), draws it over the current screen and reports views, taps and answers. You do not need any code for this.
+
+A test message sent from the dashboard waits up to 10 minutes on the server. If it does not show, send the app to the background and open it again.
 
 Optional hooks:
 
