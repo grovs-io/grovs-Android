@@ -15,6 +15,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -172,7 +174,8 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
         contentAlignment = Alignment.Center
     ) {
         Column(
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.verticalScroll(rememberScrollState()),
         ) {
             CopyableText(
                 text = callbackGeneratedLinkState.value,
@@ -336,6 +339,8 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
                 }) {
                 Text(text = "Open clipboard link")
             }
+
+            InAppControls()
         }
     }
 }

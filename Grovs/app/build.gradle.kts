@@ -68,6 +68,8 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(project(":Grovs"))
+    // Optional: enables in-app star ratings and the "Rate the app" action.
+    implementation("com.google.android.play:review-ktx:2.0.2")
     implementation(libs.androidx.fragment.ktx)
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-analytics")
