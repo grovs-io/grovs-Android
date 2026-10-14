@@ -3,7 +3,6 @@ package io.grovs.inapp.ui
 import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.google.gson.JsonPrimitive
 import io.grovs.inapp.InAppBridge
 import io.grovs.inapp.InAppCancellable
 import io.grovs.inapp.InAppOutcome
@@ -32,16 +31,41 @@ internal class InAppHtmlSession(
     companion object {
         const val DEADLINE_MILLIS = 5_000L
         const val NAME_LIMIT = 100
+        /** In UTF-16 units. A bridge call is a few hundred; this leaves room for large track properties. */
+        const val MESSAGE_LIMIT = 64 * 1024
+        /** Gson reads nesting recursively, so a deeper message could overflow the main thread's stack. */
+        const val DEPTH_LIMIT = 32
 
         fun isRemote(scheme: String?): Boolean = scheme?.lowercase() == "https" || scheme?.lowercase() == "http"
 
         private val elements = Gson().getAdapter(JsonElement::class.java)
 
         /** Strict JSON only: a raw NaN or other non-JSON text is refused. */
-        private fun parse(raw: String): JsonElement? = try {
-            elements.fromJson(raw)
-        } catch (e: Exception) {
-            null
+        private fun parse(raw: String): JsonElement? {
+            if (raw.length > MESSAGE_LIMIT || depth(raw) > DEPTH_LIMIT) return null
+            return try {
+                elements.fromJson(raw)
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        /** The deepest bracket nesting outside strings. */
+        private fun depth(raw: String): Int {
+            var depth = 0
+            var deepest = 0
+            var inString = false
+            var escaped = false
+            for (c in raw) {
+                when {
+                    escaped -> escaped = false
+                    inString -> if (c == '\\') escaped = true else if (c == '"') inString = false
+                    c == '"' -> inString = true
+                    c == '[' || c == '{' -> deepest = maxOf(deepest, ++depth)
+                    c == ']' || c == '}' -> depth--
+                }
+            }
+            return deepest
         }
     }
 
@@ -85,7 +109,7 @@ internal class InAppHtmlSession(
             }
             "height" -> {
                 val value = InAppJson.double(args.get("value")) ?: return
-                if (value < 0 || value.isNaN() || value.isInfinite()) return
+                if (value < 0) return
                 contentHeight = value
                 onHeight(value)
                 showIfReady()
@@ -176,9 +200,7 @@ internal class InAppHtmlSession(
         val key = InAppJson.string(args.get("key")) ?: return
         if (key.length !in 1..NAME_LIMIT || !args.has("value")) return
         val value: JsonElement = args.get("value")
-        val scalar = value.isJsonNull || (value is JsonPrimitive &&
-            (value.isString || value.isBoolean || (value.isNumber && value.asDouble.let { !it.isNaN() && !it.isInfinite() })))
-        if (!scalar) return
+        if (!value.isJsonNull && !InAppJson.isScalar(value)) return
         presentation.onAttribute?.invoke(key, value)
     }
 

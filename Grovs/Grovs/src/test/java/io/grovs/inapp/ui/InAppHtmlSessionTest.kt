@@ -10,7 +10,6 @@ import io.grovs.inapp.InAppPresentation
 import io.grovs.inapp.model.InAppActionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -101,6 +100,34 @@ class InAppHtmlSessionTest {
         s.receive("{\"v\":1,\"token\":\"${s.token}\",\"id\":\"1\",\"type\":\"ready\",\"args\":{\"missing\":false},\"pad\":NaN}", mainFrame = true)
         s.receive("{v:1,token:'${s.token}',id:'1',type:'ready',args:{missing:false}}", mainFrame = true)
         assertEquals(0, shownCount)
+    }
+
+    @Test
+    fun deepNestingIsRefusedWithoutParsing() {
+        val s = session("full")
+        s.receive("[".repeat(200_000), mainFrame = true)
+        s.receive("{\"v\":1,\"token\":\"${s.token}\",\"id\":\"1\",\"type\":\"ready\",\"args\":{\"missing\":false},\"pad\":" +
+            "[".repeat(InAppHtmlSession.DEPTH_LIMIT) + "]".repeat(InAppHtmlSession.DEPTH_LIMIT) + "}", mainFrame = true)
+        assertEquals(0, shownCount)
+        // Brackets inside a string are text, not nesting.
+        send(s, "ready", obj("missing" to false, "pad" to "[\\\"[".repeat(1_000)))
+        assertEquals(1, shownCount)
+    }
+
+    @Test
+    fun aMessageOverTheSizeLimitIsRefused() {
+        val over = session("full")
+        send(over, "ready", obj("missing" to false, "pad" to "x".repeat(InAppHtmlSession.MESSAGE_LIMIT)))
+        assertEquals(0, shownCount)
+        send(over, "ready", obj("missing" to false, "pad" to "x".repeat(InAppHtmlSession.MESSAGE_LIMIT - 1_000)))
+        assertEquals(1, shownCount)
+    }
+
+    @Test
+    fun aWholeFloatVersionIsAccepted() {
+        val s = session("full")
+        send(s, "ready", obj("missing" to false), version = JsonPrimitive(1.0))
+        assertEquals(1, shownCount)
     }
 
     @Test
@@ -329,6 +356,7 @@ class InAppHtmlSessionTest {
         show(s)
         send(s, "setAttribute", obj("key" to "", "value" to "x"))
         send(s, "setAttribute", obj("key" to "k".repeat(101), "value" to "x"))
+        send(s, "setAttribute", obj("key" to "😀".repeat(51), "value" to "x"))
         send(s, "setAttribute", obj("key" to "list", "value" to listOf("a")))
         send(s, "setAttribute", obj("key" to "map", "value" to mapOf("a" to 1)))
         send(s, "setAttribute", obj("key" to "missing"))
@@ -338,9 +366,10 @@ class InAppHtmlSessionTest {
         send(s, "setAttribute", obj("key" to "k".repeat(100), "value" to 3.5))
         send(s, "setAttribute", obj("key" to "vip", "value" to true))
         send(s, "setAttribute", obj("key" to "gone", "value" to null))
-        assertEquals(listOf("plan", "k".repeat(100), "vip", "gone"), attributes.map { it.first })
+        send(s, "setAttribute", obj("key" to "😀".repeat(50), "value" to 1))
+        assertEquals(listOf("plan", "k".repeat(100), "vip", "gone", "😀".repeat(50)), attributes.map { it.first })
         assertEquals("pro", attributes.first().second.asString)
-        assertTrue(attributes.last().second.isJsonNull)
+        assertTrue(attributes[3].second.isJsonNull)
         assertTrue(outcomes.isEmpty())
     }
 
