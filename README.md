@@ -553,14 +553,14 @@ Grovs.Companion.setInAppListener(new GrovsInAppListenerAdapter() {
 Control when messages may appear:
 
 ```kotlin
-Grovs.pauseInAppMessages()                         // nothing new shows; a waiting message is kept
+Grovs.pauseInAppMessages()                         // nothing new shows; a message that comes due is kept
 Grovs.resumeInAppMessages()                        // shows the waiting message if it still qualifies
-Grovs.discardInAppMessages(dismissCurrent = true)  // drops waiting messages, stays paused
+Grovs.discardInAppMessages(dismissCurrent = true)  // drops waiting and delayed messages, stays paused
 Grovs.setInAppExcludedScreens(listOf("CheckoutActivity", "PaymentFragment"))
 Grovs.setInAppDebugLogging(true)                   // logs why each campaign was skipped
 ```
 
-`discardInAppMessages()` can also be called with no argument from Kotlin or Java; `dismissCurrent` defaults to `false`. These settings can be called before `configure`. Excluded screens use the same names as screen views, compared without case. A message waits until the user leaves an excluded screen. Debug logging writes at INFO, so also call `Grovs.setDebug(LogLevel.INFO)`.
+`discardInAppMessages()` can also be called with no argument from Kotlin or Java; `dismissCurrent` defaults to `false`. These settings can be called before `configure`. Excluded screens use the same names as screen views, compared without case. A message waits until the user leaves an excluded screen. Debug logging writes to Logcat at INFO under the tag `GrovsInApp`, whatever the SDK log level.
 
 **Optional: app ratings.** Star questions and the "Rate the app" action use Google Play In-App Review. Add it to your app to enable them:
 
