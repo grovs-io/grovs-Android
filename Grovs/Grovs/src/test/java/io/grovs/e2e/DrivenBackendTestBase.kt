@@ -35,7 +35,6 @@ abstract class DrivenBackendTestBase {
     protected val payload = "data_for_device_and_url"
     protected val fingerprint = "data_for_device"
     protected val attributes = "visitor_attributes"
-    protected val notifications = "notifications_for_device"
     protected val authOk = """{"linksquared":"test-grovs-id","uri_scheme":"testapp"}"""
 
     private var host: ActivityController<TestActivity>? = null
@@ -56,7 +55,6 @@ abstract class DrivenBackendTestBase {
             phase = "enabled"
             respond(device, """{"last_seen":null}""")
             respond(fingerprint, """{"link":null,"data":null}""")
-            respond("notifications_to_display_automatically", """{"notifications":[]}""")
             respond("events/batch", """{"accepted":50,"rejected":0,"errors":[]}""")
             respond("clipboard_status", """{"clipboard_active":false}""")
         }

@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.os.Looper
-import android.os.SystemClock
 import io.grovs.Grovs
 import io.grovs.handlers.ConsentController
 import io.grovs.handlers.GrovsContext
@@ -14,13 +13,10 @@ import io.grovs.model.LogLevel
 import io.grovs.service.ConsentBackend
 import io.grovs.service.DrivenDispatcher
 import io.grovs.service.GatedExecutor
-import io.grovs.service.GrovsService
 import io.grovs.service.useConsentController
-import io.grovs.viewmodels.NotificationsMainViewModel
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -31,8 +27,6 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
-import java.time.Duration
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * E04: the retrying families through the public SDK over real HTTP. A genuine transport failure;
@@ -42,9 +36,8 @@ import java.util.concurrent.CopyOnWriteArrayList
  *
  * Time: the SDK's serial dispatcher is a [DrivenDispatcher] (a StandardTestDispatcher that also
  * records cross-thread dispatches), installed through the existing GrovsContext(serialDispatcher)
- * seam, so retry waits are virtual. The notification view model's retry wait is on Robolectric's
- * paused main looper, whose clock the test advances. Real HTTP is awaited with bounded polls; no
- * test sleeps through a real 5 s retry interval.
+ * seam, so retry waits are virtual. Real HTTP is awaited with bounded polls; no test sleeps
+ * through a real 5 s retry interval.
  *
  * "In the retry wait" is established from the SDK's own INFO log line for the failed attempt,
  * which is written synchronously right before the wait starts.
@@ -66,8 +59,6 @@ class ConsentRetryE2ETest {
     private val authenticate = "authenticate"
     private val payload = "data_for_device_and_url"
     private val attributes = "visitor_attributes"
-    private val unread = "number_of_unread_notifications"
-    private val notifications = "notifications_for_device"
 
     @Before
     fun setUp() {
@@ -82,7 +73,6 @@ class ConsentRetryE2ETest {
             phase = "enabled"
             respond(device, """{"last_seen":null}""")
             respond(authenticate, """{"linksquared":"test-grovs-id","uri_scheme":"testapp"}""")
-            respond("notifications_to_display_automatically", """{"notifications":[]}""")
             respond("events/batch", """{"accepted":50,"rejected":0,"errors":[]}""")
             respond("clipboard_status", """{"clipboard_active":false}""")
             failWithStatus("in_app/sync", 404)
@@ -295,87 +285,5 @@ class ConsentRetryE2ETest {
 
         backend.assertQuiet(attributes, attempts)
         assertEquals("the stale retry woke under the new grant and was refused", 0, backend.count(attributes, "re-enabled"))
-    }
-
-    // ==================== Notification families ====================
-
-    @Test
-    fun `E04 unread count - disabled during the retry wait, no stale count, an explicit call works`() {
-        authenticated()
-        val results = CopyOnWriteArrayList<Int?>()
-        failIntoRetryWait(unread, "Get unread messages - Failed") { Grovs.numberOfUnreadMessages(null) { results += it } }
-
-        revokeDuringWait(unread)
-        assertTrue("no count from a revoked request: $results", results.none { it != null })
-        grantAgainAfterRecovery(unread, """{"number_of_unread_notifications":3}""")
-        assertEquals("consent alone never replays the request", 0, backend.count(unread, "re-enabled"))
-
-        backend.phase = "explicit"
-        Grovs.numberOfUnreadMessages(null) { results += it }
-        pumpUntil("the explicit count") { 3 in results }
-        assertEquals(1, backend.count(unread, "explicit"))
-        assertEquals(listOf(3), results.filterNotNull())
-    }
-
-    @Test
-    fun `E04 unread count - with revocation cancellation held, the stale retry cannot use the new grant`() {
-        holdCleanup()
-        authenticated()
-        val results = CopyOnWriteArrayList<Int?>()
-        failIntoRetryWait(unread, "Get unread messages - Failed") { Grovs.numberOfUnreadMessages(null) { results += it } }
-        val attempts = backend.count(unread)
-
-        Grovs.setSDK(false)
-        backend.respond(unread, """{"number_of_unread_notifications":3}""")
-        Grovs.setSDK(true)
-        backend.phase = "re-enabled"
-        assertTrue("the wait's cancellation is held", gate!!.heldCount > 0)
-        driver.advanceTimeBy(intervals)
-        pump()
-
-        backend.assertQuiet(unread, attempts)
-        assertEquals(0, backend.count(unread, "re-enabled"))
-        assertTrue("no count from the stale request: $results", results.none { it != null })
-    }
-
-    @Test
-    fun `E04 notifications page from the view model - disabled during the main-looper retry wait`() {
-        // The view model calls the service directly, with no inherited operation, on the main looper.
-        // Not configured, so point the context at the test backend (never the default server URL).
-        context.settings.baseURL = backend.baseUrl
-        val service = GrovsService(context = application, apiKey = "test-key", grovsContext = context)
-        val viewModel = NotificationsMainViewModel(application).also { it.grovsService = service }
-        backend.fail(notifications)
-        viewModel.loadMoreNotifications()
-        pumpUntil("the page request to fail into its retry wait") {
-            backend.count(notifications) >= 1 && logged("Getting all the notifications - Failed")
-        }
-        assertTrue(viewModel.isLoading.value)
-        assertTrue("the retry wait is a registered operation", context.consent.registrationCount() >= 1)
-        val attempts = backend.count(notifications)
-        val before = SystemClock.uptimeMillis()
-
-        Grovs.setSDK(false)
-        backend.phase = "disabled"
-        val cleanup = context.consent.pendingWork()
-        pumpUntil("the revoked page request to finish") { cleanup.isCompleted }
-        assertEquals("revocation ended the wait without main-looper time passing", before, SystemClock.uptimeMillis())
-        assertFalse("the loading state is reset", viewModel.isLoading.value)
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(intervals))
-        backend.assertQuiet(notifications, attempts)
-
-        backend.respond(notifications, """{"notifications":[{"id":7,"title":"n7","updated_at":"2024-01-01T10:00:00.000Z",
-            "subtitle":null,"auto_display":false,"access_url":null,"read":false}]}""")
-        Grovs.setSDK(true)
-        backend.phase = "re-enabled"
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(intervals))
-        backend.assertQuiet(notifications, attempts)
-
-        // Explicit new action: the page the revoked request asked for is requested again.
-        backend.phase = "explicit"
-        viewModel.loadMoreNotifications()
-        pumpUntil("the explicit page") { viewModel.notifications.value.size == 1 }
-        assertEquals(1, backend.count(notifications, "explicit"))
-        assertEquals(1, JSONObject(backend.seen.last { it.path == notifications }.body).getInt("page"))
     }
 }

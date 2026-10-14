@@ -5,7 +5,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import io.grovs.handlers.ActivityProvider
-import io.grovs.GrovsNotificationsListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runCurrent
@@ -150,6 +149,5 @@ class SystemClipboardTest {
 
     private class FixedActivityProvider(private val activity: Activity?) : ActivityProvider {
         override fun requireActivity(): Activity? = activity
-        override fun requireNotificationsListener(): GrovsNotificationsListener? = null
     }
 }

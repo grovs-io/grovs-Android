@@ -314,30 +314,6 @@ object E2ETestUtils {
         )
     }
 
-    fun enqueueAutoDisplayNotificationsResponse(server: MockWebServer, notifications: List<Map<String, Any>> = emptyList()) {
-        val notificationsJson = notifications.joinToString(",", "[", "]") { notification ->
-            notification.entries.joinToString(",", "{", "}") { (k, v) ->
-                when (v) {
-                    is String -> "\"$k\":\"$v\""
-                    is Boolean -> "\"$k\":$v"
-                    is Int -> "\"$k\":$v"
-                    else -> "\"$k\":$v"
-                }
-            }
-        }
-        val response = """
-            {
-                "notifications": $notificationsJson
-            }
-        """.trimIndent()
-        server.enqueue(
-            MockResponse()
-                .setResponseCode(200)
-                .setHeader("Content-Type", "application/json")
-                .setBody(response)
-        )
-    }
-
     // ==================== Singleton/State Management ====================
 
     /** Reads a private field of the Grovs singleton via reflection. */
@@ -437,12 +413,10 @@ object E2ETestUtils {
             // Reset nullable fields to null
             listOf(
                 "grovsManager",
-                "notificationsManager",
                 "apiKey",
                 "application",
                 "authenticationJob",
                 "deeplinkListener",
-                "grovsNotificationsListener",
                 "launcherActivityReference",
                 "currentActivityReference",
                 "startupPushIntent"
@@ -1162,8 +1136,8 @@ object E2ETestUtils {
     /**
      * Set up a URL-based dispatcher on MockWebServer so responses are matched
      * by endpoint path instead of consumed FIFO. This is needed for deeplink
-     * tests where multiple concurrent SDK calls (auth, events, notifications,
-     * deeplink resolution) would consume responses in unpredictable order.
+     * tests where multiple concurrent SDK calls (auth, events, deeplink
+     * resolution) would consume responses in unpredictable order.
      *
      * @param responses Map of path substring to MockResponse.
      *   A request whose path contains the key gets the corresponding response.

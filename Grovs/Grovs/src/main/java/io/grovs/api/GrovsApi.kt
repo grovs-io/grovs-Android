@@ -17,10 +17,6 @@ import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsRequest
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.events.PaymentEvent
-import io.grovs.model.notifications.MarkNotificationAsReadRequest
-import io.grovs.model.notifications.NotificationsRequest
-import io.grovs.model.notifications.NotificationsResponse
-import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.Body
@@ -68,18 +64,6 @@ internal interface GrovsApi {
 
     @GET("device_for_vendor_id")
     suspend fun getDeviceFor(@Query("vendor_id") page: String, @Tag token: ConsentToken): Response<GetDeviceResponse>
-
-    @POST("notifications_for_device")
-    suspend fun notifications(@Body request: NotificationsRequest, @Tag token: ConsentToken): Response<NotificationsResponse>
-
-    @GET("number_of_unread_notifications")
-    suspend fun numberOfUnreadNotifications(@Tag token: ConsentToken): Response<NumberOfUnreadNotificationsResponse>
-
-    @POST("mark_notification_as_read")
-    suspend fun markNotificationAsRead(@Body request: MarkNotificationAsReadRequest, @Tag token: ConsentToken): Response<Unit>
-
-    @GET("notifications_to_display_automatically")
-    suspend fun notificationsToDisplayAutomatically(@Tag token: ConsentToken): Response<NotificationsResponse>
 
     @POST("screen_aliases")
     suspend fun syncScreenAliases(@Body request: ScreenAliasesRequest, @Tag token: ConsentToken): Response<Unit>

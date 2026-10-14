@@ -141,6 +141,29 @@ class LegacyMessagesApiTest {
         assertTrue(calls.isEmpty())
     }
 
+    @Test
+    fun `a full session never calls an inbox endpoint`() {
+        configure()
+        val controller = Robolectric.buildActivity(TestActivity::class.java).setup()
+        Grovs.displayMessagesFragment { }
+        Grovs.numberOfUnreadMessages { }
+        runBlocking { Grovs.numberOfUnreadMessages() }
+        controller.pause().stop()
+        controller.start().resume()
+        shadowOf(mainLooper).idle()
+        E2ETestUtils.waitForCondition(description = "the session's requests") { paths.isNotEmpty() }
+        Thread.sleep(300)
+        shadowOf(mainLooper).idle()
+
+        val inbox = listOf(
+            "notifications_for_device",
+            "number_of_unread_notifications",
+            "mark_notification_as_read",
+            "notifications_to_display_automatically",
+        )
+        assertEquals(emptyList<String>(), paths.filter { path -> inbox.any(path::contains) })
+    }
+
     private fun assertHarmless() {
         val dismissed = CopyOnWriteArrayList<Looper?>()
         val counts = CopyOnWriteArrayList<Pair<Int?, Looper?>>()

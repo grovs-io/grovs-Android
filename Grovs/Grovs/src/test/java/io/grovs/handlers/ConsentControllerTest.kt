@@ -738,22 +738,18 @@ class ConsentControllerTest {
     }
 
     @Test
-    fun `C10 same-key reconfiguration retires the previous managers as owners`() {
+    fun `C10 same-key reconfiguration retires the previous manager as owner`() {
         val context = configureSingleton(apiKey = "same-key")
         val consent = context.consent
         val oldManager = currentGrovsManager()
-        val oldNotifications = currentNotificationsManager()
         val oldToken = requireNotNull(consent.tryAcquire(oldManager.configuration))
-        assertSame(oldManager.configuration, oldNotifications.configuration)
 
         Grovs.configure(RuntimeEnvironment.getApplication(), "same-key", useTestEnvironment = true)
         val newManager = currentGrovsManager()
 
         assertNotSame(oldManager, newManager)
         assertNotSame(oldManager.configuration, newManager.configuration)
-        assertSame(newManager.configuration, currentNotificationsManager().configuration)
         assertNull("the old manager's configuration must not acquire after same-key reconfigure", consent.tryAcquire(oldManager.configuration))
-        assertNull(consent.tryAcquire(oldNotifications.configuration))
         assertFalse(consent.isCurrent(oldToken))
         assertNull(consent.tryAdmitCommit(oldToken, CommitKind.STORAGE_TRANSACTION))
         assertNotNull("positive control: the replacement acquires", consent.tryAcquire(newManager.configuration))
@@ -1051,10 +1047,6 @@ class ConsentControllerTest {
     private fun currentGrovsManager(): GrovsManager =
         Grovs::class.java.getDeclaredField("grovsManager").apply { isAccessible = true }
             .get(E2ETestUtils.getGrovsInstance()) as GrovsManager
-
-    private fun currentNotificationsManager(): NotificationsManager =
-        Grovs::class.java.getDeclaredField("notificationsManager").apply { isAccessible = true }
-            .get(E2ETestUtils.getGrovsInstance()) as NotificationsManager
 
     companion object {
         private const val BUDGET_MS = 500L

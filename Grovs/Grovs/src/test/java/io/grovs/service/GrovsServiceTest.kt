@@ -4,7 +4,6 @@ import android.content.Context
 import io.grovs.TestFixtures
 import io.grovs.MockGrovsApi
 import io.grovs.api.GrovsApi
-import io.grovs.handlers.ConsentToken
 import io.grovs.TestAssertions.assertEqualsWithContext
 import io.grovs.TestAssertions.assertNotNullWithContext
 import io.grovs.TestAssertions.assertTrueWithContext
@@ -16,8 +15,6 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.DeeplinkDetails
 import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.LogLevel
-import io.grovs.model.notifications.NotificationsResponse
-import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -33,7 +30,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import retrofit2.Response
-import java.io.IOException
 
 /**
  * Core unit tests for GrovsService.
@@ -254,65 +250,6 @@ class GrovsServiceTest {
         assertResultError(
             result,
             context = "after linkDetails('/nonexistent') with 404 error response"
-        )
-    }
-
-    // ==================== notifications Tests ====================
-
-    @Test
-    fun `GrovsService notifications returns LSResult Success with notification list on successful response`() = runTest {
-        mockGrovsApi.notificationsResponse = Response.success(NotificationsResponse(notifications = emptyList()))
-
-        val result = grovsService.notifications(page = 1)
-
-        val response = assertResultSuccess(
-            result,
-            context = "after notifications(page=1) with successful mock response"
-        )
-        assertNotNullWithContext(
-            response.notifications,
-            "notifications",
-            "after notifications() returns success"
-        )
-    }
-
-    @Test
-    fun `GrovsService numberOfUnreadNotifications returns LSResult Success with count on successful response`() = runTest {
-        mockGrovsApi.numberOfUnreadNotificationsResponse = Response.success(
-            NumberOfUnreadNotificationsResponse(numberOfUnreadNotifications = 5)
-        )
-        var attempts = 0
-        installApi(object : GrovsApi by mockGrovsApi {
-            override suspend fun numberOfUnreadNotifications(token: ConsentToken): Response<NumberOfUnreadNotificationsResponse> {
-                if (attempts++ == 0) throw IOException("Transient connection failure")
-                return mockGrovsApi.numberOfUnreadNotifications(token)
-            }
-        })
-
-        val result = grovsService.numberOfUnreadNotifications()
-
-        val response = assertResultSuccess(
-            result,
-            context = "after numberOfUnreadNotifications() with successful mock response"
-        )
-        assertEqualsWithContext(
-            5,
-            response.numberOfUnreadNotifications,
-            "numberOfUnreadNotifications",
-            "after numberOfUnreadNotifications() returns success"
-        )
-        assertEqualsWithContext(2, attempts, "attempts", "after recovering from a transport failure")
-    }
-
-    @Test
-    fun `GrovsService markNotificationAsRead returns LSResult Success on successful API response`() = runTest {
-        mockGrovsApi.markNotificationAsReadResponse = Response.success(Unit)
-
-        val result = grovsService.markNotificationAsRead(notificationId = 123)
-
-        assertResultSuccess(
-            result,
-            context = "after markNotificationAsRead(123) with successful mock response"
         )
     }
 

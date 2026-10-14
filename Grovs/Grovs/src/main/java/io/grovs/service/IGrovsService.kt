@@ -11,8 +11,6 @@ import io.grovs.model.GetDeviceResponse
 import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.Event
 import io.grovs.model.events.PaymentEvent
-import io.grovs.model.notifications.NotificationsResponse
-import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSResult
 import kotlinx.coroutines.flow.Flow
@@ -103,26 +101,6 @@ interface IGrovsService {
      * controller owns when to try again.
      */
     suspend fun inAppSync(body: JsonObject): LSResult<JsonObject>
-
-    /**
-     * Get notifications.
-     */
-    suspend fun notifications(page: Int): LSResult<NotificationsResponse>
-    
-    /**
-     * Get notifications to display automatically.
-     */
-    suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse>
-    
-    /**
-     * Get number of unread notifications.
-     */
-    suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse>
-    
-    /**
-     * Mark notification as read.
-     */
-    suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean>
 
     /**
      * Syncs the class-name → friendly-name mapping used for screen-view reporting.

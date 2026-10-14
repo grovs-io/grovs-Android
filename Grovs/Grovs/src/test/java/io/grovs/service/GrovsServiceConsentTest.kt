@@ -466,7 +466,7 @@ class GrovsServiceConsentLifecycleTest {
     @Test
     fun `N08 services under one configuration all stop on disable, a bystander survives, a retired one stays retired`() = runBlocking {
         val f = fixture()
-        val cases = listOf(named("payloadFor"), named("numberOfUnreadNotifications"), named("getDeviceFor"))
+        val cases = listOf(named("payloadFor"), named("updateAttributes"), named("getDeviceFor"))
         val releases = cases.map { f.backend.hold(it.path, it.successBody) }
         val services = cases.map { f.service() }
         val callers = f.scope(Dispatchers.IO)
@@ -523,8 +523,8 @@ class GrovsServiceConsentLifecycleTest {
     fun `N09 a request queued inside OkHttp when consent is revoked is refused before it is sent`() = runBlocking {
         val f = fixture()
         f.holdCleanup()
-        val busy = named("notifications")
-        val queued = named("numberOfUnreadNotifications")
+        val busy = named("payloadWithLinkFor")
+        val queued = named("getDeviceFor")
         val release = f.backend.hold(busy.path, busy.successBody)
         f.backend.respond(queued.path, queued.successBody)
         val service = f.service()
@@ -553,7 +553,7 @@ class GrovsServiceConsentLifecycleTest {
     fun `N09 a network callback queued behind revocation cannot publish its result`() {
         val f = fixture()
         f.holdCleanup()
-        val case = named("notificationsToDisplayAutomatically")
+        val case = named("getDeviceFor")
         f.backend.respond(case.path, case.successBody)
         val service = f.service()
         val stepper = SteppingDispatcher()

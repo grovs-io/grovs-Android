@@ -63,7 +63,6 @@ class ConsentTransitionRaceE2ETest {
         backend = ConsentBackend().apply {
             respond("device_for_vendor_id", """{"last_seen":null}""")
             respond("authenticate", """{"linksquared":"test-grovs-id","uri_scheme":"testapp"}""")
-            respond("notifications_to_display_automatically", """{"notifications":[]}""")
             respond("events/batch", """{"accepted":50,"rejected":0,"errors":[]}""")
             respond("clipboard_status", """{"clipboard_active":false}""")
         }

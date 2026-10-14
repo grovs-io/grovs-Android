@@ -62,8 +62,8 @@ class HttpResultsTest {
 
     @Test
     fun `a bodiless 200 succeeds when the status is the whole answer`() {
-        // updateAttributes and markNotificationAsRead are Response<Unit>; a backend answering
-        // head :ok must not look like a failure.
+        // addPaymentEvent, updateAttributes, syncScreenAliases and pushOpen are Response<Unit>; a
+        // backend answering head :ok must not look like a failure.
         assertTrue(Response.success<Unit>(null).toStatusResult("Set attributes", gson) is LSResult.Success)
     }
 

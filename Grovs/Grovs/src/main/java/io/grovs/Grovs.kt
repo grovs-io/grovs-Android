@@ -32,7 +32,6 @@ import io.grovs.handlers.GrovsPushPayload
 import io.grovs.handlers.HandledPushes
 import io.grovs.handlers.IntentOutcome
 import io.grovs.handlers.NavigationScreenTracker
-import io.grovs.handlers.NotificationsManager
 import io.grovs.handlers.PendingLinkRetry
 import io.grovs.handlers.RequestFailure
 import io.grovs.handlers.VisibleFragmentResolver
@@ -97,11 +96,6 @@ public class Grovs: ActivityProvider {
 
     companion object {
         private val instance = Grovs()
-
-        // Lets SDK dialogs that Android restored after process death find their service again.
-        @get:JvmSynthetic
-        internal val activeNotificationsManager: NotificationsManager?
-            get() = instance.notificationsManager
 
         /// Indicates if the test environment should be used
         private var useTestEnvironment: Boolean
@@ -519,7 +513,6 @@ public class Grovs: ActivityProvider {
         }
 
     private var grovsManager: GrovsManager? = null
-    private var notificationsManager: NotificationsManager? = null
 
     // This is used for linking the SDK to your account
     private var apiKey: String? = null
@@ -527,7 +520,6 @@ public class Grovs: ActivityProvider {
     private var application: Application? = null
 
     private var deeplinkListener: GrovsDeeplinkListener? = null
-    private var grovsNotificationsListener: GrovsNotificationsListener? = null
     /// The host's in-app choices, kept across configure() as iOS keeps them in statics.
     private val inAppSettings = InAppSettings()
     /// One per process: the actions read the push permission and open links for every manager.
@@ -543,9 +535,6 @@ public class Grovs: ActivityProvider {
     private var currentActivityReference: WeakReference<Activity>? = null
         set(value) {
             field = value
-            if ((field != null) && (grovsManager?.authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED)) {
-                notificationsManager?.displayAutomaticNotificationsIfNeeded()
-            }
             currentActivityReference?.get()?.let {
                 ScreenUtils.getScreenResolution(context = it)
             }
@@ -880,11 +869,6 @@ public class Grovs: ActivityProvider {
             inAppPresenter = inAppPresenterFactory,
             inAppPushPermission = actions::pushPermission,
             inAppUnsupportedActions = actions::unsupportedActions)
-
-        notificationsManager = NotificationsManager(context = application.applicationContext,
-            grovsContext = grovsContext,
-            apiKey = apiKey,
-            activityProvider = this)
 
         checkConfiguration(awaiting = grovsContext.consent.pendingCommits())
         // registerActivityLifecycleCallbacks adds to a list, so registering on every configure()
@@ -1293,10 +1277,6 @@ public class Grovs: ActivityProvider {
         }
     }
 
-    fun setOnAutomaticNotificationsListener(listener: GrovsNotificationsListener) {
-        grovsNotificationsListener = listener
-    }
-
     fun setInAppListener(listener: GrovsInAppListener?) = runOnMain { inAppSettings.listener = listener }
 
     fun pauseInAppMessages() = inAppChoice({ it.pause() }) { paused = true }
@@ -1337,79 +1317,6 @@ public class Grovs: ActivityProvider {
 
     fun setInAppDebugLogging(enabled: Boolean) = runOnMain { inAppSettings.debug = enabled }
 
-    fun displayMessagesFragment(onDismissed: (()->Unit)?): Boolean {
-        val manager = grovsManager ?: return false
-        // Checked before anything is created: a disabled SDK starts no request and shows no
-        // fragment, and answers false rather than opening a view it may not populate.
-        if (explicitToken(manager) == null) {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - not displaying the messages fragment")
-            return false
-        }
-        notificationsManager?.let { notificationsManager ->
-            return notificationsManager.displayNotificationsViewController(onDismissed = onDismissed)
-        } ?: run {
-            return false
-        }
-    }
-
-    suspend fun numberOfUnreadMessages(): Int? {
-        if (grovsManager?.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
-            val message = "The device is not yet authenticated, check internet connection and try again."
-            DebugLogger.instance.log(LogLevel.ERROR, message)
-            return null
-        }
-
-        val manager = grovsManager ?: return null
-        val token = explicitToken(manager) ?: run {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - no unread count")
-            return null
-        }
-        val result = explicitRequest(token) {
-            notificationsManager?.numberOfUnreadNotifications() ?: NO_COUNT
-        } ?: return null
-        // Checked once more before the caller sees it, so a count that went stale while it was
-        // handed back is reported as no answer rather than as a fresh one.
-        if (!isConsented(token) || result === NO_COUNT) return null
-        return result as? Int
-    }
-
-    fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
-        if (grovsManager?.authenticationState == GrovsManager.AuthenticationState.RETRYING) {
-            val message = "The device is not yet authenticated, check internet connection and try again."
-            DebugLogger.instance.log(LogLevel.ERROR, message)
-            onResult?.invoke(null)
-            return
-        }
-
-        if (lifecycleOwner == null) {
-            DebugLogger.instance.log(LogLevel.INFO,"LifecycleScope not provided, will use global scope.")
-        }
-
-        val manager = grovsManager
-        val token = manager?.let { explicitToken(it) }
-        if (token == null) {
-            DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted or SDK not configured - no unread count")
-        }
-        val scope = (lifecycleOwner?.lifecycleScope ?: GlobalScope)
-        scope.launch {
-            // Answered on the main thread like every other outcome, never inline on the caller's thread.
-            if (token == null) {
-                withContext(Dispatchers.Main) { onResult?.invoke(null) }
-                return@launch
-            }
-            val result = explicitRequest(token) {
-                notificationsManager?.numberOfUnreadNotifications() ?: NO_COUNT
-            }
-
-            withContext(Dispatchers.Main) {
-                // Exactly one callback on every path: a revoked request answers null rather than
-                // leaving the caller waiting, and a stale success is not reported as a count.
-                onResult?.invoke(if (result == null || !isConsented(token)) null else result as? Int)
-            }
-        }
-
-    }
-
     /**
      * The message an explicit request fails with when consent does not admit it, or was withdrawn
      * before its result could be handed back. Suspend callers get it in a [GrovsException] with the
@@ -1417,14 +1324,6 @@ public class Grovs: ActivityProvider {
      */
     private val CONSENT_REJECTED: String
         get() = "The SDK is not enabled. Grant consent with Grovs.setSDK(true) and try again."
-
-    /**
-     * Stands in for a null unread count inside a consent operation, so "the request was revoked"
-     * and "the backend answered no count" stay distinguishable through a non-null-typed helper.
-     */
-    private val NO_COUNT: Any get() = NoCount
-
-    private object NoCount
 
     private fun explicitToken(manager: GrovsManager): ConsentToken? =
         grovsContext.consent.tryAcquire(manager.configuration)
@@ -1569,7 +1468,6 @@ public class Grovs: ActivityProvider {
                         manager.start()
                         replayParkedIntent()
                         manager.startInApp()
-                        notificationsManager?.displayAutomaticNotificationsIfNeeded()
                     } else {
                         // Otherwise a user who never leaves the app stays logged out all session.
                         scheduleAuthenticationRetry(manager)
@@ -1766,10 +1664,6 @@ public class Grovs: ActivityProvider {
 
     override fun requireActivity(): Activity? {
         return currentActivityReference?.get()
-    }
-
-    override fun requireNotificationsListener(): GrovsNotificationsListener? {
-        return grovsNotificationsListener
     }
 
 }

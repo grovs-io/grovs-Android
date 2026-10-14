@@ -34,10 +34,6 @@ import io.grovs.model.LinkDetailsResponse
 import io.grovs.model.LogLevel
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.events.PaymentEvent
-import io.grovs.model.notifications.MarkNotificationAsReadRequest
-import io.grovs.model.notifications.NotificationsRequest
-import io.grovs.model.notifications.NotificationsResponse
-import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.LSJsonDateTypeAdapterFactory
@@ -385,37 +381,6 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
             DebugLogger.instance.log(LogLevel.INFO, "Getting device last seen")
             grovsApi.getDeviceFor(vendorId, token).toRetryResult("Getting device last seen", gson)
         }
-
-    override suspend fun notifications(page: Int): LSResult<NotificationsResponse> {
-        DebugLogger.instance.log(LogLevel.INFO, "Getting all the notifications")
-        return requestExecutor.retrying("Getting all the notifications") { token ->
-            grovsApi.notifications(NotificationsRequest(page = page), token)
-                .toResult("Getting all the notifications", gson)
-        }
-    }
-
-    override suspend fun numberOfUnreadNotifications(): LSResult<NumberOfUnreadNotificationsResponse> {
-        DebugLogger.instance.log(LogLevel.INFO, "Get unread messages")
-        return requestExecutor.retrying("Get unread messages") { token ->
-            grovsApi.numberOfUnreadNotifications(token).toResult("Get unread messages", gson)
-        }
-    }
-
-    override suspend fun markNotificationAsRead(notificationId: Int): LSResult<Boolean> {
-        DebugLogger.instance.log(LogLevel.INFO, "Mark notification as read")
-        return requestExecutor.retrying("Mark notification as read") { token ->
-            grovsApi.markNotificationAsRead(MarkNotificationAsReadRequest(notificationId = notificationId), token)
-                .toStatusResult("Mark notification as read", gson)
-        }
-    }
-
-    override suspend fun notificationsToDisplayAutomatically(): LSResult<NotificationsResponse> {
-        DebugLogger.instance.log(LogLevel.INFO, "Notifications to display automatically")
-        return requestExecutor.retrying("Notifications to display automatically") { token ->
-            grovsApi.notificationsToDisplayAutomatically(token)
-                .toResult("Notifications to display automatically", gson)
-        }
-    }
 
     override suspend fun syncScreenAliases(aliases: Map<String, String>): LSResult<Boolean> {
         // An empty map is not a no-op: it is how a caller clears the aliases the backend holds, so

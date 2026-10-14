@@ -129,7 +129,6 @@ class ConsentGateE2ETest {
                 return when (path) {
                     "/api/v1/sdk/device_for_vendor_id" -> json("""{"last_seen":null}""")
                     "/api/v1/sdk/authenticate" -> json("""{"linksquared":"test-grovs-id-123","uri_scheme":"testapp"}""")
-                    "/api/v1/sdk/notifications_to_display_automatically" -> json("""{"notifications":[]}""")
                     "/api/v1/sdk/events/batch" -> json("""{"accepted":50,"rejected":0,"errors":[]}""")
                     "/api/v1/sdk/data_for_device_and_url" -> json(
                         """{"link":"$launchLink","data":{"product":"sku-123"}}"""
@@ -277,8 +276,7 @@ class ConsentGateE2ETest {
 
     // End-to-end: nothing leaves the device and nothing lands in storage while disabled, through a
     // full activity lifecycle. Coverage for each individual gate this exercises (lifecycle
-    // bookkeeping, notification auto-display, auto screen tracking) lives in GrovsManagerTest,
-    // NotificationsManagerTest and GrovsSingletonTest respectively.
+    // bookkeeping, auto screen tracking) lives in GrovsManagerTest and GrovsSingletonTest respectively.
     @Test
     fun `a disabled SDK sends and stores nothing through a full activity lifecycle`() {
         configure(enabled = false)

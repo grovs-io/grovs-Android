@@ -16,10 +16,6 @@ import io.grovs.model.GenerateLinkResponse
 import io.grovs.model.GetDeviceResponse
 import io.grovs.model.UpdateAttributesRequest
 import io.grovs.model.events.PaymentEvent
-import io.grovs.model.notifications.NotificationsRequest
-import io.grovs.model.notifications.NotificationsResponse
-import io.grovs.model.notifications.NumberOfUnreadNotificationsResponse
-import io.grovs.model.notifications.MarkNotificationAsReadRequest
 import io.grovs.model.LinkDetailsRequest
 import io.grovs.utils.InstantCompat
 import okhttp3.MediaType.Companion.toMediaType
@@ -46,13 +42,9 @@ internal class MockGrovsApi : GrovsApi {
     var clipboardStatusResponse: Response<ClipboardStatusResponse>? = null
     var linkDetailsResponse: Response<ResponseBody>? = null
     var getDeviceResponse: Response<GetDeviceResponse>? = null
-    var notificationsResponse: Response<NotificationsResponse>? = null
-    var numberOfUnreadNotificationsResponse: Response<NumberOfUnreadNotificationsResponse>? = null
     var addEventsBatchResponse: Response<BatchEventsResponse>? = null
     var addPaymentEventResponse: Response<Unit>? = null
     var updateAttributesResponse: Response<Unit>? = null
-    var markNotificationAsReadResponse: Response<Unit>? = null
-    var notificationsToDisplayAutomaticallyResponse: Response<NotificationsResponse>? = null
     var syncScreenAliasesResponse: Response<Unit>? = null
     var pushOpenResponse: Response<Unit>? = null
     var inAppSyncResponse: Response<JsonObject>? = null
@@ -125,22 +117,6 @@ internal class MockGrovsApi : GrovsApi {
         return getDeviceResponse ?: createSuccessGetDeviceResponse()
     }
 
-    override suspend fun notifications(request: NotificationsRequest, token: ConsentToken): Response<NotificationsResponse> {
-        return notificationsResponse ?: createSuccessNotificationsResponse()
-    }
-
-    override suspend fun numberOfUnreadNotifications(token: ConsentToken): Response<NumberOfUnreadNotificationsResponse> {
-        return numberOfUnreadNotificationsResponse ?: createSuccessUnreadNotificationsResponse()
-    }
-
-    override suspend fun markNotificationAsRead(request: MarkNotificationAsReadRequest, token: ConsentToken): Response<Unit> {
-        return markNotificationAsReadResponse ?: Response.success(Unit)
-    }
-
-    override suspend fun notificationsToDisplayAutomatically(token: ConsentToken): Response<NotificationsResponse> {
-        return notificationsToDisplayAutomaticallyResponse ?: createSuccessNotificationsResponse()
-    }
-
     override suspend fun syncScreenAliases(request: ScreenAliasesRequest, token: ConsentToken): Response<Unit> {
         lastScreenAliases = request
         return syncScreenAliasesResponse ?: Response.success(Unit)
@@ -168,13 +144,9 @@ internal class MockGrovsApi : GrovsApi {
         clipboardStatusResponse = null
         linkDetailsResponse = null
         getDeviceResponse = null
-        notificationsResponse = null
-        numberOfUnreadNotificationsResponse = null
         addEventsBatchResponse = null
         addPaymentEventResponse = null
         updateAttributesResponse = null
-        markNotificationAsReadResponse = null
-        notificationsToDisplayAutomaticallyResponse = null
         syncScreenAliasesResponse = null
         pushOpenResponse = null
         inAppSyncResponse = null
@@ -234,14 +206,6 @@ internal class MockGrovsApi : GrovsApi {
 
         fun createSuccessGetDeviceResponse(): Response<GetDeviceResponse> {
             return Response.success(GetDeviceResponse(lastSeen = InstantCompat.now()))
-        }
-
-        fun createSuccessNotificationsResponse(): Response<NotificationsResponse> {
-            return Response.success(NotificationsResponse(notifications = emptyList()))
-        }
-
-        fun createSuccessUnreadNotificationsResponse(): Response<NumberOfUnreadNotificationsResponse> {
-            return Response.success(NumberOfUnreadNotificationsResponse(numberOfUnreadNotifications = 0))
         }
 
         // Error response factories
