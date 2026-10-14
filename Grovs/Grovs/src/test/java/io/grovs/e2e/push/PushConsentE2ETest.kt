@@ -6,6 +6,7 @@ import io.grovs.e2e.contract.BackendContract
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
+import io.grovs.handlers.GrovsManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +37,11 @@ internal class PushConsentE2ETest : ContractTestBase() {
         advance(30_000)
     }
 
+    private fun assertAuthenticated() {
+        pumpUntil("authentication") { manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED }
+        assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
+    }
+
     @Test
     fun `P24 a tap while disabled reports and delivers nothing, also after enabling`() {
         configure(enabled = false)
@@ -45,6 +51,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         foreground()
         advance(10_000)
 
+        assertAuthenticated()
         assertEquals(0, pushOpens())
         assertTrue(deepLinks.delivered.isEmpty())
     }
@@ -58,6 +65,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         Grovs.setSDK(true)
         authRecovers()
 
+        assertAuthenticated()
         assertEquals(0, pushOpens())
     }
 
@@ -72,11 +80,13 @@ internal class PushConsentE2ETest : ContractTestBase() {
         gate.countDown()
         advance(30_000)
         val sent = pushOpens()
+        assertEquals("no in-request retry after consent was withdrawn", 1, sent)
         Grovs.setSDK(true)
         contract.install()
         foreground(Intent())
         advance(30_000)
 
+        assertAuthenticated()
         assertEquals("no report after consent came back", sent, pushOpens())
     }
 
@@ -89,6 +99,7 @@ internal class PushConsentE2ETest : ContractTestBase() {
         foreground(Intent())
         advance(30_000)
 
+        assertAuthenticated()
         assertEquals(0, pushOpens())
     }
 }
