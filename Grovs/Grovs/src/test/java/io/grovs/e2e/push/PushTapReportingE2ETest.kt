@@ -43,6 +43,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         foreground(tapIntent())
         settle(5_000)
 
+        pumpUntil("the open") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         val body = contract.bodies("push_open").single()
         assertEquals(PushPayloads.CAMPAIGN, body.getString("campaign_id"))
@@ -155,6 +156,7 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
         thread.join(5_000)
         settle(5_000)
 
+        pumpUntil("the open and its delivery") { pushOpens() >= 1 && deepLinks.delivered.isNotEmpty() }
         assertTrue(grovs)
         assertFalse(foreign)
         assertEquals(1, pushOpens())

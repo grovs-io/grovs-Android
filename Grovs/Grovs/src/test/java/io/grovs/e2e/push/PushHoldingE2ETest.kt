@@ -27,6 +27,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         authenticated()
         settle(5_000)
 
+        pumpUntil("the open") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
     }
@@ -39,6 +40,7 @@ internal class PushHoldingE2ETest : ContractTestBase() {
         authenticated()
         settle(5_000)
 
+        pumpUntil("the open") { pushOpens() >= 1 }
         assertEquals(listOf("second"), contract.bodies("push_open").map { it.getString("campaign_id") })
     }
 

@@ -26,7 +26,10 @@ internal abstract class ContractTestBase : DrivenBackendTestBase() {
     protected fun pushOpens(phase: String? = null): Int =
         if (phase == null) backend.count("push_open") else backend.count("push_open", phase)
 
-    /** Moves virtual time, then gives the real network a moment so replies are in before asserting. */
+    /**
+     * Moves virtual time, then gives the real network a moment so replies are in before asserting.
+     * Positive checks should wait on a condition; this only widens the window before negative checks.
+     */
     protected fun settle(totalMs: Long) {
         advance(totalMs)
         repeat(3) { Thread.sleep(50); pump() }

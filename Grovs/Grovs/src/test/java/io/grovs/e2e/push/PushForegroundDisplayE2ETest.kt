@@ -173,6 +173,7 @@ internal class PushForegroundDisplayE2ETest : ContractTestBase() {
         foreground(tap)
         settle(5_000)
 
+        pumpUntil("the open and its delivery") { pushOpens() >= 1 && deepLinks.delivered.isNotEmpty() }
         assertEquals(application.packageName, tap.component?.packageName)
         assertEquals(1, pushOpens())
         assertEquals("spring26", deepLinks.delivered.single().data!!["promo"])
