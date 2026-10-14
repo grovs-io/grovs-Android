@@ -15,6 +15,11 @@ internal object BackendContract {
         "add_payment_event", "in_app/sync",
     )
 
+    /** The one route with a path parameter. */
+    private val BANNER_LINK = Regex("""smart_banners/[^/]+/link""")
+
+    fun isSdkRoute(path: String): Boolean = path in SDK_ROUTES || BANNER_LINK.matches(path)
+
     /** Old inbox routes, still answering 200. */
     val INBOX_ROUTES = setOf(
         "notifications_for_device", "number_of_unread_notifications",

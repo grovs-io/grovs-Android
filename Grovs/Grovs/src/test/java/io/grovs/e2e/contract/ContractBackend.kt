@@ -37,8 +37,9 @@ internal class ContractBackend(val backend: ConsentBackend) {
             }
         }
         backend.respond("device_for_vendor_id", """{"last_seen":null}""")
-        backend.respond("data_for_device", """{"link":null,"data":null}""")
-        backend.respond("data_for_device_and_url", """{"link":null,"data":null}""")
+        // No data for this link
+        backend.respond("data_for_device", NIL_LINK)
+        backend.respond("data_for_device_and_url", NIL_LINK)
         backend.respond("clipboard_status", """{"clipboard_active":false}""")
         backend.answer("push_open") { seen -> pushOpen(seen) }
         backend.answer("events/batch") { seen -> batch(seen) }
@@ -71,7 +72,7 @@ internal class ContractBackend(val backend: ConsentBackend) {
     /** Called after every contract test. */
     fun assertKept() {
         backend.seen.forEach { seen ->
-            if (seen.path !in BackendContract.SDK_ROUTES) violations += "route the backend does not have: ${seen.path}"
+            if (!BackendContract.isSdkRoute(seen.path)) violations += "route the backend does not have: ${seen.path}"
             listOf("PROJECT-KEY", "PLATFORM", "IDENTIFIER").forEach { name ->
                 if (BackendContract.header(seen.request, name).isNullOrBlank()) violations += "${seen.path} without $name"
             }
@@ -87,15 +88,14 @@ internal class ContractBackend(val backend: ConsentBackend) {
 
     // push_open: the device check comes first (403), then the push outcome
     private fun pushOpen(seen: ConsentBackend.Seen): MockResponse {
-        val body = runCatching { JSONObject(seen.body) }.getOrElse { JSONObject() }
-        val campaign = body.opt("campaign_id")
-        if (campaign !is String || campaign.isBlank()) {
-            violations += "push_open without a campaign_id string: ${seen.body}"
-            return json(400, """{"error":"campaign_id is required"}""")
-        }
-        if (body.has("session_id") && body.opt("session_id") !is String) violations += "push_open session_id is not a string"
         val visitor = BackendContract.header(seen.request, "LINKSQUARED")
             ?: return json(403, """{"error":"Invalid linksquared id"}""")
+        val body = runCatching { JSONObject(seen.body) }.getOrElse { JSONObject() }
+        val campaign = body.opt("campaign_id")?.takeUnless { it === JSONObject.NULL }?.toString().orEmpty()
+        if (campaign.isBlank()) {
+            violations += "push_open without a campaign_id: ${seen.body}"
+            return json(400, """{"error":"campaign_id is required"}""")
+        }
         if (campaign !in knownPushCampaigns) return json(404, """{"error":"Push campaign not found"}""")
         return if (opened.add("$visitor/$campaign")) json(200, BackendContract.PUSH_OPEN_RECORDED)
         else json(200, BackendContract.PUSH_OPEN_ALREADY)
@@ -112,7 +112,8 @@ internal class ContractBackend(val backend: ConsentBackend) {
         var accepted = 0
         for (i in 0 until events.length()) {
             val event = events.getJSONObject(i)
-            val error = eventError(event, ids)
+            // An id counts as seen only after the event passed validation
+            val error = eventError(event) ?: sdkEventId(event)?.let { if (ids.add(it)) null else "duplicate event_id in batch" }
             if (error == null) accepted++ else {
                 rejected += Rejection(event, error)
                 errors.put(JSONObject().put("index", i).put("error", error))
@@ -123,9 +124,13 @@ internal class ContractBackend(val backend: ConsentBackend) {
         return json(200, answer.toString())
     }
 
-    private fun eventError(event: JSONObject, ids: MutableSet<String>): String? {
+    /** Only strings and numbers, trimmed, cut to 255, blank means no id. */
+    private fun sdkEventId(event: JSONObject): String? {
         val id = event.opt("event_id")
-        if ((id is String || id is Number) && !ids.add(id.toString().trim())) return "duplicate event_id in batch"
+        return if (id is String || id is Number) id.toString().trim().take(255).trim().ifEmpty { null } else null
+    }
+
+    private fun eventError(event: JSONObject): String? {
         val system = event.optString("event", "")
         val name = event.optString("event_name", "")
         return when {
@@ -148,7 +153,7 @@ internal class ContractBackend(val backend: ConsentBackend) {
             name in BackendContract.SERVER_RESERVED || name in BackendContract.MESSAGE_EVENTS -> {
                 violations += "custom event with reserved name $name"; json(400, """{"error":"event_name is reserved"}""")
             }
-            else -> json(200, """{"message":"ok"}""")
+            else -> json(200, """{"message":"Event added"}""")
         }
     }
 
@@ -167,6 +172,8 @@ internal class ContractBackend(val backend: ConsentBackend) {
             """"first_seen_at":null,"global_caps":{"session":10,"day":10},"campaigns":[],"test_messages":[]}"""
 
     companion object {
+        private const val NIL_LINK = """{"data":null,"link":null,"tracking":null}"""
+
         /** The body of an authenticate request. */
         fun authenticateBody(identifier: String? = null, attributes: Map<String, Any>? = null, pushToken: String? = null): String =
             JSONObject()
