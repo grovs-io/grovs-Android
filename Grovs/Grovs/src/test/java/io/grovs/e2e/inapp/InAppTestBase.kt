@@ -249,7 +249,8 @@ internal abstract class InAppTestBase : ContractTestBase() {
 
     /** Sends the queued events now and waits for the request to finish. */
     protected fun flushEvents() {
-        E2ETestUtils.awaitEventsReleased()
+        // The attribution lookup that holds events runs on the driver (a new activity starts one), so pump while waiting.
+        pumpUntil("custom events to be released") { runCatching { E2ETestUtils.awaitEventsReleased(timeoutMs = 0) }.isSuccess }
         val flush = CoroutineScope(driver + SupervisorJob()).launch { manager().flushCustomEvents() }
         pumpUntil("the event flush") { flush.isCompleted }
         pump()
