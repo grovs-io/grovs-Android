@@ -119,11 +119,15 @@ internal abstract class InAppTestBase : ContractTestBase() {
     /**
      * Cold start: the app goes to the background, the process dies, the SDK is configured again with the same listener and the
      * launcher comes back. Stored files survive. Returns once the SDK has used the sync answer, whatever it was.
+     * [whileDead] runs between the process death and the new configure, to change what is on disk.
      */
-    protected fun restart() {
+    protected fun restart(whileDead: () -> Unit = {}) {
+        // A sync still running would be counted as the new process's sync.
+        pumpUntil("the running sync to finish") { !sdkSyncing() }
         val syncs = inApp.syncBodies.size
         backgroundApp()
         simulateProcessDeath()
+        whileDead()
         Grovs.setInAppListener(recorder)
         configure()
         foreground(Intent())
