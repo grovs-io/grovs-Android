@@ -25,7 +25,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.concurrent.CopyOnWriteArrayList
 
-/** The inbox is gone; its public calls must stay callable, answer on main once, and show nothing. */
+/** The deprecated inbox calls must stay callable, answer on main once, and show nothing. */
 @Suppress("DEPRECATION")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])

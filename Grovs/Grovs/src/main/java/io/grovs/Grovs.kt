@@ -423,7 +423,7 @@ public class Grovs: ActivityProvider {
                 startDate = startDate)
         }
 
-        /// Does nothing: the messages inbox was removed.
+        /// Does nothing.
         @Suppress("DEPRECATION", "UNUSED_PARAMETER")
         @Deprecated("The messages inbox was removed. Use in-app messages.")
         fun setOnAutomaticNotificationsListener(listener: GrovsNotificationsListener) = Unit
@@ -460,14 +460,14 @@ public class Grovs: ActivityProvider {
             instance.setInAppDebugLogging(enabled)
         }
 
-        /// Shows nothing: the messages inbox was removed. Calls [onDismissed] once, on the main thread.
+        /// Shows nothing. Calls [onDismissed] once, on the main thread.
         @Deprecated("The messages inbox was removed. Use in-app messages.")
         fun displayMessagesFragment(onDismissed: (()->Unit)?) {
             onDismissed ?: return
             instance.mainHandler.post { onDismissed() }
         }
 
-        /// Always 0: the messages inbox was removed.
+        /// Always 0.
         @Deprecated("The messages inbox was removed. Use in-app messages.")
         suspend fun numberOfUnreadMessages(): Int? = 0
 

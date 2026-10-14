@@ -97,8 +97,8 @@ internal class ConsentRequestExecutor(
      * a retryable failure to spend one attempt.
      *
      * A spent budget returns [LSResult.Error]. It must never throw: callers such as
-     * `GrovsManager.getDataForDevice`, `ClipboardHandler.sendMatch` and the notification view
-     * models have no handler for a network failure, because this helper could not produce one
+     * `GrovsManager.getDataForDevice`, `ClipboardHandler.sendMatch`
+     * have no handler for a network failure, because this helper could not produce one
      * before. Consent rejection and every other cancellation still propagate untouched.
      */
     suspend fun <T : Any> retrying(label: String, block: suspend (ConsentToken) -> LSResult<T>): LSResult<T> {

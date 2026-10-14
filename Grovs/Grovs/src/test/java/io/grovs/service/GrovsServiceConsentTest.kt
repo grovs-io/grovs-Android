@@ -553,7 +553,7 @@ class GrovsServiceConsentLifecycleTest {
     fun `N09 a network callback queued behind revocation cannot publish its result`() {
         val f = fixture()
         f.holdCleanup()
-        val case = named("getDeviceFor")
+        val case = named("payloadFor")
         f.backend.respond(case.path, case.successBody)
         val service = f.service()
         val stepper = SteppingDispatcher()

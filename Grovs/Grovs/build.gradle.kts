@@ -215,8 +215,6 @@ tasks.register<JacocoReport>("jacocoTestReport") {
         "**/Manifest*.*",
         "**/*Test*.*",
         "android/**/*.*",
-        "**/databinding/**",
-        "**/android/databinding/*Binding.*",
         "**/BR.*",
         "**/*_MembersInjector.*",
         "**/Dagger*Component*.*",

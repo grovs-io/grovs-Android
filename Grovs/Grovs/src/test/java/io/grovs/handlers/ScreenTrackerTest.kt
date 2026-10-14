@@ -182,7 +182,7 @@ class ScreenTrackerTest {
     }
 
     @Test
-    fun `host screens named like the removed inbox screens are tracked`() = runTest {
+    fun `host screens named like the old SDK screens are tracked`() = runTest {
         tracker.trackScreen("NotificationsListFragment")
 
         coVerify(exactly = 1) {
