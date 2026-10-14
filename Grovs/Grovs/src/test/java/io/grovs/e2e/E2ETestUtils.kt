@@ -788,6 +788,12 @@ object E2ETestUtils {
         set("stopSent", true)
         registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
         val application = org.robolectric.RuntimeEnvironment.getApplication()
+        // A second reset inside one test must not stack a second set of listeners, which would
+        // count every later activity pause and stop twice.
+        val callbacksField = android.app.Application::class.java.getDeclaredField("mActivityLifecycleCallbacks")
+        callbacksField.isAccessible = true
+        (callbacksField.get(application) as MutableList<*>)
+            .removeAll { it != null && it.javaClass.name.startsWith("androidx.lifecycle.") }
         // Before API 29 the owner reads activity starts from a ReportFragment that the dispatcher
         // injects, so the dispatcher must attach first, as ProcessLifecycleInitializer does.
         val dispatcher = Class.forName("androidx.lifecycle.LifecycleDispatcher")

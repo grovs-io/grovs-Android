@@ -19,6 +19,7 @@ import io.grovs.inapp.ui.InAppHtmlDocument
 import io.grovs.inapp.ui.InAppHtmlView
 import io.grovs.inapp.ui.InAppJavascriptChannel
 import io.grovs.inapp.ui.InAppWindow
+import io.grovs.utils.InstantCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -95,9 +96,21 @@ internal abstract class InAppTestBase : ContractTestBase() {
     }
 
     /** The app goes to the background and comes back with a fresh launcher; returns once the SDK has used the sync answer. */
-    protected fun reopen() {
+    protected fun reopen() = reopenAfterBackground(minutesAway = 0)
+
+    /**
+     * Like [reopen], but the app was away for [minutesAway] minutes, so the SDK may start a new session on the same
+     * running controller (a background over 30 minutes).
+     */
+    protected fun reopenAfterBackground(minutesAway: Long) {
         val syncs = inApp.syncBodies.size
         backgroundApp()
+        // backgroundedAt has a private setter and the real wait would need that much wall-clock time.
+        if (minutesAway > 0) {
+            val sdkContext = manager().grovsContext
+            sdkContext.javaClass.getDeclaredField("backgroundedAt").apply { isAccessible = true }
+                .set(sdkContext, InstantCompat.now().minusMillis(minutesAway * 60_000))
+        }
         foreground(Intent())
         resumeHost()
         awaitSyncHandled("a sync after reopening", syncs)

@@ -148,6 +148,24 @@ internal class InAppTriggersRulesE2ETest : InAppTestBase() {
         pumpUntil("again in a new session") { recorder.shown.size == 2 }
     }
 
+    // cases.json: "a session cap resets with a new session"
+    @Test
+    fun `I11 a session cap resets after the app was away for more than 30 minutes`() {
+        start(InAppCampaigns.campaign().caps(session = 1).build())
+        Grovs.track("cart_viewed")
+        pumpUntil("first") { recorder.shown.size == 1 }
+        closeShown()
+
+        reopen()
+        Grovs.track("cart_viewed")
+        settle(3_000)
+        assertEquals("a short absence keeps the session", 1, recorder.shown.size)
+
+        reopenAfterBackground(minutesAway = 31)
+        Grovs.track("cart_viewed")
+        pumpUntil("again in the new session") { recorder.shown.size == 2 }
+    }
+
     // cases.json: "the global session cap spans campaigns, except those that opt out"
     @Test
     fun `I11 the global session cap applies unless ignore_global`() {
@@ -256,7 +274,7 @@ internal class InAppTriggersRulesE2ETest : InAppTestBase() {
         assertTrue("stale campaigns never show", recorder.shown.isEmpty())
 
         inApp.mode = SyncMode.UNCHANGED_WHEN_SAME
-        restart()
+        reopen()
         Grovs.track("cart_viewed")
         pumpUntil("control: fresh again after a good sync") { recorder.shown == listOf("c1") }
     }
