@@ -31,12 +31,14 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         foreground()
         advance(5_000)
 
+        pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
 
         // Control: a push with a new id is still reported in the same state.
         foreground(tap("0:control"))
         advance(5_000)
+        pumpUntil("2 push open(s) reported") { pushOpens() >= 2 }
         assertEquals(2, pushOpens())
     }
 
@@ -48,11 +50,13 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         foreground(tap("0:same"))
         advance(5_000)
 
+        pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
 
         foreground(tap("0:control"))
         advance(5_000)
+        pumpUntil("2 push open(s) reported") { pushOpens() >= 2 }
         assertEquals(2, pushOpens())
     }
 
@@ -75,6 +79,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         assertEquals(1, deepLinks.delivered.size)
 
         foreground(tap("0:control"))
+        pumpUntil("control push reported") { pushOpens("after-restart") > 0 }
         advance(5_000)
         assertEquals(1, pushOpens("after-restart"))
     }
@@ -93,6 +98,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         gate.countDown()
         advance(10_000)
 
+        pumpUntil("1 push open(s) reported") { pushOpens() >= 1 }
         assertEquals(1, pushOpens())
         assertEquals(1, deepLinks.delivered.size)
     }
@@ -102,6 +108,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
         authenticated()
         (0..50).forEach { foreground(tap("0:id$it", "c$it")); pump() }
         advance(10_000)
+        pumpUntil("51 push open(s) reported") { pushOpens() >= 51 }
         assertEquals(51, pushOpens())
     }
 
@@ -116,6 +123,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
 
         foreground(tap("0:control", "c1"))
         advance(5_000)
+        pumpUntil("1 push open(s) reported") { pushOpens("replay") >= 1 }
         assertEquals(1, pushOpens("replay"))
     }
 
@@ -136,6 +144,7 @@ internal class PushDedupeE2ETest : ContractTestBase() {
 
         foreground(tap("0:id0", "c0"))
         advance(5_000)
+        pumpUntil("1 push open(s) reported") { pushOpens("after-restart") >= 1 }
         assertEquals("the oldest was forgotten", 1, pushOpens("after-restart"))
     }
 }
