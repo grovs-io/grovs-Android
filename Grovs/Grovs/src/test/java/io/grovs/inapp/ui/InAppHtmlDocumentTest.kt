@@ -26,15 +26,29 @@ class InAppHtmlDocumentTest {
     }
 
     @Test
+    fun theScriptGoesBeforeAnyAuthorScriptWhateverCommentsFollow() {
+        val tricky = "<!-- a --><p>x</p><script>evil()</script><!-- b --><!doctype html><p>y</p>"
+        assertEquals("<!doctype html>$viewport<s>$tricky", InAppHtmlDocument.document(tricky, "<s>"))
+        assertEquals("\uFEFF<!doctype html>$viewport<s><p>Hi</p>", InAppHtmlDocument.document("\uFEFF<!doctype html><p>Hi</p>", "<s>"))
+        assertEquals("  \n<!DOCTYPE html>$viewport<s><p>Hi</p>", InAppHtmlDocument.document("  \n<!DOCTYPE html><p>Hi</p>", "<s>"))
+    }
+
+    @Test
+    fun alphaIsIgnoredTheSameForHexAndRgba() {
+        assertEquals(0xFF112233.toInt(), InAppHtmlDocument.parseColor("#11223380"))
+        assertEquals(0xFF112233.toInt(), InAppHtmlDocument.parseColor("rgba(17, 34, 51, 0.5)"))
+    }
+
+    @Test
     fun injectsTheHandoffThenTheBridgeInOneScript() {
         val script = InAppHtmlDocument.injection("tok-1", obj("first_name" to "Ana"), obj("sku" to "A1"), "denied")
-        assertTrue(script.startsWith("<script>(function(b,s){window.__grovs=Object.assign("))
+        assertTrue(script.startsWith("<script>(function(b,p,s){window.__grovs=Object.assign("))
         assertTrue(script.contains("\"token\":\"tok-1\""))
         assertTrue(script.contains("\"first_name\":\"Ana\""))
         assertTrue(script.contains("\"sku\":\"A1\""))
         assertTrue(script.contains("\"pushPermission\":\"denied\""))
-        assertTrue(script.contains("{post:function(m){b.postMessage(s(m));}}"))
-        assertTrue(script.contains("(window.grovsAndroid,JSON.stringify.bind(JSON))"))
+        assertTrue(script.contains("{post:function(m){p.call(b,s(m));}}"))
+        assertTrue(script.contains("(window.grovsAndroid,window.grovsAndroid.postMessage,JSON.stringify.bind(JSON))"))
         assertTrue(script.endsWith("\n" + InAppBridge.SCRIPT + "</script>"))
     }
 

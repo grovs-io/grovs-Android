@@ -25,7 +25,7 @@ internal object InAppHtmlDocument {
     private const val URL_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~!\$&'()*+,;=:@/?#%"
     private val HEX = "0123456789ABCDEF".toCharArray()
     private val viewportTag = Regex("<meta[^>]*name\\s*=\\s*[\"']?viewport", RegexOption.IGNORE_CASE)
-    private val doctype = Regex("^(?:\\s|<!--[\\s\\S]*?-->)*<!doctype[^>]*>", RegexOption.IGNORE_CASE)
+    private val doctype = Regex("^(?:\\s|\uFEFF|<!--[^-]*(?:-(?!->)[^-]*)*-->)*<!doctype[^>]*>", RegexOption.IGNORE_CASE)
     private val metaTag = Regex("<meta[^>]*>", RegexOption.IGNORE_CASE)
     private val themeName = Regex("name\\s*=\\s*[\"']?theme-color[\"'\\s>/]", RegexOption.IGNORE_CASE)
     private val contentValue = Regex("content\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", RegexOption.IGNORE_CASE)
@@ -52,8 +52,8 @@ internal object InAppHtmlDocument {
         handoff.add("user", plain(user))
         handoff.add("event", plain(event))
         handoff.add("capabilities", JsonObject().apply { addProperty("pushPermission", pushPermission) })
-        val boot = "(function(b,s){window.__grovs=Object.assign(" + scriptJson(handoff) +
-            ",{post:function(m){b.postMessage(s(m));}});})(window." + CHANNEL + ",JSON.stringify.bind(JSON));"
+        val boot = "(function(b,p,s){window.__grovs=Object.assign(" + scriptJson(handoff) +
+            ",{post:function(m){p.call(b,s(m));}});})(window." + CHANNEL + ",window." + CHANNEL + ".postMessage,JSON.stringify.bind(JSON));"
         return "<script>" + boot + "\n" + InAppBridge.SCRIPT + "</script>"
     }
 
@@ -100,15 +100,14 @@ internal object InAppHtmlDocument {
         return plain?.let { parseColor(it.trim()) }
     }
 
-    /** `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` or `rgb()`/`rgba()` (alpha ignored) as ARGB. */
+    /** `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` or `rgb()`/`rgba()` as opaque ARGB (alpha ignored). */
     fun parseColor(value: String): Int? {
         if (value.startsWith("#")) {
             if (!hexValue.matches(value)) return null
             var hex = value.substring(1)
             if (hex.length == 3 || hex.length == 4) hex = hex.map { "$it$it" }.joinToString("")
             val rgb = hex.substring(0, 6).toInt(16)
-            val alpha = if (hex.length == 8) hex.substring(6, 8).toInt(16) else 0xFF
-            return (alpha shl 24) or rgb
+            return (0xFF shl 24) or rgb
         }
         val match = rgbValue.find(value) ?: return null
         val channels = (1..3).map { min(match.groupValues[it].toDouble(), 255.0).toInt() }
