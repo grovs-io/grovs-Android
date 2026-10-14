@@ -9,7 +9,7 @@ import io.grovs.inapp.model.InAppCampaign
 import io.grovs.inapp.model.InAppDefinition
 import io.grovs.inapp.model.InAppRendered
 
-/** `html` campaigns on the shared cases' base_campaign. */
+/** `html` campaigns built on the shared cases' base_campaign. */
 internal object InAppHtmlFixtures {
     val RENDERED = InAppRendered(title = null, message = null, buttons = emptyList(), urls = emptyList())
 

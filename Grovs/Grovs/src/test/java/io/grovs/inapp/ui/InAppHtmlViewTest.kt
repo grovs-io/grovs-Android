@@ -64,7 +64,7 @@ class InAppHtmlViewTest {
 
     private class Shown(val view: InAppHtmlView, val window: InAppWindow)
 
-    /** Draws the page the way the presenter does (Task 5): attach, a window for its edge, show, bind. */
+    /** Draws the page the way the presenter does: attach, a window for its edge, show, bind. */
     private fun present(
         layout: String = "modal", html: String = "<p>Hi</p>", content: JsonObject = JsonObject(),
         makeWebView: (Context) -> WebView = { WebView(it) },
