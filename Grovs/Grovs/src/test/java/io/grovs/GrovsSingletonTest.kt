@@ -434,6 +434,7 @@ class GrovsSingletonTest {
         )
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun `unconfigured unread callback remains asynchronous on main`() {
         val callbackReceived = CountDownLatch(1)
@@ -458,7 +459,7 @@ class GrovsSingletonTest {
         }
 
         assertEquals("Unread callback was not delivered", 0L, callbackReceived.count)
-        assertNull(unreadCount)
+        assertEquals(0, unreadCount)
         assertSame(Looper.getMainLooper(), callbackLooper)
     }
 

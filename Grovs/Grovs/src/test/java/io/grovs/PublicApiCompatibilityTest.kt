@@ -162,4 +162,26 @@ class PublicApiCompatibilityTest {
         assertFalse(java.lang.reflect.Modifier.isFinal(adapter.modifiers))
         assertNotNull(adapter.getConstructor())
     }
+
+    @Test
+    fun `removed inbox api keeps its 3_0 signatures`() {
+        val companion = Grovs.Companion.javaClass
+        val lifecycleOwner = androidx.lifecycle.LifecycleOwner::class.java
+        assertNotNull(companion.getDeclaredMethod("setOnAutomaticNotificationsListener", GrovsNotificationsListener::class.java))
+        assertNotNull(companion.getDeclaredMethod("displayMessagesFragment", Function0::class.java))
+        assertNotNull(companion.getDeclaredMethod("numberOfUnreadMessages", kotlin.coroutines.Continuation::class.java))
+        assertNotNull(companion.getDeclaredMethod("numberOfUnreadMessages", lifecycleOwner, Function1::class.java))
+        assertNotNull(
+            companion.getDeclaredMethod(
+                "numberOfUnreadMessages\$default",
+                companion,
+                lifecycleOwner,
+                Function1::class.java,
+                intType,
+                Any::class.java,
+            )
+        )
+        assertTrue(GrovsNotificationsListener::class.java.isInterface)
+        assertNotNull(GrovsNotificationsListener::class.java.getDeclaredMethod("onAutomaticNotificationClosed", booleanType))
+    }
 }

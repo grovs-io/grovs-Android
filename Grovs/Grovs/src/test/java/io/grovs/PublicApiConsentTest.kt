@@ -179,11 +179,9 @@ class PublicApiConsentTest {
         Grovs.generateLink(title = "t", tracking = null, listener = { l, e -> generated += l to e })
         val details = CopyOnWriteArrayList<Pair<Map<String, Any>?, Exception?>>()
         Grovs.linkDetails(path = "/p", listener = { d, e -> details += d to e })
-        val counts = CopyOnWriteArrayList<Int?>()
-        Grovs.numberOfUnreadMessages(onResult = { counts += it })
-        waitFor("all three rejections") { generated.isNotEmpty() && details.isNotEmpty() && counts.isNotEmpty() }
+        waitFor("both rejections") { generated.isNotEmpty() && details.isNotEmpty() }
         // A second completion would show up in the same collections during this window.
-        assertNever("a duplicate completion") { generated.size > 1 || details.size > 1 || counts.size > 1 }
+        assertNever("a duplicate completion") { generated.size > 1 || details.size > 1 }
 
         assertEquals("exactly one link-generation completion", 1, generated.size)
         assertNull(generated.single().first)
@@ -198,9 +196,6 @@ class PublicApiConsentTest {
             GrovsErrorCode.LINK_DETAILS_ERROR,
             (details.single().second as GrovsException).errorCode,
         )
-
-        assertEquals("exactly one unread-count completion", 1, counts.size)
-        assertNull("a rejected unread count is null, not a number", counts.single())
 
         // Nothing reached the manager: the rejection happened at the public entry point.
         coVerify(exactly = 0) {

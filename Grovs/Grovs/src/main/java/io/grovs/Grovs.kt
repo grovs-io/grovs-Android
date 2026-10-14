@@ -88,6 +88,7 @@ fun interface GrovsLinkDetailsListener {
     fun onLinkDetails(linkDetails:Map<String, Any>?, error: GrovsException?)
 }
 
+@Deprecated("The messages inbox was removed. The listener is never called.")
 fun interface GrovsNotificationsListener {
     fun onAutomaticNotificationClosed(isLast:Boolean)
 }
@@ -428,13 +429,10 @@ public class Grovs: ActivityProvider {
                 startDate = startDate)
         }
 
-        /// Register a listener for receiving automatic notifications events.
-        ///
-        /// - Parameters:
-        ///   - listener: A listener to receive events about automatic notifications.
-        fun setOnAutomaticNotificationsListener(listener: GrovsNotificationsListener) {
-            instance.setOnAutomaticNotificationsListener(listener = listener)
-        }
+        /// Does nothing: the messages inbox was removed.
+        @Suppress("DEPRECATION", "UNUSED_PARAMETER")
+        @Deprecated("The messages inbox was removed. Use in-app messages.")
+        fun setOnAutomaticNotificationsListener(listener: GrovsNotificationsListener) = Unit
 
         /// Follows in-app messages: shown, clicked, dismissed, answered and failed. Called on the
         /// main thread. The SDK holds the listener strongly; pass null to remove it. Java apps
@@ -468,22 +466,25 @@ public class Grovs: ActivityProvider {
             instance.setInAppDebugLogging(enabled)
         }
 
-        /// Show the notifications screen.
-        ///
-        /// - Parameters:
-        ///   - listener: A lambda function to be called when the screen is dismissed.
+        /// Shows nothing: the messages inbox was removed. Calls [onDismissed] once, on the main thread.
+        @Deprecated("The messages inbox was removed. Use in-app messages.")
         fun displayMessagesFragment(onDismissed: (()->Unit)?) {
-            instance.displayMessagesFragment(onDismissed)
+            onDismissed ?: return
+            instance.mainHandler.post { onDismissed() }
         }
 
-        /// Get the number of unread notifications this device currently has.
-        suspend fun numberOfUnreadMessages(): Int? {
-            return instance.numberOfUnreadMessages()
-        }
+        /// Always 0: the messages inbox was removed.
+        @Deprecated("The messages inbox was removed. Use in-app messages.")
+        suspend fun numberOfUnreadMessages(): Int? = 0
 
-        /// Get the number of unread notifications this device currently has.
+        /// Always 0, once, on the main thread; skipped if [lifecycleOwner] is destroyed by then.
+        @Deprecated("The messages inbox was removed. Use in-app messages.")
         fun numberOfUnreadMessages(lifecycleOwner: LifecycleOwner? = null, onResult: ((Int?)->Unit)?) {
-            return instance.numberOfUnreadMessages(lifecycleOwner = lifecycleOwner, onResult = onResult)
+            onResult ?: return
+            instance.mainHandler.post {
+                if (lifecycleOwner?.lifecycle?.currentState == Lifecycle.State.DESTROYED) return@post
+                onResult(0)
+            }
         }
 
         /// Checks the configuration validity.

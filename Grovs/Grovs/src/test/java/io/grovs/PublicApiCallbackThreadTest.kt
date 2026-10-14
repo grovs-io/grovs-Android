@@ -46,7 +46,6 @@ class PublicApiCallbackThreadTest {
             "device_for_vendor_id" to json("""{"last_seen":null}"""),
             "create_link" to json("""{"link":"https://test.grovs.io/generated"}"""),
             "link_details" to json("""{"title":"T","subtitle":"S","image_url":null,"data":{"k":"v"}}"""),
-            "number_of_unread_notifications" to json("""{"number_of_unread_notifications":3}"""),
             "data_for_device" to json("""{"link":"https://test.grovs.io/deferred","data":{"ref":"x"}}"""),
         ))
         E2ETestUtils.configureAndWaitForAuthOnly(application, baseURL = server.url("/").toString())
@@ -104,6 +103,7 @@ class PublicApiCallbackThreadTest {
         assertEquals("T", details?.get("title"))
     }
 
+    @Suppress("DEPRECATION")
     @Test
     fun `numberOfUnreadMessages result is delivered on the main looper`() {
         val delivery = Delivery()
@@ -115,7 +115,7 @@ class PublicApiCallbackThreadTest {
         }
 
         awaitDelivery(delivery, "unread count callback")
-        assertEquals(3, count)
+        assertEquals(0, count)
     }
 
     @Test
