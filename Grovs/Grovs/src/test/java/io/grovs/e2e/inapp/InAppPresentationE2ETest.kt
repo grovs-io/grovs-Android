@@ -140,7 +140,7 @@ internal class InAppPresentationE2ETest : InAppTestBase() {
         assertNotNull("still on screen", presenter().shownWindow)
         assertTrue("no close view", root().findViewById<View>(R.id.grovs_in_app_close)?.visibility != View.VISIBLE)
         tapButton("ok")
-        pumpUntil("the button closes it") { recorder.clicked.isNotEmpty() }
+        pumpUntil("the button closes it") { recorder.clicked.isNotEmpty() && presenter().shownWindow == null }
         assertEquals("c1", recorder.clicked.single().first)
         assertEquals("ok", recorder.clicked.single().second)
         assertEquals("a button close is a click, not a dismissal", 0, reported("in_app_dismissed").size)

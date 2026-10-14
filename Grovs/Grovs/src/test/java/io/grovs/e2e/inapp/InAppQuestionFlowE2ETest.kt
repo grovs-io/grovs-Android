@@ -221,9 +221,12 @@ internal class InAppQuestionFlowE2ETest : InAppTestBase() {
             .triggers(event("in_app_answered", filter("campaign_id", "eq", "q1"), filter("value", "eq", 4))).build()
         ask(stars(thanks = "Thanks"), five, four)
         tapAnswer("4")
+        idleFor(1_000)
         assertEquals("the follow-up waits while the question is on screen", listOf("q1"), recorder.shown)
         idleUntil("the follow-up", 5_000) { recorder.shown == listOf("q1", "four") }
         assertEquals(1, recorder.answered.size)
+        val order = recorder.calls.map { it.kind to it.campaignId }
+        assertTrue("q1 closes before four shows: $order", order.indexOf("answered" to "q1") < order.indexOf("shown" to "four"))
     }
 
     // shared README Questions, Review: "at or above review_from ... asked for once the message has closed"

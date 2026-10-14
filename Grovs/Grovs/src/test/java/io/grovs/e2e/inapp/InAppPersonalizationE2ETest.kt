@@ -73,6 +73,23 @@ internal class InAppPersonalizationE2ETest : InAppTestBase() {
         assertEquals("https://grovs.io/s?q=x%20y", shadowOf(application).nextStartedActivity.dataString)
     }
 
+    // cases.json "everything outside the unreserved set is percent-encoded, fallbacks included"
+    @Test
+    fun `I26 everything outside the unreserved set is percent-encoded in a link`() {
+        start(
+            InAppCampaigns.campaign().buttons(
+                button("go", "Go", openUrl("https://acme.example/s?q={{ event.q }}&d={{ event.missing | default: \"a b\" }}")),
+            ).build(),
+        )
+        Grovs.track("cart_viewed", mapOf("q" to "a!'()*+ \u00e9~-._Z9"))
+        pumpUntil("the message to show") { recorder.shown.size == 1 }
+        tapButton("go")
+        assertEquals(
+            "https://acme.example/s?q=a%21%27%28%29%2A%2B%20%C3%A9~-._Z9&d=a%20b",
+            shadowOf(application).nextStartedActivity.dataString,
+        )
+    }
+
     // "no fallback fails" personalization, so the campaign is skipped
     @Test
     fun `I26 a missing value without a default skips the campaign`() {

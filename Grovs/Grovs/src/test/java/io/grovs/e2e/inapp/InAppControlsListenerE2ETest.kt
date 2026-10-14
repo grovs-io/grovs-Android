@@ -10,6 +10,7 @@ import io.grovs.e2e.contract.InAppCampaigns
 import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,6 +18,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLog
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArrayList
 
 @RunWith(RobolectricTestRunner::class)
@@ -180,7 +182,12 @@ internal class InAppControlsListenerE2ETest : InAppTestBase() {
             override fun onInAppMessageShown(campaignId: String) { shown += campaignId }
         })
         start(c1)
-        repeat(3) { System.gc(); System.runFinalization() }
+        val canary = WeakReference(Any())
+        for (i in 1..50) {
+            if (canary.get() == null) break
+            System.gc(); System.runFinalization(); Thread.sleep(10)
+        }
+        assertNull("a garbage collection ran", canary.get())
         Grovs.track("cart_viewed")
         pumpUntil("the only reference is the SDK's") { shown == listOf("c1") }
     }
