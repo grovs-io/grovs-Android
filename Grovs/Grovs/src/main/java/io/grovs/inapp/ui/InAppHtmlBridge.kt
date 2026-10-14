@@ -9,8 +9,12 @@ import androidx.webkit.WebViewFeature
 
 /** Carries the page's messages to the session, both ways named `grovsAndroid` so the boot script is the same. */
 internal object InAppHtmlTransport {
-    fun install(webView: WebView, receive: (raw: String, mainFrame: Boolean) -> Unit): () -> Unit {
-        if (supportsMessageListener()) {
+    fun install(
+        webView: WebView,
+        useListener: Boolean = supportsMessageListener(),
+        receive: (raw: String, mainFrame: Boolean) -> Unit,
+    ): () -> Unit {
+        if (useListener) {
             // Runs on the main thread and knows the frame, which the token alone cannot tell.
             WebViewCompat.addWebMessageListener(webView, InAppHtmlDocument.CHANNEL, setOf("*")) { _, message, _, isMainFrame, _ ->
                 message.data?.let { receive(it, isMainFrame) }

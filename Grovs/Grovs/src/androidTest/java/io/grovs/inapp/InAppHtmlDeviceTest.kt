@@ -2,6 +2,8 @@ package io.grovs.inapp
 
 import android.app.Activity
 import android.app.Application
+import android.content.MutableContextWrapper
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
@@ -25,9 +27,11 @@ import io.grovs.inapp.ui.InAppActions
 import io.grovs.inapp.ui.InAppDialogPresenter
 import io.grovs.inapp.ui.InAppHtmlDocument
 import io.grovs.inapp.ui.InAppHtmlView
-import io.grovs.inapp.ui.InAppJavascriptChannel
+import io.grovs.inapp.ui.InAppHtmlTransport
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -189,8 +193,31 @@ class InAppHtmlDeviceTest {
      */
     private fun spin(millis: Long) = "var end=Date.now()+$millis;while(Date.now()<end){}"
 
-    private fun keyboardUp(view: View): Boolean =
-        ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+    /** Runs a shell command and waits for it to finish. */
+    private fun shell(command: String): String =
+        ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+            .use { it.readBytes().toString(Charsets.UTF_8) }
+
+    /** The system's own answer, the same before and after the page closes, whichever window holds the focus. */
+    private fun keyboardShown(): Boolean = shell("dumpsys input_method").contains("mInputShown=true")
+
+    /** Polls a size until it is non-zero and has held still for half a second. */
+    private fun settled(read: () -> Int): Int {
+        val end = SystemClock.uptimeMillis() + 5_000
+        var last = -1
+        var since = SystemClock.uptimeMillis()
+        while (SystemClock.uptimeMillis() < end) {
+            val now = onMain(read)
+            if (now != last) {
+                last = now
+                since = SystemClock.uptimeMillis()
+            } else if (now > 0 && SystemClock.uptimeMillis() - since >= 500) {
+                return now
+            }
+            Thread.sleep(50)
+        }
+        return last
+    }
 
     // Tests
 
@@ -208,16 +235,17 @@ class InAppHtmlDeviceTest {
     fun aTallModalIsClampedAndABannerTakesItsPagesHeight() {
         val modal = present("<style>body{margin:0}</style><div style=\"height:5000px\">tall</div>")
         awaitShown()
-        Thread.sleep(500)
-        val (height, safe) = onMain { modal.webView!!.height to safeHeightPx(current!!) }
-        assertTrue("$height within 90 % of $safe", height <= (safe * 0.9f).roundToInt() + 1)
+        val height = settled { modal.webView!!.height }
+        val (safe, density) = onMain { safeHeightPx(current!!) to modal.webView!!.resources.displayMetrics.density }
+        // The modal keeps 16 dp from the safe top and bottom, and takes 90 % of what is left.
+        val room = safe - 2 * 16 * density
+        assertEquals("$height is 90 % of $room", (room * 0.9f).roundToInt().toFloat(), height.toFloat(), 2f)
         onMain { presenter.dismiss() }
         outcomes.poll(2, TimeUnit.SECONDS)
 
         val banner = present("<style>body{margin:0}</style><div style=\"height:60px\">short</div>", "banner_bottom")
         awaitShown()
-        Thread.sleep(500)
-        val (bannerHeight, density) = onMain { banner.webView!!.height to banner.webView!!.resources.displayMetrics.density }
+        val bannerHeight = settled { banner.webView!!.height }
         assertEquals((60 * density).roundToInt().toFloat(), bannerHeight.toFloat(), 2 * density)
     }
 
@@ -288,11 +316,28 @@ class InAppHtmlDeviceTest {
 
     @Test
     fun subframesLoadButCannotSpeakForThePage() {
-        server.enqueue(MockResponse().setBody("<p>embed</p><script>window.grovsAndroid&&grovsAndroid.postMessage(" +
-            "JSON.stringify({v:1,token:'forged',id:'1',type:'close',args:{}}))</script>"))
+        val listener = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+        val token = LinkedBlockingQueue<String>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.path != "/embed") return MockResponse().setResponseCode(204)
+                // Served once the page shows, so the embed's close is not dropped as too early.
+                shown.await(10, TimeUnit.SECONDS)
+                // The listener knows the frame, so the embed gets this show's token; the fallback has only the token as a guard.
+                val sent = if (listener) token.poll(5, TimeUnit.SECONDS) else "forged"
+                return MockResponse().setBody("<p>embed</p><script>" +
+                    "new Image().src='/seen?bridge='+typeof window.grovsAndroid;" +
+                    "if(window.grovsAndroid){grovsAndroid.postMessage(JSON.stringify({v:1,token:'$sent',id:'1',type:'close',args:{}}));" +
+                    "new Image().src='/posted';}</script>")
+            }
+        }
         val view = present("<iframe src=\"${server.url("/embed")}\"></iframe>")
+        token.add(onMain { view.session.token })
         awaitShown()
-        assertNotNull("the embed loaded", server.takeRequest(5, TimeUnit.SECONDS))
+        assertEquals("/embed", server.takeRequest(5, TimeUnit.SECONDS)?.path)
+        // The two pings load in parallel, so they may arrive in either order.
+        val pings = (1..2).mapNotNull { server.takeRequest(5, TimeUnit.SECONDS)?.path }.toSet()
+        assertEquals("the embed's script ran, saw the channel and posted its close", setOf("/seen?bridge=object", "/posted"), pings)
         noOutcomeFor(1_000)
         assertNotNull(onMain { view.webView })
     }
@@ -334,7 +379,12 @@ class InAppHtmlDeviceTest {
         eval(view, "window.__mark = 42")
         scenario.recreate()
         scenario.onActivity { current = it }
-        Thread.sleep(1_000)
+        assertTrue("the page never moved to the new Activity", until {
+            onMain {
+                val web = view.webView
+                (web?.context as? MutableContextWrapper)?.baseContext === current && web?.isAttachedToWindow == true
+            }
+        })
         assertSame(view, onMain { presenter.shownPage })
         assertSame(before, onMain { view.webView })
         assertTrue(onMain { view.webView!!.isAttachedToWindow })
@@ -371,11 +421,12 @@ class InAppHtmlDeviceTest {
         val page = "<script>window.grovsAndroid = {fake: true, postMessage: function () {}};" +
             "window.replaced = window.grovsAndroid.fake === true</script>" +
             "<button id=\"t\" data-grovs-action=\"track\" data-grovs-event=\"chose_plan\">Pick</button>"
+        var remove: () -> Unit = {}
         val web = onMain {
             val activity = current!!
             WebView(activity).also { web ->
                 web.settings.javaScriptEnabled = true
-                web.addJavascriptInterface(InAppJavascriptChannel { messages.add(it) }, InAppHtmlDocument.CHANNEL)
+                remove = InAppHtmlTransport.install(web, useListener = false) { raw, mainFrame -> if (mainFrame) messages.add(raw) }
                 activity.addContentView(web, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
                 val script = InAppHtmlDocument.injection(token, JsonObject(), JsonObject(), "unsupported")
                 web.loadDataWithBaseURL(null, InAppHtmlDocument.document(page, script), "text/html", "utf-8", null)
@@ -394,6 +445,7 @@ class InAppHtmlDeviceTest {
             assertEquals("chose_plan", track!!.getAsJsonObject("args").get("name").asString)
         } finally {
             onMain {
+                remove()
                 (web.parent as? ViewGroup)?.removeView(web)
                 web.destroy()
             }
@@ -402,16 +454,23 @@ class InAppHtmlDeviceTest {
 
     @Test
     fun theKeyboardThePageOpenedGoesAwayWithIt() {
-        instrumentation.uiAutomation.executeShellCommand("settings put secure show_ime_with_hard_keyboard 1").close()
-        val view = present("<style>body{margin:0}input{display:block;width:100%;height:120px}</style><input id=\"i\">")
-        awaitShown()
-        tapPage(view, 40f, 60f)
-        val opened = until { onMain { keyboardUp(presenter.shownPageWindow!!.dialog.window!!.decorView) } }
-        assumeTrue("no soft keyboard came up on this device", opened)
-        val close = onMain { view.root!!.findViewById<View>(R.id.grovs_in_app_close) }
-        tapView(close)
-        assertEquals(InAppOutcome.Dismissed("close_button"), outcomes.poll(5, TimeUnit.SECONDS))
-        assertTrue("the keyboard stayed up after the page closed", until { !onMain { keyboardUp(current!!.window.decorView) } })
+        val setting = "secure show_ime_with_hard_keyboard"
+        val original = shell("settings get $setting").trim()
+        shell("settings put $setting 1")
+        try {
+            val view = present("<style>body{margin:0}input{display:block;width:100%;height:120px}</style><input id=\"i\">")
+            awaitShown()
+            tapPage(view, 40f, 60f)
+            assumeTrue("no soft keyboard came up on this device", until { keyboardShown() })
+            val close = onMain { view.root!!.findViewById<View>(R.id.grovs_in_app_close) }
+            // The keyboard lifts the modal; tap the close once it has stopped moving.
+            settled { IntArray(2).also(close::getLocationOnScreen)[1] + 1 }
+            tapView(close)
+            assertEquals(InAppOutcome.Dismissed("close_button"), outcomes.poll(5, TimeUnit.SECONDS))
+            assertTrue("the keyboard stayed up after the page closed", until { !keyboardShown() })
+        } finally {
+            shell(if (original == "null") "settings delete $setting" else "settings put $setting $original")
+        }
     }
 
     private companion object {
