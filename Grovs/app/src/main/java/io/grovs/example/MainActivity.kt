@@ -40,7 +40,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
-import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.tasks.OnCompleteListener
 import com.google.firebase.messaging.FirebaseMessaging
 import io.grovs.Grovs
@@ -86,32 +85,12 @@ class MainActivity : FragmentActivity() {
 
             viewModel.updateCallbackState(message)
         }
-
-        // Notifications
-
-        Grovs.setOnAutomaticNotificationsListener { isLast ->
-            Log.d("MainActivity", "Dismissed automatic notification is last: $isLast")
-
-            Toast.makeText(this, "Dismissed automatic notification is last: $isLast", Toast.LENGTH_LONG).show()
-        }
-
     }
 
     override fun onStart() {
         super.onStart()
 
         Grovs.onStart(launcherActivity = this)
-
-        lifecycleScope.launch {
-            val result = Grovs.numberOfUnreadMessages()
-            viewModel.updateUnreadNotificationsState(result ?: 0)
-            Log.d("MainActivity", "Number of unread notifications coroutines: $result")
-        }
-
-        Grovs.numberOfUnreadMessages(lifecycleOwner = this, onResult = {
-            viewModel.updateUnreadNotificationsState(it ?: 0)
-            Log.d("MainActivity", "Number of unread notifications callback: $it")
-        })
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -163,7 +142,6 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
     val flowGeneratedLinkState = remember { mutableStateOf("Flow generated link") }
     val incomingLinkCallbackState by viewModel::incomingLinkCallbackState
     val incomingLinkFlowState by viewModel::incomingLinkFlowState
-    val unreadNotificationsState by viewModel::unreadNotificationsState
     val context = LocalContext.current
     val activity = context as? MainActivity
     val coroutineScope = rememberCoroutineScope()
@@ -311,22 +289,6 @@ fun CenteredTextViewAndButton(viewModel: MainViewModel) {
 
             Text(
                 text = incomingLinkFlowState,
-                modifier = Modifier.padding(top = 16.dp)
-            )
-
-            Button(
-                modifier = Modifier.padding(top = 16.dp),
-                onClick = {
-                Grovs.displayMessagesFragment {
-                    Log.d("MainActivity", "Notifications screen dismissed")
-                    Toast.makeText(context, "Notifications screen dismissed", Toast.LENGTH_LONG).show()
-                }
-            }) {
-                Text(text = "Show notifications")
-            }
-
-            Text(
-                text = unreadNotificationsState.toString(),
                 modifier = Modifier.padding(top = 16.dp)
             )
 

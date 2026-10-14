@@ -18,8 +18,6 @@ class MainViewModel : ViewModel() {
         private set
     var incomingLinkFlowState by mutableStateOf("Invitation link flow")
         private set
-    var unreadNotificationsState by mutableStateOf(0)
-        private set
 
     init {
         viewModelScope.launch {
@@ -38,9 +36,5 @@ class MainViewModel : ViewModel() {
 
     fun updateFlowState(newValue: String) {
         incomingLinkFlowState = newValue
-    }
-
-    fun updateUnreadNotificationsState(newValue: Int) {
-        unreadNotificationsState = newValue
     }
 }

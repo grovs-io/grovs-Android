@@ -34,7 +34,7 @@ The Grovs Android SDK provides deep linking, app links, link generation, in-app 
 - **Deep linking & app links**: route users to the right in-app screen, even after install
 - **Smart link generation**: create trackable links with metadata, custom redirects, and UTM parameters
 - **In-app messages**: show dashboard campaigns inside the app on app open, a screen view or a custom event, with targeting, limits, schedules, questions and custom HTML
-- **Push notifications**: receive push notifications for dashboard-sent messages via Firebase Cloud Messaging
+- **Push notifications**: receive Grovs push campaigns via Firebase Cloud Messaging
 - **Analytics**: track custom events, automatic and manual screen views, and Jetpack Navigation destinations
 - **Revenue tracking**: log Google Play Billing and custom purchases with automatic attribution
 - **User identity**: attach user IDs and attributes for analytics and segmentation
@@ -395,11 +395,9 @@ Grovs.generateLink(
 
 ## Messages
 
-> If console messages have **automatic display** enabled in your dashboard, they will appear in your app without any additional integration.
-
 ### Push notifications
 
-To receive push notifications for messages sent from the Grovs dashboard:
+To receive Grovs push campaigns:
 
 **1. Add Firebase Cloud Messaging.** If your app doesn't already use Firebase, add your app in the [Firebase Console](https://console.firebase.google.com), download `google-services.json`, and add the dependencies:
 
@@ -576,21 +574,6 @@ Without it, campaigns with a "Rate the app" action are skipped and the review st
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
-### Display messages
-
-```kotlin
-// Show the messages list as a modal fragment
-Grovs.displayMessagesFragment {
-    // Fragment was dismissed
-}
-
-// Get unread count for badges
-lifecycleScope.launch {
-    val count = Grovs.numberOfUnreadMessages()
-    Log.d("Grovs", "Unread: $count")
-}
-```
-
 ## Revenue Tracking
 
 > Revenue tracking is currently in **beta**.
@@ -656,7 +639,7 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 | `trackScreenView(screenName, properties)` | Track a screen view manually |
 | `trackNavigation(navController)` | Track Jetpack Navigation destinations |
 | `setScreenAliases(aliases)` | Friendly screen names for the dashboard |
-| `displayMessagesFragment(onDismissed)` | Show messages modal fragment |
+| `displayMessagesFragment(onDismissed)` | Deprecated: the messages inbox was removed; only calls `onDismissed` |
 | `isGrovsNotification(data)` / `isGrovsNotification(intent)` | Check whether a push or its tap intent comes from Grovs |
 | `handleNotificationOpen(intent)` | Report a Grovs push tap and deliver its data to the deep link listener. Returns `true` if the intent was a Grovs push |
 | `GrovsMessaging.handleMessage(context, message)` | Handle a push from your own messaging service. Returns `true` if it was a Grovs push |
@@ -667,8 +650,8 @@ Use `CANCELLATION` and `REFUND` payment event types for cancellations and refund
 | `discardInAppMessages(dismissCurrent)` | Drop waiting in-app messages, optionally closing the one on screen |
 | `setInAppExcludedScreens(screens)` | Screens where in-app messages never appear |
 | `setInAppDebugLogging(enabled)` | Log why each in-app campaign was or was not shown |
-| `setOnAutomaticNotificationsListener(listener)` | Get notified when an automatically displayed message closes |
-| `numberOfUnreadMessages(...)` | Get unread message count (callback or coroutine) |
+| `setOnAutomaticNotificationsListener(listener)` | Deprecated: the messages inbox was removed; the listener is never called |
+| `numberOfUnreadMessages(...)` | Deprecated: the messages inbox was removed; always yields `0` |
 | `logInAppPurchase(originalJson)` | Log a Google Play Billing purchase |
 | `logCustomPurchase(type, priceInCents, currency, productId, startDate)` | Log a custom purchase |
 

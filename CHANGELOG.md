@@ -7,6 +7,20 @@
 - `Grovs.setInAppListener` with `GrovsInAppListener` (shown, clicked, dismissed, answered and failed callbacks, plus `shouldShowInAppMessage` to hold one back) and `GrovsInAppListenerAdapter` for Java.
 - `Grovs.pauseInAppMessages`, `resumeInAppMessages`, `discardInAppMessages`, `setInAppExcludedScreens` and `setInAppDebugLogging`.
 
+### Removed
+- The messages inbox screens and the automatic display of dashboard messages. The SDK no longer calls the inbox endpoints. Use in-app messages instead.
+- Public classes and helpers that only drove those screens: `io.grovs.handlers.NotificationsManager`, everything in `io.grovs.fragments`, `io.grovs.viewmodels`, `io.grovs.adapters` and `io.grovs.model.notifications`, the generated `io.grovs.databinding` classes, the `Fragment.applySystemBarInsets`, `showProgressBar`, `hideProgressBar` and `NavController.safeNavigate` extensions, `ActivityProvider.requireNotificationsListener`, and the four inbox methods on `IGrovsService`.
+- The inbox resources: the `Grovs*` text and button styles (except `GrovsInAppWindow`), `grovs_messages`, `grovs_messages_empty`, the `grovs_*` colors except `grovs_push_notification_icon_tint`, the inbox layouts, navigation graph, slide animations and icons.
+- Dependencies the SDK no longer brings in: `com.google.android.material:material`, `androidx.constraintlayout:constraintlayout`, `androidx.navigation:navigation-fragment-ktx` and `androidx.navigation:navigation-ui-ktx` (replaced by `navigation-runtime-ktx`). If your app uses any of them, declare them yourself.
+
+### Deprecated
+- `Grovs.displayMessagesFragment(onDismissed)` shows nothing: it calls `onDismissed` once on the main thread.
+- `Grovs.numberOfUnreadMessages()` and `numberOfUnreadMessages(lifecycleOwner, onResult)` always yield `0`, the callback once on the main thread. It used to yield `null` when the SDK was not configured, not enabled or offline.
+- `Grovs.setOnAutomaticNotificationsListener` and `GrovsNotificationsListener`: the listener is never called.
+
+### Changed
+- Screens whose class is named `NotificationsMainFragment`, `NotificationsListFragment`, `NotificationDetailsFragment` or `AutoDisplayedNotificationFragment` are now tracked like any other screen.
+
 ### Notes
 - The in-app listener is held strongly. Call `Grovs.setInAppListener(null)` to release it.
 - App ratings use Google Play In-App Review only when the app adds `com.google.android.play:review-ktx`. Without it, "Rate the app" campaigns are skipped.
