@@ -293,6 +293,8 @@ internal class InAppController(private val deps: Dependencies) {
 
         val base = base(campaign)
         val shownIn = generation
+        // A stop posted from another thread may not have run yet, so [active] is checked too.
+        val current = { shownIn == generation && active }
         val html = campaign.template == InAppTemplate.HTML
         var answer: InAppAnswer? = null
         var clicked = false
@@ -304,21 +306,21 @@ internal class InAppController(private val deps: Dependencies) {
             user = device().user,
             event = event.properties,
             onAnswer = { value ->
-                if (shownIn == generation) {
+                if (current()) {
                     answer = value
                     answered(campaign, base, value)
                 }
             },
             onComment = { comment ->
                 val given = answer
-                if (shownIn == generation && given != null) {
+                if (current() && given != null) {
                     val properties = merged(base, answerProperties(campaign, given))
                     properties.addProperty("comment", comment)
                     deps.report(newEventId(), "in_app_commented", properties)
                 }
             },
             onTrack = { name, properties ->
-                if (shownIn == generation) {
+                if (current()) {
                     deps.track(name, merged(properties).also { it.addProperty("campaign_id", id) })
                     if (!clicked) {
                         clicked = true
@@ -326,13 +328,13 @@ internal class InAppController(private val deps: Dependencies) {
                     }
                 }
             },
-            onAttribute = { key, value -> if (shownIn == generation) deps.setAttribute(key, value) },
+            onAttribute = { key, value -> if (current()) deps.setAttribute(key, value) },
             canShow = if (html) {
-                { shownIn == generation && active && !hostBlocks }
+                { current() && !hostBlocks }
             } else null,
             onShown = if (html) {
                 {
-                    if (shownIn == generation && !counted) {
+                    if (current() && !counted) {
                         counted = true
                         countView(campaign, base)
                     }
@@ -341,7 +343,7 @@ internal class InAppController(private val deps: Dependencies) {
         )
         val drawn = deps.presenter.present(presentation) { outcome ->
             showing = null
-            if (shownIn != generation) return@present
+            if (!current()) return@present
             if (outcome is InAppOutcome.Unshown) {
                 showWaiting()
                 return@present

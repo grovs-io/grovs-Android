@@ -449,4 +449,48 @@ class InAppControllerAnswersTest {
         assertTrue(h.attributes.isEmpty())
         assertTrue(h.reports.isEmpty())
     }
+    @Test
+    fun `once the SDK cannot run a message on screen reaches neither the host nor the attributes`() {
+        val h = InAppHarness()
+        h.start(listOf(html()))
+        h.controller.onEvent(cart)
+        val presentation = h.presenter.shown.single()
+        presentation.onShown!!()
+        h.canRun = false
+        presentation.onAttribute!!("plan", JsonPrimitive("pro"))
+        presentation.onTrack!!("chose_plan", json("{}"))
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertTrue(h.attributes.isEmpty())
+        assertTrue(h.tracked.isEmpty())
+        assertTrue(h.listener.clicks.isEmpty())
+        assertTrue(h.listener.dismissals.isEmpty())
+        assertFalse(h.names().contains("in_app_dismissed"))
+    }
+
+    @Test
+    fun `once the SDK cannot run an answer reaches neither the host nor the reports`() {
+        val h = InAppHarness()
+        h.start(listOf(asking()))
+        h.controller.onEvent(cart)
+        h.canRun = false
+        answer(h, InAppAnswer.Stars(4))
+        h.presenter.shown.single().onComment!!("nice")
+        h.presenter.finish(InAppOutcome.Answered(InAppAnswer.Stars(4), "nice"))
+        assertTrue(h.listener.answers.isEmpty())
+        assertFalse(h.names().contains("in_app_answered"))
+        assertFalse(h.names().contains("in_app_commented"))
+    }
+
+    @Test
+    fun `a message that closes while the SDK cannot run still frees the screen`() {
+        val h = InAppHarness()
+        h.start(listOf(asking(), html("""{"id":"c2"}""")))
+        h.controller.onEvent(cart)
+        val first = h.presenter.shown.size
+        h.canRun = false
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        h.canRun = true
+        h.controller.onEvent(cart)
+        assertEquals(first + 1, h.presenter.shown.size)
+    }
 }
