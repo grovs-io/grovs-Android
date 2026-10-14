@@ -16,11 +16,13 @@ import io.grovs.inapp.InAppCancellable
 import io.grovs.inapp.InAppController
 import io.grovs.inapp.InAppFileStore
 import io.grovs.inapp.InAppHost
+import io.grovs.inapp.InAppRecord
 import io.grovs.inapp.model.InAppDevice
 import io.mockk.spyk
 import io.mockk.verify
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,7 +46,11 @@ class InAppQuestionFlowTest {
     private val app = RuntimeEnvironment.getApplication()
     private val reports = mutableListOf<Pair<String, JsonObject>>()
     private val answered = mutableListOf<Triple<String, Any, String?>>()
+    private val dismissed = mutableListOf<String>()
     private var reviews = 0
+    /** Ends the review prompt the fake actions started. */
+    private var reviewEnds: (() -> Unit)? = null
+    private lateinit var store: InAppFileStore
 
     private fun stamp(millis: Long) = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.ROOT)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(millis))
@@ -55,7 +61,7 @@ class InAppQuestionFlowTest {
     private fun start(): Pair<InAppController, InAppDialogPresenter> {
         val activity = Robolectric.buildActivity(TestActivity::class.java).setup().get()
         val images = InAppUiFixtures.images(folder.newFolder("img"))
-        val actions = InAppActions(app, { activity }, reviewAvailable = true, review = { _, done -> reviews++; done() })
+        val actions = InAppActions(app, { activity }, reviewAvailable = true, review = { _, done -> reviews++; reviewEnds = done })
         val presenter = InAppDialogPresenter({ activity }, images, actions).also { it.register(app) }
         val asking = InAppUiFixtures.json("""{"triggers":[{"type":"app_open"}],"content":{"question":
             {"id":"q1","type":"stars","options":[],"comment":{"split":null,"low":"Why?","high":null},"thanks":null,"review_from":4}}}""")
@@ -67,7 +73,7 @@ class InAppQuestionFlowTest {
             "global_caps":{"session":10,"day":10},"campaigns":[$asking,$following],"test_messages":[]}""").asJsonObject
         val handler = Handler(Looper.getMainLooper())
         val controller = InAppController(InAppController.Dependencies(
-            store = InAppFileStore(folder.newFolder("store"), "key"),
+            store = InAppFileStore(folder.newFolder("store"), "key").also { store = it },
             presenter = presenter,
             images = images,
             device = {
@@ -90,6 +96,10 @@ class InAppQuestionFlowTest {
             override fun onInAppMessageAnswered(campaignId: String, value: Any, comment: String?) {
                 answered += Triple(campaignId, value, comment)
             }
+
+            override fun onInAppMessageDismissed(campaignId: String, reason: String) {
+                dismissed += campaignId
+            }
         }
         presenter.onIdle = { controller.showWaiting() }
         controller.start()
@@ -107,6 +117,7 @@ class InAppQuestionFlowTest {
         tap(presenter, "grovs-in-app-answer-5")
         val answer = reports.single { it.first == "in_app_answered" }.second
         assertEquals("5", answer.get("value").toString())
+        assertEquals("c1", answer.get("campaign_id").asString)
         assertEquals("q1", answer.get("question_id").asString)
         assertEquals("stars", answer.get("type").asString)
         assertEquals("1", answer.get("revision").toString())
@@ -118,6 +129,9 @@ class InAppQuestionFlowTest {
         assertEquals("5", comment.get("value").toString())
         assertEquals(listOf(Triple("c1", 5 as Any, "Love it" as String?)), answered)
         assertTrue(reports.none { it.first == "in_app_dismissed" })
+        assertEquals(emptyList<String>(), dismissed)
+        val state = JsonParser.parseString(store.read(InAppRecord.STATE)).asJsonObject.getAsJsonObject("state")
+        assertEquals(listOf("c1"), state.getAsJsonArray("answered").map { it.asString })
     }
 
     @Test
@@ -127,6 +141,11 @@ class InAppQuestionFlowTest {
         presenter.shownWindow!!.dialog.findViewById<View>(R.id.grovs_in_app_skip).performClick()
         idle()
         assertEquals(1, reviews)
+        assertNull(presenter.shownSession)
+
+        reviewEnds!!()
+        idle()
+
         assertEquals("c2", presenter.shownSession!!.campaign.id)
     }
 
