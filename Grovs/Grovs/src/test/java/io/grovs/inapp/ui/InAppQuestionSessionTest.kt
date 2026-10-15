@@ -139,7 +139,7 @@ class InAppQuestionSessionTest {
         session.draft("Great")
         session.send()
         assertEquals(listOf("Great"), comments)
-        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), "Great"), outcomes.single())
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), "Great", byApp = true), outcomes.single())
         assertTrue(timers.isEmpty())
     }
 
@@ -147,7 +147,7 @@ class InAppQuestionSessionTest {
     fun aHostClosingAtTheAnswerStopsTheQuestion() {
         closeAtAnswer = true
         start().answer(InAppAnswer.Stars(5))
-        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null), outcomes.single())
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null, byApp = true), outcomes.single())
         assertTrue(session.step is InAppStep.Message)
     }
 
@@ -164,7 +164,7 @@ class InAppQuestionSessionTest {
         start().answer(InAppAnswer.Stars(2))
         session.draft("half typed")
         session.leave("app")
-        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(2), null), outcomes.single())
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(2), null, byApp = true), outcomes.single())
         assertTrue(comments.isEmpty())
     }
 

@@ -133,6 +133,15 @@ class InAppQuestionPresenterTest {
     }
 
     @Test
+    fun theAppClosingAHighStarAnswerAsksForNoReviewButFreesTheScreen() {
+        present()
+        tap("grovs-in-app-answer-5")
+        presenter.dismiss()
+        idle()
+        assertEquals(listOf("outcome", "idle"), events)
+    }
+
+    @Test
     fun aLowStarAnswerAsksForNoReview() {
         present()
         tap("grovs-in-app-answer-3")
@@ -216,7 +225,7 @@ class InAppQuestionPresenterTest {
         raiseKeyboard()
         presenter.dismiss()
         idle()
-        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null), outcomes.single())
+        assertEquals(InAppOutcome.Answered(InAppAnswer.Stars(5), null, byApp = true), outcomes.single())
         assertFalse(keyboard.isSoftInputVisible)
     }
 

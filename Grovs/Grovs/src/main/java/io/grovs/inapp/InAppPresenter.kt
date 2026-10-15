@@ -37,8 +37,8 @@ internal sealed class InAppOutcome {
     data class Clicked(val buttonId: String?, val action: InAppAction) : InAppOutcome()
     /** close_button, backdrop, swipe, app or orientation. */
     data class Dismissed(val reason: String) : InAppOutcome()
-    /** The question was answered, however the message closed afterwards. */
-    data class Answered(val value: InAppAnswer, val comment: String?) : InAppOutcome()
+    /** The question was answered, however the message closed afterwards. Closed [byApp], nothing follows it. */
+    data class Answered(val value: InAppAnswer, val comment: String?, val byApp: Boolean = false) : InAppOutcome()
     /** An html page that never showed (timeout, missing, app): nothing is counted or reported. */
     data class Unshown(val reason: String) : InAppOutcome()
 }
@@ -47,7 +47,7 @@ internal interface InAppPresenter {
     /** False when there is nowhere to draw: nothing shown, completion never called. Main thread. */
     fun present(presentation: InAppPresentation, completion: (InAppOutcome) -> Unit): Boolean
 
-    /** Closes what is on screen; its completion reports Dismissed("app"). */
+    /** Closes what is on screen; its completion reports Dismissed("app"), or Answered by the app for an answered question. */
     fun dismiss()
 }
 

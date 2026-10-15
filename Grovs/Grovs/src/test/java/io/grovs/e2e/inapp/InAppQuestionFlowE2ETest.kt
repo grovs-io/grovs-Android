@@ -242,6 +242,17 @@ internal class InAppQuestionFlowE2ETest : InAppTestBase() {
     }
 
     @Test
+    fun `I31 disabling the SDK during the comment asks for no review`() {
+        countReviews()
+        ask(stars(reviewFrom = 4, comment = true, split = 3, low = "What went wrong?", high = "What did you like?"))
+        tapAnswer("5")
+        Grovs.setSDK(false)
+        pumpUntil("closed by disabling") { !onScreen() }
+        idleFor(5_000)
+        assertEquals(0, reviews)
+    }
+
+    @Test
     fun `I31 stars below review_from never ask for a review`() {
         countReviews()
         ask(stars(reviewFrom = 4))

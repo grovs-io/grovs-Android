@@ -37,7 +37,7 @@ internal class InAppMessageSession(
 
     /** After an answer the outcome stays the answer; before it, a dismissal for this reason. */
     fun leave(reason: String) {
-        complete(answer?.let { InAppOutcome.Answered(it, comment) } ?: InAppOutcome.Dismissed(reason))
+        complete(answer?.let { InAppOutcome.Answered(it, comment, byApp = reason == "app") } ?: InAppOutcome.Dismissed(reason))
     }
 
     fun clickButton(index: Int) {

@@ -104,7 +104,7 @@ internal class InAppDialogPresenter(
         val question = presentation.campaign.content.question ?: return
         val from = question.reviewFrom ?: return
         if (question.type != InAppQuestionType.STARS || stars < from) return
-        if (presentation.isTest || !actions.canRequestReview) return onIdle()
+        if (presentation.isTest || outcome.byApp || !actions.canRequestReview) return onIdle()
         actions.requestReview { onIdle() }
     }
 
