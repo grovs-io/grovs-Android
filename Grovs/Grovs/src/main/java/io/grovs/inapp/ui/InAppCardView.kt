@@ -266,6 +266,19 @@ internal class InAppCardView(
         applyLayout()
     }
 
+    /**
+     * FrameLayout centres on the whole view and then shifts by the margins, so the keyboard's margin
+     * could lift a centred card past the top. It is centred in the room the margins leave instead.
+     */
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        val params = card.layoutParams as? LayoutParams ?: return
+        if (params.gravity != Gravity.CENTER) return
+        val x = params.leftMargin + (width - params.leftMargin - params.rightMargin - card.measuredWidth) / 2
+        val y = params.topMargin + (height - params.topMargin - params.bottomMargin - card.measuredHeight) / 2
+        card.layout(x, y, x + card.measuredWidth, y + card.measuredHeight)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         chooseImage(w, h)
@@ -332,7 +345,7 @@ internal class InAppCardView(
             if (!template.isImageOnly) {
                 text = textBlock()?.let(::scrolling)
                 buttons = buttonRow(besideClose = false)
-                question = questionArea(besideClose = false)
+                question = questionArea(besideClose = false)?.let { scrolling(it, viewId = View.NO_ID) }
             }
         }
     }
@@ -348,7 +361,7 @@ internal class InAppCardView(
         body.text = text?.let(::scrolling)
         var besideClose = text == null && InAppStyle.showsClose(campaign)
         body.buttons = buttonRow(besideClose)?.also { besideClose = false }
-        body.question = questionArea(besideClose)
+        body.question = questionArea(besideClose)?.let { scrolling(it, viewId = View.NO_ID) }
         row.addView(body, LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
         return row
     }
@@ -391,8 +404,8 @@ internal class InAppCardView(
         includeFontPadding = false
     }
 
-    private fun scrolling(inner: View): View = ScrollView(context).apply {
-        id = R.id.grovs_in_app_text
+    private fun scrolling(inner: View, viewId: Int = R.id.grovs_in_app_text): View = ScrollView(context).apply {
+        id = viewId
         isFillViewport = false
         addView(inner, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
     }

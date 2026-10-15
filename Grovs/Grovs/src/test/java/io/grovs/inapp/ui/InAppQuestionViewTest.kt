@@ -4,6 +4,7 @@ import android.app.Activity
 import android.graphics.Rect
 import android.view.View
 import android.widget.EditText
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.graphics.Insets
 import io.grovs.R
@@ -46,7 +47,7 @@ class InAppQuestionViewTest {
     }
 
     private fun make(question: String, template: String = "interstitial", title: String? = "Hello",
-                     message: String? = "Welcome"): Pair<InAppCardView, InAppMessageSession> {
+                     message: String? = "Welcome", w: Int = width, h: Int = height): Pair<InAppCardView, InAppMessageSession> {
         val campaign = InAppUiFixtures.campaign("""{"template":"$template","content":{"question":$question}}""")
         val presentation = InAppUiFixtures.presentation(campaign, title = title, message = message)
             .copy(onAnswer = { answers += it })
@@ -55,16 +56,26 @@ class InAppQuestionViewTest {
             object : io.grovs.inapp.InAppCancellable { override fun cancel() {} }
         }) { outcomes += it }
         view = InAppCardView(activity, session, InAppUiFixtures.images(folder.newFolder()), night = false)
-        session.redraw = { view.rebuild(); lay(view) }
+        session.redraw = { view.rebuild(); lay(view, w, h) }
         view.applyInsets(Insets.of(0, 24, 0, 48), 0)
-        lay(view)
+        lay(view, w, h)
         return view to session
     }
 
-    private fun lay(view: View) {
-        view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY))
-        view.layout(0, 0, width, height)
+    private fun lay(view: View, w: Int = width, h: Int = height) {
+        view.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+        view.layout(0, 0, w, h)
+    }
+
+    /** Scrolls [target]'s scroller to its end; true when [target] then sits whole inside it, above [floor]. */
+    private fun reachable(root: View, target: View, floor: Int): Boolean {
+        var node = target.parent as View
+        while (node !is ScrollView) node = node.parent as View
+        node.scrollTo(0, node.getChildAt(0).height - node.height)
+        val viewport = bounds(root, node)
+        val shown = bounds(root, target)
+        return viewport.bottom <= floor && shown.top >= viewport.top && shown.bottom <= viewport.bottom
     }
 
     private fun bounds(root: View, view: View): Rect {
@@ -186,6 +197,22 @@ class InAppQuestionViewTest {
             val area = bounds(view, view.findViewById(R.id.grovs_in_app_question))
             assertTrue(template, area.top >= 0 && area.bottom <= height && area.right <= width)
         }
+    }
+
+    @Test
+    fun inAShortWindowTheLastOptionCanBeScrolledIntoView() {
+        val options = (1..5).joinToString(",") { """{"id":"$it","text":"Option $it"}""" }
+        val five = """{"id":"q3","type":"choice","options":[$options],"comment":null,"thanks":null,"review_from":null}"""
+        val (view, _) = make(five, w = 640, h = 240)
+        assertTrue(reachable(view, view.findViewWithTag("grovs-in-app-answer-5"), floor = 240))
+    }
+
+    @Test
+    fun inLandscapeWithTheKeyboardUpSendCanBeScrolledIntoView() {
+        val (view, _) = make(stars, w = 640, h = 360)
+        view.applyInsets(Insets.of(0, 24, 0, 0), 200)
+        view.findViewWithTag<View>("grovs-in-app-answer-5").performClick()
+        assertTrue(reachable(view, view.findViewById(R.id.grovs_in_app_send), floor = 360 - 200))
     }
 
     @Test

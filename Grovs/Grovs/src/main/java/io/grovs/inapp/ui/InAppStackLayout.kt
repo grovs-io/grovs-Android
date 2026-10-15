@@ -9,7 +9,7 @@ import kotlin.math.roundToInt
 
 /**
  * Picture, text, buttons and question from top to bottom. When the room runs out the picture gives way
- * first, then the text scrolls; buttons and the question always keep their height.
+ * first, then the text scrolls, then the question; buttons always keep their height.
  */
 internal class InAppStackLayout(context: Context) : ViewGroup(context) {
     var picture: View? = null
@@ -61,10 +61,10 @@ internal class InAppStackLayout(context: Context) : ViewGroup(context) {
         val limit = if (mode == MeasureSpec.UNSPECIFIED) Int.MAX_VALUE / 2 else MeasureSpec.getSize(heightMeasureSpec)
         val inner = width - paddingLeft - paddingRight
         val present = listOfNotNull(picture, text, buttons, question).size
-        val fixed = natural(buttons, inner) + natural(question, inner) + spacing * max(0, present - 1) +
-            paddingTop + paddingBottom
+        val fixed = natural(buttons, inner) + spacing * max(0, present - 1) + paddingTop + paddingBottom
+        val questionHeight = min(natural(question, inner), max(0, limit - fixed))
         val textNatural = natural(text, inner)
-        val room = max(0, limit - fixed)
+        val room = max(0, limit - fixed - questionHeight)
         var pictureHeight = 0
         val textHeight: Int
         if (picture != null && fillPicture) {
@@ -74,13 +74,13 @@ internal class InAppStackLayout(context: Context) : ViewGroup(context) {
             if (picture != null) pictureHeight = min((inner * ratio).roundToInt(), max(0, room - textNatural))
             textHeight = min(textNatural, room - pictureHeight)
         }
-        val content = fixed + pictureHeight + textHeight
+        val content = fixed + questionHeight + pictureHeight + textHeight
         val height = if (mode == MeasureSpec.EXACTLY) limit else min(content, limit)
         leftover = max(0, height - content)
         picture?.measure(exactly(inner), exactly(pictureHeight))
         text?.measure(exactly(inner), exactly(textHeight))
         buttons?.let { it.measure(exactly(inner), exactly(it.measuredHeight)) }
-        question?.let { it.measure(exactly(inner), exactly(it.measuredHeight)) }
+        question?.measure(exactly(inner), exactly(questionHeight))
         setMeasuredDimension(width, height)
     }
 
