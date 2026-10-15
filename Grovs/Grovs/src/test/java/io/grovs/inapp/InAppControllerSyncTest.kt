@@ -1,5 +1,6 @@
 package io.grovs.inapp
 
+import com.google.gson.JsonObject
 import io.grovs.inapp.InAppFixtures.campaign
 import io.grovs.inapp.InAppFixtures.json
 import io.grovs.inapp.model.InAppEvent
@@ -17,6 +18,19 @@ class InAppControllerSyncTest {
     val temp = TemporaryFolder()
 
     private val cart = InAppEvent(InAppEventType.EVENT, "cart_viewed")
+    private var download: ((ByteArray?) -> Unit)? = null
+
+    /** A first launch: the opening is held for the sync, whose campaign's picture is still downloading. */
+    private fun openingWithoutPicture(vararg others: JsonObject): InAppHarness {
+        val images = InAppImages(temp.root, loader = { _, done -> download = done }, decodes = { true })
+        val h = InAppHarness(imageCache = images)
+        h.holdSync = true
+        h.start(listOf(campaign("""{"triggers":[{"type":"app_open"}],"content":{"image":{"portrait":"https://cdn.example/welcome.png"}}}""")) + others)
+        h.controller.onAppOpen()
+        h.heldSync!!.invoke()
+        return h
+    }
+
     private val storeButton = """{"content":{"buttons":[{"id":"b1","text":"Update","action":{"type":"open_store"}}]}}"""
 
     // IOS/InAppController.swift:208-220 onBatchResponse
@@ -219,6 +233,65 @@ class InAppControllerSyncTest {
         h.controller.onEvent(cart)
         assertEquals(listOf("c1"), h.presenter.ids)
         assertTrue(images.file("https://cdn.example/a.png") != null)
+    }
+
+    @Test
+    fun `an opening shows once its first picture arrives`() {
+        val h = openingWithoutPicture()
+        assertEquals(emptyList<String>(), h.presenter.ids)
+
+        download!!(byteArrayOf(1))
+        assertEquals(listOf("c1"), h.presenter.ids)
+        assertEquals(1, h.reports.count { it.name == "in_app_viewed" })
+    }
+
+    @Test
+    fun `an opening waits for its pictures only a short while`() {
+        val h = openingWithoutPicture()
+        h.clock += InAppController.IMAGES_WAIT_MS + 1
+        download!!(byteArrayOf(1))
+        assertEquals(emptyList<String>(), h.presenter.ids)
+    }
+
+    @Test
+    fun `a picture arriving after a stop shows nothing`() {
+        val h = openingWithoutPicture()
+        h.controller.stop()
+        h.controller.start()
+        download!!(byteArrayOf(1))
+        assertEquals(emptyList<String>(), h.presenter.ids)
+    }
+
+    @Test
+    fun `a picture arriving after a discard shows nothing`() {
+        val h = openingWithoutPicture()
+        h.controller.discard(dismissCurrent = false)
+        h.controller.resume()
+        download!!(byteArrayOf(1))
+        assertEquals(emptyList<String>(), h.presenter.ids)
+    }
+
+    @Test
+    fun `an opening whose picture arrives while another message shows waits its turn`() {
+        val h = openingWithoutPicture(campaign("""{"id":"other","triggers":[{"type":"event","name":"cart_viewed"}]}"""))
+        h.controller.onEvent(cart)
+        assertEquals(listOf("other"), h.presenter.ids)
+
+        download!!(byteArrayOf(1))
+        assertEquals(listOf("other"), h.presenter.ids)
+        h.presenter.finish(InAppOutcome.Dismissed("close_button"))
+        assertEquals(listOf("other", "c1"), h.presenter.ids)
+    }
+
+    @Test
+    fun `a picture does not bring back an ordinary event that missed it`() {
+        val images = InAppImages(temp.root, loader = { _, done -> download = done }, decodes = { true })
+        val h = InAppHarness(imageCache = images)
+        h.start(listOf(campaign("""{"content":{"image":{"portrait":"https://cdn.example/a.png"}}}""")))
+        h.controller.onEvent(cart)
+
+        download!!(byteArrayOf(1))
+        assertEquals(emptyList<String>(), h.presenter.ids)
     }
 
     @Test

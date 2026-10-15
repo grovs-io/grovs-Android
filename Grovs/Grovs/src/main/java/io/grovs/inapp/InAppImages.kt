@@ -28,6 +28,9 @@ internal class InAppImages(
     private val background: Executor = deletions,
 ) {
     private val loading = mutableSetOf<String>()
+    /** Called on the loading thread after a picture is stored. */
+    @Volatile
+    var onStored: () -> Unit = {}
     /** File names in [folder], read from it on first use. Guarded by itself. */
     private val stored: MutableSet<String> by lazy {
         folder.listFiles()?.mapTo(mutableSetOf()) { it.name } ?: mutableSetOf()
@@ -41,8 +44,9 @@ internal class InAppImages(
             if (!started) continue
             loader(url) { data ->
                 // Decoded once here, so a file that is not an image never counts as ready.
-                if (data != null && data.size <= MAX_BYTES && decodes(data)) store(url, data)
+                val kept = data != null && data.size <= MAX_BYTES && decodes(data) && store(url, data)
                 synchronized(loading) { loading.remove(url) }
+                if (kept) onStored()
             }
         }
     }
@@ -73,20 +77,22 @@ internal class InAppImages(
 
     private fun path(url: String) = File(folder, name(url))
 
-    private fun store(url: String, data: ByteArray) {
-        if (!folder.isDirectory && !folder.mkdirs()) return
+    private fun store(url: String, data: ByteArray): Boolean {
+        if (!folder.isDirectory && !folder.mkdirs()) return false
         val file = AtomicFile(path(url))
         val stream = try {
             file.startWrite()
         } catch (e: IOException) {
-            return
+            return false
         }
-        try {
+        return try {
             stream.write(data)
             file.finishWrite(stream)
             synchronized(stored) { stored.add(name(url)) }
+            true
         } catch (e: IOException) {
             file.failWrite(stream)
+            false
         }
     }
 

@@ -182,6 +182,10 @@ internal class InAppHarness(
         )
     ).also { it.settings = settings }
 
+    init {
+        images.onStored = { controller.onImageStored() }
+    }
+
     fun iso(millis: Long): String = InAppFixtures.iso(millis)
 
     fun respond(campaigns: List<JsonObject>, extra: JsonObject = JsonObject()) {

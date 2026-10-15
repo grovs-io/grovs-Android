@@ -15,6 +15,7 @@ import io.grovs.inapp.model.InAppEventType
 import io.grovs.inapp.model.InAppGlobalCaps
 import io.grovs.inapp.model.InAppJson
 import io.grovs.inapp.model.InAppPersonalize
+import io.grovs.inapp.model.InAppReason
 import io.grovs.inapp.model.InAppTemplate
 import java.net.URI
 import java.util.UUID
@@ -54,6 +55,7 @@ internal class InAppController(private val deps: Dependencies) {
         const val TEST_TRIES = 10
         const val TEST_RETRY_MS = 1_000L
         const val OPEN_WAIT_MS = 2_000L
+        const val IMAGES_WAIT_MS = 10_000L
         const val JITTER_MS = 10_000L
     }
 
@@ -84,6 +86,9 @@ internal class InAppController(private val deps: Dependencies) {
     private var testTimer: InAppCancellable? = null
     private var openTimer: InAppCancellable? = null
     private val held = mutableListOf<InAppEvent>()
+    /** Openings whose campaign only lacked its pictures, decided again as each one arrives until [unreadyUntil]. */
+    private val unready = mutableListOf<InAppEvent>()
+    private var unreadyUntil = 0L
     /** The screen the app opened on, tracked before in-app could run. */
     private var landing: InAppEvent? = null
     private var lastSyncAttempt: Long? = null
@@ -132,6 +137,7 @@ internal class InAppController(private val deps: Dependencies) {
         delayed = null
         testTimer = null
         held.clear()
+        unready.clear()
         afterSync.clear()
         syncing = false
         syncAgain = false
@@ -158,6 +164,7 @@ internal class InAppController(private val deps: Dependencies) {
         openTimer?.cancel()
         openTimer = null
         held.clear()
+        unready.clear()
         if (dismissCurrent) deps.presenter.dismiss()
     }
 
@@ -215,13 +222,18 @@ internal class InAppController(private val deps: Dependencies) {
 
     // Deciding
 
-    private fun handle(event: InAppEvent) {
+    private fun handle(event: InAppEvent): InAppDecision? {
         followSession()
-        val engine = engine ?: return
+        val engine = engine ?: return null
         engine.update(device())
         val decision = engine.peek(event, now())
         persist()
         explain(event, decision)
+        act(engine, decision, event)
+        return decision
+    }
+
+    private fun act(engine: InAppEngine, decision: InAppDecision, event: InAppEvent) {
         val id = decision.show ?: return
 
         val priority = engine.campaign(id)?.priority ?: 0
@@ -237,6 +249,31 @@ internal class InAppController(private val deps: Dependencies) {
         }
         show(decision, event)
     }
+
+    /** A picture was stored: an opening that waited only for pictures is decided again, without counting it twice. */
+    fun onImageStored() {
+        if (unready.isEmpty()) return
+        val engine = engine
+        if (!active || engine == null || deps.now() > unreadyUntil) {
+            unready.clear()
+            return
+        }
+        val events = unready.toList()
+        unready.clear()
+        for (event in events) {
+            engine.update(device())
+            val decision = engine.recheck(event, now())
+            if (waitsForImages(decision)) {
+                unready.add(event)
+                continue
+            }
+            explain(event, decision)
+            act(engine, decision, event)
+        }
+    }
+
+    private fun waitsForImages(decision: InAppDecision): Boolean =
+        decision.show == null && InAppReason.NOT_READY in decision.reasons.values
 
     /** Holds one message until its delay has passed; then it is decided again, as a waiting one is. */
     private fun delay(event: InAppEvent, only: String, priority: Int, seconds: Int) {
@@ -507,7 +544,13 @@ internal class InAppController(private val deps: Dependencies) {
             openTimer?.cancel()
             openTimer = null
             if (!active) return@release
-            order.forEach(::handle)
+            // An opening happens once, so one held back by its pictures is kept for them a little while.
+            unready.clear()
+            for (event in order) {
+                val decision = handle(event)
+                if (decision != null && waitsForImages(decision)) unready.add(event)
+            }
+            unreadyUntil = deps.now() + IMAGES_WAIT_MS
             showWaiting()
         }
         openTimer = deps.schedule(OPEN_WAIT_MS, release)

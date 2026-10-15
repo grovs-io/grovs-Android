@@ -75,7 +75,10 @@ class InAppHostTest {
             "first_seen_at":null,"global_caps":{"session":10,"day":10},"campaigns":[${campaigns.joinToString(",")}]}""")
     }
 
-    private fun host(draw: InAppPresenter = presenter) = InAppHost(
+    private fun host(
+        draw: InAppPresenter = presenter,
+        images: InAppImages = InAppImages(temp.root, loader = { _, done -> done(null) }, decodes = { true }),
+    ) = InAppHost(
         context = RuntimeEnvironment.getApplication(),
         grovsContext = grovsContext,
         configuration = grovsContext.consent.currentConfiguration,
@@ -86,7 +89,7 @@ class InAppHostTest {
         isAuthenticated = { authenticated },
         presenter = { draw },
         storeKey = "key",
-        images = InAppImages(temp.root, loader = { _, done -> done(null) }, decodes = { true }),
+        images = images,
         storeExecutor = storeExecutor,
     )
 
@@ -112,6 +115,20 @@ class InAppHostTest {
         idle()
         assertEquals(listOf("c1"), presenter.ids)
         coVerify(exactly = 2) { service.inAppSync(any()) }
+    }
+
+    @Test
+    fun `an opening shows when its picture arrives on the download thread`() {
+        respond(campaign("""{"triggers":[{"type":"app_open"}],"content":{"image":{"portrait":"https://cdn.example/welcome.png"}}}"""))
+        var download: ((ByteArray?) -> Unit)? = null
+        val host = host(images = InAppImages(temp.root, loader = { _, done -> download = done }, decodes = { true }))
+        host.start()
+        idle()
+        assertEquals(emptyList<String>(), presenter.ids)
+
+        Thread { download!!(byteArrayOf(1)) }.apply { start(); join() }
+        idle()
+        assertEquals(listOf("c1"), presenter.ids)
     }
 
     @Test

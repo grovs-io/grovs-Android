@@ -44,6 +44,21 @@ class InAppImagesTest {
     }
 
     @Test
+    fun `says when a picture is stored, and only then`() {
+        val served = mutableListOf<(ByteArray?) -> Unit>()
+        val images = InAppImages(temp.root, loader = { _, done -> served.add(done) }, decodes = { it.size > 1 })
+        var stored = 0
+        images.onStored = { stored++ }
+        images.preload(listOf(campaign("cover", "https://a/p.png", "https://a/l.png")))
+        served[0](null)
+        served[1](byteArrayOf(1))
+        assertEquals(0, stored)
+        images.preload(listOf(campaign("cover", "https://a/p.png")))
+        served[2](byteArrayOf(1, 2))
+        assertEquals(1, stored)
+    }
+
+    @Test
     fun `a failed download is tried again on the next preload`() {
         var asked = 0
         val images = InAppImages(temp.root, loader = { _, done -> asked++; done(null) }, decodes = { true })

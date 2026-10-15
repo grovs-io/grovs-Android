@@ -83,6 +83,10 @@ internal class InAppHost(
         )
     ).also { it.settings = settings }
 
+    init {
+        images.onStored = { onMain { if (!closed) controller.onImageStored() } }
+    }
+
     fun start() = onMain {
         if (!canRun()) return@onMain
         controller.start()
