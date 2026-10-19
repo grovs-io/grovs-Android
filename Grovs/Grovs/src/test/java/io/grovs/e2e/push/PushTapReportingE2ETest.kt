@@ -8,6 +8,7 @@ import io.grovs.e2e.contract.BackendContract
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
+import io.grovs.handlers.EventsManager
 import io.grovs.utils.InstantCompat
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -220,5 +221,100 @@ internal class PushTapReportingE2ETest : ContractTestBase() {
 
         assertEquals(PushPayloads.LINK, contract.bodies("data_for_device_and_url").single().getString("url"))
         assertEquals(fingerprintLookups, backend.count("data_for_device"))
+    }
+
+    private fun tapLink(link: String) = Intent(Intent.ACTION_VIEW, Uri.parse(link))
+
+    /** Tracks an event once the tap is delivered and returns the link it was sent with. */
+    private fun linkOfNextTrackedEvent(): String? {
+        Grovs.track("checkout_done")
+        advanceUntil("the tracked event") { contract.batchEvents().any { it.optString("event_name") == "checkout_done" } }
+        val event = contract.batchEvents().single { it.optString("event_name") == "checkout_done" }
+        return if (event.isNull("link")) null else event.getString("link")
+    }
+
+    /** The link system events such as app opens and time spent are sent with. */
+    private fun systemEventsLink(): String? {
+        val field = manager().javaClass.getDeclaredField("eventsManager").apply { isAccessible = true }
+        return (field.get(manager()) as EventsManager).linkForFutureActions
+    }
+
+    @Test
+    fun `P21 the push link lookup tells the backend it comes from a push`() {
+        contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapIntent())
+        pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
+
+        assertEquals("push", contract.bodies("data_for_device_and_url").single().optString("source"))
+    }
+
+    @Test
+    fun `P21 a tapped link that is not a push sends no source`() {
+        contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapLink(PushPayloads.LINK))
+        pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
+
+        assertFalse(contract.bodies("data_for_device_and_url").single().has("source"))
+    }
+
+    @Test
+    fun `P22 events after a push link tap are not attributed to the push link`() {
+        contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapIntent())
+        pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
+
+        assertNull(linkOfNextTrackedEvent())
+        assertNull(systemEventsLink())
+        assertTrue(
+            "no event carries the push link",
+            contract.batchEvents().none { !it.isNull("link") && it.optString("link") == PushPayloads.LINK },
+        )
+    }
+
+    @Test
+    fun `P22 events after a tapped link that is not a push are attributed to it`() {
+        contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapLink(PushPayloads.LINK))
+        pumpUntil("delivery") { deepLinks.delivered.isNotEmpty() }
+
+        assertEquals(PushPayloads.LINK, linkOfNextTrackedEvent())
+        assertEquals(PushPayloads.LINK, systemEventsLink())
+    }
+
+    @Test
+    fun `P22 a push link tap keeps the link the session was already attributed to`() {
+        val opened = "https://demo.sqd.link/earlier"
+        contract.linkResolves(opened, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapLink(opened))
+        pumpUntil("the link delivery") { deepLinks.delivered.isNotEmpty() }
+        contract.linkResolves(PushPayloads.LINK, mapOf("only_link" to "yes"))
+        // Staying in the foreground: going to the background would end the attribution by itself.
+        assertTrue(Grovs.handleNotificationOpen(tapIntent()))
+        pumpUntil("the push delivery") { deepLinks.delivered.size >= 2 }
+
+        assertEquals(PushPayloads.LINK, deepLinks.delivered.last().link)
+        assertEquals(opened, linkOfNextTrackedEvent())
+        assertEquals(opened, systemEventsLink())
+    }
+
+    @Test
+    fun `P22 a push link that fails to resolve keeps the link the session was already attributed to`() {
+        val opened = "https://demo.sqd.link/earlier"
+        contract.linkResolves(opened, mapOf("only_link" to "yes"))
+        authenticated()
+        foreground(tapLink(opened))
+        pumpUntil("the link delivery") { deepLinks.delivered.isNotEmpty() }
+        backend.failWithStatus("data_for_device_and_url", code = 503, body = "down")
+        assertTrue(Grovs.handleNotificationOpen(tapIntent()))
+        advanceUntil("the push delivery") { deepLinks.delivered.size >= 2 }
+
+        assertNull(deepLinks.delivered.last().link)
+        assertEquals(opened, linkOfNextTrackedEvent())
+        assertEquals(opened, systemEventsLink())
     }
 }

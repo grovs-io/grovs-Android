@@ -137,10 +137,12 @@ internal class GrovsManager(
     /// results can wait for a direct link the user opened (which takes precedence) to settle.
     /// `sequence` is the tap order of the link being looked up, and a lookup with
     /// `yieldsToNewerTaps` set is a replay: it goes stale as soon as a newer tap starts.
+    /// A `fromPush` lookup only fetches the link data: the tap counts as a push open, not a link open.
     private class Lookup(
         val generation: Int,
         val sessionId: String,
         val explicit: Boolean,
+        val fromPush: Boolean,
         val token: ConsentToken,
         val sequence: Long,
         val yieldsToNewerTaps: Boolean,
@@ -395,6 +397,7 @@ internal class GrovsManager(
         val request = appDetailsHelperForIntent.toAppDetails().copy(
             url = link,
             sessionId = lookup.sessionId,
+            source = if (lookup.fromPush) "push" else null,
         )
         val result = if (link == null) grovsService.payloadFor(request) else grovsService.payloadWithLinkFor(request)
         if (!isCurrent(lookup)) return LookupAnswer(null)
@@ -411,7 +414,7 @@ internal class GrovsManager(
     private suspend fun resolveSuccess(data: DeeplinkDetails, request: AppDetails, lookup: Lookup): ResolvedDeeplink? {
         return if (data.link != null) {
             ResolvedDeeplink(data, data.link)
-        } else if (clipboardHandler.isPending) {
+        } else if (clipboardHandler.isPending && !lookup.fromPush) {
             // Only an empty resolve on a fresh install runs the clipboard flow. A run already
             // parked by another lookup keeps the hold; this call must not touch it.
             // The barrier the flow re-checks at every suspension point covers consent as
@@ -706,6 +709,7 @@ internal class GrovsManager(
         var repeatedIntent = false
         var newlyCachedIntent = false
         var explicitLink: String? = null
+        var fromPush = false
         val lookup = resolutionMutex.withLock {
             if (isClosed || !grovsContext.consent.isCurrent(token)) return@withLock null
             repeatedIntent = intent.hashCode() == lastIntentHandledReference?.get()?.hashCode() ||
@@ -714,12 +718,14 @@ internal class GrovsManager(
             newlyCachedIntent = cacheIntent && !repeatedIntent
             if (newlyCachedIntent) handledIntentTokens.add(intent.hashCode())
             explicitLink = if (repeatedIntent) null else intent.data?.toString() ?: pushLink
+            fromPush = explicitLink != null && intent.data == null
             // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.
             if (explicitLink == null && sharedLookup?.sessionId == grovsContext.sessionId) return@withLock null
             Lookup(
                 committedLinks,
                 grovsContext.sessionId,
                 explicit = explicitLink != null,
+                fromPush = fromPush,
                 token = token,
                 sequence = sequence,
                 yieldsToNewerTaps = yieldToNewerTaps,
@@ -732,7 +738,7 @@ internal class GrovsManager(
                 }
                 lookupsInFlight.add(it)
                 armHold(token)
-                if (it.explicit) {
+                if (it.explicit && !it.fromPush) {
                     // The user opened this link: events logged from now on carry it even if the
                     // lookup is cancelled. The backend's answer replaces it either way.
                     eventsManager.setLinkForFutureEvents(explicitLink)
@@ -755,13 +761,13 @@ internal class GrovsManager(
             val result = answer.resolved
             if (result == null) {
                 if (lookup.explicit && isCurrent(lookup)) {
-                    eventsManager.setLinkForFutureEvents(null)
+                    if (!lookup.fromPush) eventsManager.setLinkForFutureEvents(null)
                     leaveUnconsumed = answer.failure != null && answer.failure != RequestFailure.REJECTED
                     return IntentOutcome(details = null, tappedLink = explicitLink, failure = answer.failure)
                 }
                 return IntentOutcome.NOTHING
             }
-            val eventLink = result.eventLink
+            val eventLink = result.eventLink?.takeUnless { lookup.fromPush }
                 ?: return IntentOutcome(details = result.details, tappedLink = explicitLink, failure = null)
 
             if (!lookup.explicit) awaitExplicitLookups()
