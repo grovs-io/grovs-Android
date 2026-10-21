@@ -719,6 +719,9 @@ internal class GrovsManager(
             lastIntentHandledReference = WeakReference(intent)
             newlyCachedIntent = cacheIntent && !repeatedIntent
             if (newlyCachedIntent) handledIntentTokens.add(intent.hashCode())
+            // The first call owns a push tap. A repeat must not turn into an organic lookup, which
+            // could count the tap as a link open.
+            if (repeatedIntent && pushLink != null) return@withLock null
             explicitLink = if (repeatedIntent) null else intent.data?.toString() ?: pushLink
             fromPush = explicitLink != null && intent.data == null
             // Repeated lifecycle callbacks share the pending lookup; a direct link always runs.

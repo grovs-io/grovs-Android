@@ -1523,6 +1523,8 @@ public class Grovs: ActivityProvider {
             if (freshPush.link == null) runOnMain { deliverPush(freshPush, intent, freshPush.details(null), token) }
         }
         val linkPush = freshPush?.takeIf { it.link != null }
+        // A push tap is a push open: an organic lookup here could deliver an unrelated link too.
+        if (push != null && linkPush == null && intent.data == null) return
         // Tap order, taken before the work is queued so two taps in flight keep their order. A
         // replay keeps the sequence of the tap it stands for.
         val sequence = replaying?.sequence ?: pendingLink.nextSequence()

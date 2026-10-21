@@ -341,6 +341,40 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
     }
 
     @Test
+    fun `a push without a link runs no device lookup that could deliver a second link`() {
+        backend.respond(authenticate, authOk)
+        backend.respond(fingerprint, """{"link":"https://demo.sqd.link/other","data":{"screen":"other"}}""")
+        configure()
+        foreground(pushTap(withLink = false))
+        advance(5_000)
+
+        assertEquals(0, backend.count(fingerprint))
+        assertNull(delivered.single().link)
+        assertEquals("push", delivered.single().data!!["screen"])
+    }
+
+    @Test
+    fun `onNewIntent then onStart with the same link push runs no device lookup`() {
+        backend.respond(authenticate, authOk)
+        linkResolves()
+        configure()
+        foreground()
+        advanceUntil("the launch lookup") { backend.count(fingerprint) >= 1 }
+        advance(5_000)
+        val lookupsBefore = backend.count(fingerprint)
+
+        val tap = pushTap()
+        launcher().intent = tap
+        Grovs.onNewIntent(tap, launcher())
+        Grovs.onStart(launcher())
+        pumpUntil("the push to be delivered") { delivered.isNotEmpty() }
+        advance(5_000)
+
+        assertEquals(lookupsBefore, backend.count(fingerprint))
+        assertEquals(1, delivered.size)
+    }
+
+    @Test
     fun `the same tap seen again before it is delivered reports one open`() {
         backend.respond(authenticate, authOk)
         backend.failWithStatus(payload, code = 503, body = "no available server")
