@@ -1,5 +1,6 @@
 package io.grovs.handlers
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -33,7 +34,14 @@ internal class GrovsPushContent(val title: String?, val body: String?, val image
  * Posts a Grovs push received in the foreground, matching what FCM shows in the background:
  * same channel rule, image as a big picture, tap opens the launcher with the data as extras.
  */
-internal fun showGrovsPushNotification(context: Context, push: GrovsPushPayload, content: GrovsPushContent, image: Bitmap?) {
+internal fun showGrovsPushNotification(
+    context: Context,
+    push: GrovsPushPayload,
+    content: GrovsPushContent,
+    image: Bitmap?,
+    /** Posts the built notification. A seam so tests can make the system refuse it. */
+    post: ((Notification) -> Unit)? = null,
+) {
     if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
         DebugLogger.instance.log(LogLevel.INFO, "Notifications are disabled - the Grovs push is not shown")
         return
@@ -57,8 +65,21 @@ internal fun showGrovsPushNotification(context: Context, push: GrovsPushPayload,
     // From API 26 the channel decides the sound.
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) soundUri(context, content.sound)?.let(builder::setSound)
 
-    val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-    manager.notify(GROVS_NOTIFICATION_TAG, notificationId, builder.build())
+    val send = post ?: { notification ->
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(GROVS_NOTIFICATION_TAG, notificationId, notification)
+    }
+    try {
+        send(builder.build())
+    } catch (e: RuntimeException) {
+        // Most likely the picture did not fit through the binder. The text alone still shows.
+        if (image == null) {
+            DebugLogger.instance.log(LogLevel.ERROR, "The Grovs push could not be shown: ${e.message}")
+            return
+        }
+        DebugLogger.instance.log(LogLevel.INFO, "The Grovs push picture could not be shown: ${e.message}")
+        showGrovsPushNotification(context, push, content, image = null, post = post)
+    }
 }
 
 /** The app's FCM default channel when the app created it, as FCM does, else the Grovs channel. */

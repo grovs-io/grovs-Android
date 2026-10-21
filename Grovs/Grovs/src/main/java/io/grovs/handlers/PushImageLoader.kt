@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit
 internal object PushImageLoader {
     const val TIMEOUT_MS = 5_000L
     const val MAX_BYTES = 1_048_576L
+    /** Longest side of the decoded picture: enough for a notification, far below the binder limit. */
+    const val MAX_SIDE_PX = 1_024
 
     private val client by lazy {
         OkHttpClient.Builder()
@@ -29,7 +31,7 @@ internal object PushImageLoader {
             when {
                 !response.isSuccessful || source == null -> null
                 source.request(maxBytes + 1) -> null
-                else -> source.buffer.readByteArray().let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+                else -> decodeScaled(source.buffer.readByteArray())
             }
         }
     } catch (e: Exception) {
@@ -38,5 +40,14 @@ internal object PushImageLoader {
     } catch (e: OutOfMemoryError) {
         DebugLogger.instance.log(LogLevel.INFO, "Push image too large to decode")
         null
+    }
+
+    fun decodeScaled(data: ByteArray, maxSide: Int = MAX_SIDE_PX): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(data, 0, data.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sampleSize = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sampleSize > maxSide) sampleSize *= 2
+        return BitmapFactory.decodeByteArray(data, 0, data.size, BitmapFactory.Options().apply { inSampleSize = sampleSize })
     }
 }

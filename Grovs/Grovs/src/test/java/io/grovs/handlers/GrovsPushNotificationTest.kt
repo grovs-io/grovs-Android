@@ -88,6 +88,25 @@ class GrovsPushNotificationTest {
     }
 
     @Test
+    fun `a picture the system refuses falls back to the text alone`() {
+        val posted = mutableListOf<Notification>()
+        val refusePictures = { notification: Notification ->
+            if (notification.extras.containsKey(Notification.EXTRA_PICTURE)) throw RuntimeException("TransactionTooLargeException")
+            posted += notification
+        }
+
+        showGrovsPushNotification(context, push, content, Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888), refusePictures)
+
+        assertEquals("Title", posted.single().extras.getString(Notification.EXTRA_TITLE))
+        assertFalse(posted.single().extras.containsKey(Notification.EXTRA_PICTURE))
+    }
+
+    @Test
+    fun `a notification the system refuses does not crash`() {
+        showGrovsPushNotification(context, push, content, image = null) { throw RuntimeException("dead system") }
+    }
+
+    @Test
     fun `uses the app's FCM default channel when the app created it`() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         manager.createNotificationChannel(NotificationChannel("app_default", "App", NotificationManager.IMPORTANCE_DEFAULT))
