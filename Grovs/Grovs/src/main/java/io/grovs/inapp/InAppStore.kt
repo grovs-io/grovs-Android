@@ -22,6 +22,9 @@ internal enum class InAppRecord(val fileName: String) {
 internal interface InAppStoring {
     fun read(record: InAppRecord): String?
     fun write(text: String, record: InAppRecord): Boolean
+
+    /** [text] may run later on another thread, so it must only read immutable values. */
+    fun write(record: InAppRecord, text: () -> String): Boolean = write(text(), record)
 }
 
 /**
@@ -81,7 +84,7 @@ internal data class InAppSynced(
     /** Server time minus device time at the last sync, in milliseconds. */
     val clockOffset: Long = 0,
 ) {
-    fun save(store: InAppStoring): Boolean {
+    private fun toText(): String {
         val raw = JsonObject()
         raw.add("campaigns", JsonArray().also { array -> campaigns.forEach { array.add(it) } })
         raw.add("global_caps", JsonObject().also {
@@ -93,8 +96,10 @@ internal data class InAppSynced(
         storeUrl?.let { raw.addProperty("store_url", it) }
         campaignsChangedAt?.let { raw.addProperty("campaigns_changed_at", it) }
         userChangedAt?.let { raw.addProperty("user_changed_at", it) }
-        return store.write(gson.toJson(raw), InAppRecord.CAMPAIGNS)
+        return gson.toJson(raw)
     }
+
+    fun save(store: InAppStoring): Boolean = store.write(InAppRecord.CAMPAIGNS, ::toText)
 
     companion object {
         /** Null for a missing or unreadable record: the caller starts empty and syncs. */
@@ -121,11 +126,11 @@ internal data class InAppKept(
     val sessionId: String? = null,
     val state: InAppEngineState = InAppEngineState(),
 ) {
-    fun save(store: InAppStoring): Boolean {
+    fun save(store: InAppStoring): Boolean = store.write(InAppRecord.STATE) {
         val raw = JsonObject()
         sessionId?.let { raw.addProperty("sessionId", it) }
         raw.add("state", state.toJson())
-        return store.write(gson.toJson(raw), InAppRecord.STATE)
+        gson.toJson(raw)
     }
 
     companion object {

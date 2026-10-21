@@ -68,6 +68,8 @@ internal class InAppController(private val deps: Dependencies) {
     private var synced = InAppSynced()
     private var kept = InAppKept()
     private var saved: InAppKept? = null
+    /** The engine state [kept] was last made from; the engine replaces its state on every change. */
+    private var persistedState: InAppEngineState? = null
     private var engine: InAppEngine? = null
     private var running = false
     private var showing: String? = null
@@ -105,14 +107,23 @@ internal class InAppController(private val deps: Dependencies) {
 
     // Lifecycle
 
-    /** Called once authentication has succeeded. */
-    fun start() {
+    /** What start() reads from the store. Loaded off the main thread by the host. */
+    class Stored(val synced: InAppSynced?, val kept: InAppKept?) {
+        companion object {
+            fun load(store: InAppStoring) = Stored(InAppSynced.load(store), InAppKept.load(store))
+        }
+    }
+
+    /** Called once authentication has succeeded. Reads the store itself when [stored] is not given. */
+    fun start(stored: Stored? = null) {
         if (running || !deps.canRun()) return
         running = true
         generation += 1
-        synced = InAppSynced.load(deps.store) ?: InAppSynced()
-        kept = InAppKept.load(deps.store) ?: InAppKept()
+        val loaded = stored ?: Stored.load(deps.store)
+        synced = loaded.synced ?: InAppSynced()
+        kept = loaded.kept ?: InAppKept()
         saved = null
+        persistedState = null
         forgetIfOld()
         engine = build()
         reportUnsupported()
@@ -225,7 +236,8 @@ internal class InAppController(private val deps: Dependencies) {
     private fun handle(event: InAppEvent): InAppDecision? {
         followSession()
         val engine = engine ?: return null
-        engine.update(device())
+        // Reading the device costs system calls; with no campaign there is nothing to read it for.
+        if (engine.hasCampaigns) engine.update(device())
         val decision = engine.peek(event, now())
         persist()
         explain(event, decision)
@@ -697,6 +709,8 @@ internal class InAppController(private val deps: Dependencies) {
     private fun persist(force: Boolean = false) {
         val engine = engine ?: return
         val state = engine.state
+        if (!force && state === persistedState) return
+        persistedState = state
         kept = kept.copy(state = state.copy(views = state.views.takeLast(VIEWS_KEPT)))
         if (!force && kept == saved) return
         saved = kept

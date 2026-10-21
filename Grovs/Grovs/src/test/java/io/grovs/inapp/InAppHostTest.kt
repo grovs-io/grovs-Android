@@ -100,7 +100,11 @@ class InAppHostTest {
         else storeExecutor.submit {}.get(5, TimeUnit.SECONDS)
     }
 
-    private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+    /** The store's thread first: start() reads the saved messages there before it runs on the main thread. */
+    private fun idle() {
+        if (!storeExecutor.isShutdown) storeExecutor.submit {}.get(5, TimeUnit.SECONDS)
+        shadowOf(Looper.getMainLooper()).idle()
+    }
 
     @Test
     fun `start syncs and raises app_open once per session`() {
@@ -129,6 +133,17 @@ class InAppHostTest {
         Thread { download!!(byteArrayOf(1)) }.apply { start(); join() }
         idle()
         assertEquals(listOf("c1"), presenter.ids)
+    }
+
+    @Test
+    fun `a stop before the saved messages are read keeps in-app stopped`() {
+        respond(campaign("""{"triggers":[{"type":"app_open"}]}"""))
+        val host = host()
+        host.start()
+        host.stop()
+        idle()
+        coVerify(exactly = 0) { service.inAppSync(any()) }
+        assertEquals(emptyList<String>(), presenter.ids)
     }
 
     @Test

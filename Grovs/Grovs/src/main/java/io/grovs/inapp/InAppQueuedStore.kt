@@ -6,22 +6,25 @@ import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 
 /**
- * Keeps file writes off the main thread. A write is readable here at once and reaches [files] on
- * one background thread, in order. The text is an immutable snapshot taken by the caller.
+ * Keeps file work off the main thread. A write is readable here at once and reaches [files] on
+ * one background thread, in order. Its text is made on that thread, from an immutable snapshot.
  */
 internal class InAppQueuedStore(
     private val files: InAppStoring,
     private val executor: ExecutorService = newExecutor(),
 ) : InAppStoring {
-    private val latest = ConcurrentHashMap<InAppRecord, String>()
+    private val latest = ConcurrentHashMap<InAppRecord, Lazy<String>>()
 
-    override fun read(record: InAppRecord): String? = latest[record] ?: files.read(record)
+    override fun read(record: InAppRecord): String? = latest[record]?.value ?: files.read(record)
 
-    override fun write(text: String, record: InAppRecord): Boolean {
+    override fun write(text: String, record: InAppRecord): Boolean = write(record) { text }
+
+    override fun write(record: InAppRecord, text: () -> String): Boolean {
+        val snapshot = lazy(text)
         try {
             executor.execute {
                 val saved = try {
-                    files.write(text, record)
+                    files.write(snapshot.value, record)
                 } catch (e: Exception) {
                     false
                 }
@@ -30,8 +33,16 @@ internal class InAppQueuedStore(
         } catch (e: RejectedExecutionException) {
             return false
         }
-        latest[record] = text
+        latest[record] = snapshot
         return true
+    }
+
+    /** Runs [work] on the store's thread, after the writes already queued. False once shut down. */
+    fun inOrder(work: () -> Unit): Boolean = try {
+        executor.execute(work)
+        true
+    } catch (e: RejectedExecutionException) {
+        false
     }
 
     /** Writes already queued still finish; later writes are refused. */

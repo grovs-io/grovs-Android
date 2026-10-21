@@ -51,6 +51,11 @@ internal class InAppImages(
         }
     }
 
+    /** Reads the folder now, so the first check on the main thread does not have to. */
+    fun warmUp() {
+        synchronized(stored) {}
+    }
+
     fun has(url: String): Boolean = name(url).let { name -> synchronized(stored) { name in stored } }
 
     fun ready(campaign: JsonElement): Boolean = images(campaign).all(::has)

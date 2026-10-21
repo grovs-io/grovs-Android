@@ -39,7 +39,7 @@ internal class InAppHost(
     private val isAuthenticated: () -> Boolean,
     presenter: (InAppImages) -> InAppPresenter,
     storeKey: String,
-    images: InAppImages = InAppImages.forDevice(context, storeKey),
+    private val images: InAppImages = InAppImages.forDevice(context, storeKey),
     private val mainHandler: Handler = Handler(Looper.getMainLooper()),
     pushPermission: () -> InAppPushPermission = { InAppDeviceFacts.notificationsPermission(context.applicationContext) },
     unsupportedActions: () -> List<String> = { emptyList() },
@@ -52,6 +52,9 @@ internal class InAppHost(
 
     /** The SDK session whose app_open in-app has taken. Main thread. */
     private var openedSession: String? = null
+
+    /** Bumped by every start and stop, so a start whose files arrive late can tell it was replaced. Main thread. */
+    private var startRequest = 0
 
     private val facts = InAppDeviceFacts(
         context = context.applicationContext,
@@ -87,18 +90,40 @@ internal class InAppHost(
         images.onStored = { onMain { if (!closed) controller.onImageStored() } }
     }
 
+    /** The saved campaigns and state are read on the store's thread, then in-app starts on the main thread. */
     fun start() = onMain {
         if (!canRun()) return@onMain
-        controller.start()
-        openSessionIfNew()
+        if (controller.isRunning) {
+            openSessionIfNew()
+            return@onMain
+        }
+        val request = ++startRequest
+        store.inOrder {
+            val stored = try {
+                InAppController.Stored.load(store)
+            } catch (e: RuntimeException) {
+                InAppLog.error("Could not read the saved in-app messages")
+                InAppController.Stored(null, null)
+            }
+            images.warmUp()
+            mainHandler.post {
+                if (closed || request != startRequest || !canRun()) return@post
+                controller.start(stored)
+                openSessionIfNew()
+            }
+        }
     }
 
-    fun stop() = onMain { controller.stop() }
+    fun stop() = onMain {
+        startRequest++
+        controller.stop()
+    }
 
     /** The manager is gone: in-app never runs again here, and what it shows closes. Queued writes still finish. */
     fun close() {
         closed = true
         onMain {
+            startRequest++
             controller.stop()
             store.shutdown()
         }

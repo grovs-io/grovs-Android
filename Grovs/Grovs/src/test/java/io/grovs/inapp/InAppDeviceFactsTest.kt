@@ -8,6 +8,7 @@ import io.grovs.inapp.model.InAppOrientation
 import io.grovs.inapp.model.InAppPushPermission
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -78,6 +79,34 @@ class InAppDeviceFactsTest {
         }
         val facts = InAppDeviceFacts(context, attributes = { changing }, activity = { null })
         assertEquals(0, facts.read().user.size())
+    }
+
+    @Test
+    fun `the user is converted again only when the attributes are replaced`() {
+        var attributes: Map<String, Any> = mapOf("plan" to "pro")
+        val facts = InAppDeviceFacts(context, attributes = { attributes }, activity = { null })
+        val first = facts.read().user
+        assertSame(first, facts.read().user)
+
+        attributes = mapOf("plan" to "free")
+        assertEquals("free", facts.read().user.get("plan").asString)
+    }
+
+    @Test
+    fun `the notification permission is asked again only after a second`() {
+        var now = 10_000L
+        var asked = 0
+        var answer = InAppPushPermission.NOT_ASKED
+        val facts = InAppDeviceFacts(context, attributes = { null }, activity = { null },
+            pushPermission = { asked++; answer }, now = { now })
+        facts.read()
+        answer = InAppPushPermission.GRANTED
+        assertEquals(InAppPushPermission.NOT_ASKED, facts.read().pushPermission)
+        assertEquals(1, asked)
+
+        now += InAppDeviceFacts.PERMISSION_FRESH_MS
+        assertEquals(InAppPushPermission.GRANTED, facts.read().pushPermission)
+        assertEquals(2, asked)
     }
 
     @Test

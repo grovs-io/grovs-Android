@@ -38,6 +38,24 @@ class InAppControllerTest {
     }
 
     @Test
+    fun `with no campaign an event does not read the device`() {
+        val h = InAppHarness()
+        h.start(emptyList())
+        val reads = h.deviceReads
+        repeat(3) { h.controller.onEvent(cart) }
+        assertEquals(reads, h.deviceReads)
+    }
+
+    @Test
+    fun `an event that changes nothing writes no state`() {
+        val h = InAppHarness()
+        h.start(listOf(campaign()))
+        val writes = h.store.written.size
+        repeat(3) { h.controller.onEvent(InAppEvent(InAppEventType.EVENT, "unrelated")) }
+        assertEquals(writes, h.store.written.size)
+    }
+
+    @Test
     fun `reports a click and hands the payload to the host`() {
         val h = InAppHarness()
         h.start(listOf(campaign("""{"content":{"buttons":[{"id":"b1","text":"Go","action":{"type":"key_value","payload":{"screen":"offers"}}}]}}""")))

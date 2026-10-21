@@ -141,6 +141,7 @@ internal class InAppHarness(
     val attributes = mutableListOf<Pair<String, JsonElement>>()
     var user: JsonObject = InAppFixtures.json("""{"first_name":"Ana"}""")
     var push = InAppPushPermission.NOT_ASKED
+    var deviceReads = 0
     var canRun = true
     var isActive = true
     var session = "s1"
@@ -157,6 +158,7 @@ internal class InAppHarness(
             presenter = presenter,
             images = images,
             device = {
+                deviceReads += 1
                 InAppDevice(
                     platform = "android", appVersion = "2.1.0", osVersion = "14", language = "en", firstSeenAt = null,
                     utcOffsetMinutes = 0, user = user, pushPermission = push,

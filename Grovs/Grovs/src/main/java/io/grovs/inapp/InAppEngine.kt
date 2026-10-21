@@ -110,6 +110,8 @@ internal class InAppEngine(
     var state: InAppEngineState = state ?: InAppEngineState(syncedAt = syncedAt)
         private set
 
+    val hasCampaigns: Boolean get() = entries.isNotEmpty()
+
     /** The user and the permissions change between syncs; which campaigns are supported does not. */
     fun update(device: InAppDevice) {
         this.device = device

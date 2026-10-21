@@ -15,7 +15,10 @@ import io.grovs.inapp.model.InAppOrientation
 import io.grovs.inapp.model.InAppPushPermission
 import java.util.TimeZone
 
-/** The Android side of [InAppDevice], read again before every decision. */
+/**
+ * The Android side of [InAppDevice], read again before every decision. Main thread. The parts that
+ * cost system calls or a conversion are reused while they cannot have changed.
+ */
 internal class InAppDeviceFacts(
     private val context: Context,
     private val attributes: () -> Map<String, Any>?,
@@ -40,7 +43,7 @@ internal class InAppDeviceFacts(
         firstSeenAt = null,
         utcOffsetMinutes = TimeZone.getDefault().getOffset(now()) / 60_000,
         user = user(),
-        pushPermission = pushPermission(),
+        pushPermission = recentPushPermission(),
         unsupportedTemplates = emptyList(),
         unsupportedActions = unsupportedActions(),
         orientation = orientation(),
@@ -49,13 +52,39 @@ internal class InAppDeviceFacts(
     @Volatile
     private var unreadableLogged = false
 
-    /** The host may change its map on another thread, or put a map inside itself. */
-    private fun user(): JsonObject = try {
-        InAppJson.fromHost(attributes().orEmpty()).takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
+    private var userSource: Map<String, Any>? = null
+    private var userJson: JsonObject? = null
+
+    private var permission: InAppPushPermission? = null
+    private var permissionReadAt = 0L
+
+    /** Every attribute change replaces the map, so the same map gives the same user. */
+    private fun user(): JsonObject {
+        val source = attributes()
+        userJson?.takeIf { source === userSource }?.let { return it }
+        val json = convert(source) ?: return unreadable()
+        userSource = source
+        userJson = json
+        return json
+    }
+
+    /** Null when unreadable: the host may change its map on another thread, or put a map inside itself. */
+    private fun convert(source: Map<String, Any>?): JsonObject? = try {
+        InAppJson.fromHost(source.orEmpty()).takeIf { it.isJsonObject }?.asJsonObject ?: JsonObject()
     } catch (e: RuntimeException) {
-        unreadable()
+        null
     } catch (e: StackOverflowError) {
-        unreadable()
+        null
+    }
+
+    /** Asking the system on every event would cost calls into it; a second is as fresh as a person can act. */
+    private fun recentPushPermission(): InAppPushPermission {
+        val at = now()
+        permission?.takeIf { at - permissionReadAt in 0 until PERMISSION_FRESH_MS }?.let { return it }
+        return pushPermission().also {
+            permission = it
+            permissionReadAt = at
+        }
     }
 
     private fun unreadable(): JsonObject {
@@ -74,6 +103,8 @@ internal class InAppDeviceFacts(
         }
 
     companion object {
+        const val PERMISSION_FRESH_MS = 1_000L
+
         /** The primary language only, lowercased: "pt" for "pt-BR". A language tag already says "he", not "iw". */
         fun language(tag: String?): String = tag.orEmpty().split('-', '_').first().lowercase()
 
