@@ -152,16 +152,36 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
     }
 
     @Test
-    fun `a tap while disabled reports and delivers nothing, and is not picked up after setSDK true`() {
+    fun `a tap while disabled is handled once consent is granted before the app leaves`() {
         backend.respond(authenticate, authOk)
         linkResolves()
         configure(enabled = false)
         foreground(pushTap())
+        advance(5_000)
+        assertTrue("nothing delivered without consent", delivered.isEmpty())
+        assertEquals(0, backend.count(pushOpen))
+
+        Grovs.setSDK(true)
+        advanceUntil("the push to be delivered") { delivered.isNotEmpty() }
+        advance(5_000)
+
+        assertEquals(link, delivered.single().link)
+        assertEquals(1, backend.count(pushOpen))
+    }
+
+    @Test
+    fun `a tap while disabled is dropped once the app goes to the background`() {
+        backend.respond(authenticate, authOk)
+        linkResolves()
+        configure(enabled = false)
+        foreground(pushTap())
+        background()
 
         Grovs.setSDK(true)
         backend.phase = "enabled-later"
         advance(5_000)
         foreground()
+        advance(5_000)
 
         assertEquals(0, backend.count(pushOpen))
         assertEquals(0, backend.count(payload))
@@ -261,18 +281,18 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
     }
 
     @Test
-    fun `a tap held before a consent gated configure is dropped`() {
+    fun `a tap held before a consent gated configure is handled once consent is granted`() {
         backend.respond(authenticate, authOk)
         linkResolves()
 
         Grovs.handleNotificationOpen(pushTap())
         configure(enabled = false)
         Grovs.setSDK(true)
-        advance(10_000)
-        foreground()
+        advanceUntil("the push to be delivered") { delivered.isNotEmpty() }
+        advance(5_000)
 
-        assertEquals(0, backend.count(pushOpen))
-        assertTrue(delivered.isEmpty())
+        assertEquals(link, delivered.single().link)
+        assertEquals(1, backend.count(pushOpen))
     }
 
     @Test

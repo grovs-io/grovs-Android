@@ -43,9 +43,27 @@ internal class PushConsentE2ETest : ContractTestBase() {
     }
 
     @Test
-    fun `P24 a tap while disabled reports and delivers nothing, also after enabling`() {
+    fun `P24 a tap while disabled reports and delivers nothing until consent is granted`() {
         configure(enabled = false)
         foreground(tap)
+        settle(10_000)
+        assertEquals(0, pushOpens())
+        assertTrue(deepLinks.delivered.isEmpty())
+
+        Grovs.setSDK(true)
+        pumpUntil("the open") { pushOpens() >= 1 }
+        settle(10_000)
+
+        assertAuthenticated()
+        assertEquals(1, pushOpens())
+        assertEquals(1, deepLinks.delivered.size)
+    }
+
+    @Test
+    fun `P24 a tap while disabled is dropped once the app goes to the background`() {
+        configure(enabled = false)
+        foreground(tap)
+        background()
         Grovs.setSDK(true)
         settle(10_000)
         foreground()

@@ -565,6 +565,11 @@ public class Grovs: ActivityProvider {
     @Volatile
     private var startupPushIntent: Intent? = null
 
+    /// A Grovs push tapped while consent was off. Handled if consent is granted before the app goes
+    /// to the background, so a consent prompt on the first screen does not lose the tap.
+    @Volatile
+    private var pushAwaitingConsent: Intent? = null
+
     private val handledPushes = HandledPushes {
         application?.getSharedPreferences(HandledPushes.PREFS_NAME, Context.MODE_PRIVATE)
     }
@@ -767,6 +772,11 @@ public class Grovs: ActivityProvider {
         // No automatic retries from the background.
         cancelAuthenticationRetry()
         pendingLink.onBackground()
+        // The moment has passed: a push still waiting for consent is not delivered later.
+        pushAwaitingConsent?.let { intent ->
+            pushAwaitingConsent = null
+            GrovsPushPayload.from(intent)?.let { handledPushes.ignore(it, intent) }
+        }
         grovsManager?.onAppBackgrounded()
     }
 
@@ -885,8 +895,10 @@ public class Grovs: ActivityProvider {
 
         val startupPush = startupPushIntent
         startupPushIntent = null
-        if (startupPush != null && enabled && apiKey.isNotEmpty()) {
-            mainHandler.post { handleIntent(startupPush, delayEvents = true, cacheIntent = true) }
+        if (apiKey.isNotEmpty()) {
+            // A disabled configuration keeps the push until consent is granted.
+            if (startupPush != null) mainHandler.post { handleIntent(startupPush, delayEvents = true, cacheIntent = true) }
+            else if (enabled) replayPushAwaitingConsent()
         }
     }
 
@@ -968,6 +980,16 @@ public class Grovs: ActivityProvider {
             }
         } else {
             checkConfiguration(awaiting = priorWork)
+        }
+        replayPushAwaitingConsent()
+    }
+
+    /** Posted, so the intent path runs on the main thread after the authentication job is set. */
+    private fun replayPushAwaitingConsent() {
+        mainHandler.post {
+            val intent = pushAwaitingConsent ?: return@post
+            pushAwaitingConsent = null
+            handleIntent(intent, delayEvents = true, cacheIntent = true)
         }
     }
 
@@ -1505,7 +1527,7 @@ public class Grovs: ActivityProvider {
         // point where the intent would be marked handled. The intent stays unconsumed and a later
         // explicit onStart/onNewIntent can still resolve it - enabling on its own never replays it.
         val token = grovsContext.consent.tryAcquire(manager.configuration) ?: run {
-            push?.let { handledPushes.ignore(it, intent) }
+            if (push != null && !handledPushes.contains(push, intent)) pushAwaitingConsent = intent
             DebugLogger.instance.log(LogLevel.INFO, "SDK consent not granted - the intent is left unhandled")
             return
         }

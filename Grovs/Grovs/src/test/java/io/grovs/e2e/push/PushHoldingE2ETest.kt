@@ -46,17 +46,21 @@ internal class PushHoldingE2ETest : ContractTestBase() {
     }
 
     @Test
-    fun `P16 a tap before a disabled configure is dropped`() {
+    fun `P16 a tap before a disabled configure waits for consent`() {
         Grovs.handleNotificationOpen(noLink())
         configure(enabled = false)
-        Grovs.setSDK(true)
-        foreground()
-        settle(10_000)
-
-        pumpUntil("authentication") { manager().authenticationState == GrovsManager.AuthenticationState.AUTHENTICATED }
-        assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
+        settle(5_000)
         assertEquals(0, pushOpens())
         assertTrue(deepLinks.delivered.isEmpty())
+
+        Grovs.setSDK(true)
+        foreground()
+        pumpUntil("the open") { pushOpens() >= 1 }
+        settle(10_000)
+
+        assertEquals(GrovsManager.AuthenticationState.AUTHENTICATED, manager().authenticationState)
+        assertEquals(1, pushOpens())
+        assertEquals(1, deepLinks.delivered.size)
     }
 
     @Test

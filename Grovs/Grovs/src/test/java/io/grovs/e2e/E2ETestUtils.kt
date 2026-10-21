@@ -419,7 +419,8 @@ object E2ETestUtils {
                 "deeplinkListener",
                 "launcherActivityReference",
                 "currentActivityReference",
-                "startupPushIntent"
+                "startupPushIntent",
+                "pushAwaitingConsent"
             ).forEach { fieldName ->
                 try {
                     val field = grovsClass.getDeclaredField(fieldName)
