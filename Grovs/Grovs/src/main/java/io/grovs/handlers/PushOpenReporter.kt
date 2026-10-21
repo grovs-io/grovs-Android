@@ -4,62 +4,83 @@ import io.grovs.model.DebugLogger
 import io.grovs.model.LogLevel
 import io.grovs.service.HttpStatusException
 import io.grovs.service.IGrovsService
+import io.grovs.storage.PushOpen
+import io.grovs.storage.PushOpenStorage
+import io.grovs.utils.InstantCompat
 import io.grovs.utils.LSResult
 
 /**
- * Reports campaign opens to push_open. An open made before authentication, or whose report
- * failed, is held in memory and sent after the next authentication or foreground.
+ * Reports campaign opens to push_open. Every open is saved to disk first and removed only once the
+ * backend accepts or refuses it, so an open made before authentication, or whose report failed,
+ * survives the app closing and is sent after the next authentication or foreground.
  */
 internal class PushOpenReporter(
     private val service: IGrovsService,
     private val consent: ConsentController,
+    private val storage: PushOpenStorage,
     private val isAuthenticated: () -> Boolean,
 ) {
-    private class Pending(val sessionId: String, val failures: Int, val token: ConsentToken)
+    private val lock = Any()
 
-    private val pending = LinkedHashMap<String, Pending>()
+    /** Consent of opens tapped in this run. An open read back from an earlier run has none. */
+    private val tapTokens = HashMap<PushOpen, ConsentToken>()
+    private val sending = HashSet<PushOpen>()
 
     /** [sessionId] is the session of the tap; a retry keeps it even after a new session starts. */
     suspend fun onTap(campaignId: String, sessionId: String, token: ConsentToken) {
-        hold(campaignId, Pending(sessionId, failures = 0, token = token))
-        reportPending()
+        val open = PushOpen(campaignId, sessionId, InstantCompat.now())
+        if (storage.addIfAbsent(open)) {
+            synchronized(lock) { tapTokens[open] = token }
+            // Consent withdrawn while saving: its clear may have run before the write landed.
+            if (!consent.isCurrent(token)) forget(open)
+        }
+        reportPending(token)
     }
 
-    suspend fun reportPending() {
+    /** An open from an earlier run is reported under [token], the consent of the caller. */
+    suspend fun reportPending(token: ConsentToken) {
         if (!isAuthenticated()) return
-        val batch = synchronized(pending) { pending.toList().also { pending.clear() } }
-        batch.forEach { (campaignId, open) -> report(campaignId, open) }
+        storage.getAll().forEach { open ->
+            if (!synchronized(lock) { sending.add(open) }) return@forEach
+            try {
+                report(open, token)
+            } finally {
+                synchronized(lock) { sending.remove(open) }
+            }
+        }
     }
 
     fun clear() {
-        synchronized(pending) { pending.clear() }
+        synchronized(lock) { tapTokens.clear() }
+        storage.clear()
     }
 
-    private suspend fun report(campaignId: String, open: Pending) {
-        if (!consent.isCurrent(open.token)) return
-        val result = service.pushOpen(campaignId, open.sessionId)
-        if (result !is LSResult.Error) {
-            DebugLogger.instance.log(LogLevel.INFO, "Push open reported for campaign $campaignId")
+    private suspend fun report(open: PushOpen, callerToken: ConsentToken) {
+        val tapToken = synchronized(lock) { tapTokens[open] }
+        val token = tapToken ?: callerToken
+        if (!consent.isCurrent(token)) {
+            // An open tapped under withdrawn consent is never sent.
+            if (tapToken != null) forget(open)
             return
         }
-        val failures = open.failures + 1
+        val result = service.pushOpen(open.campaignId, open.sessionId)
+        val campaignId = open.campaignId
         when {
-            result.exception is HttpStatusException ->
+            result !is LSResult.Error -> {
+                DebugLogger.instance.log(LogLevel.INFO, "Push open reported for campaign $campaignId")
+                forget(open)
+            }
+            result.exception is HttpStatusException -> {
                 DebugLogger.instance.log(LogLevel.ERROR, "Push open refused for campaign $campaignId: ${result.exception.message}")
-            !consent.isCurrent(open.token) -> Unit
-            failures >= MAX_ATTEMPTS ->
-                DebugLogger.instance.log(LogLevel.ERROR, "Push open for campaign $campaignId dropped after $failures attempts")
-            else -> hold(campaignId, Pending(open.sessionId, failures, open.token))
+                forget(open)
+            }
+            !consent.isCurrent(token) -> forget(open)
+            else -> DebugLogger.instance.log(LogLevel.INFO, "Push open for campaign $campaignId failed, keeping for retry")
         }
     }
 
-    /** Keeps the first entry, so a newer tap never resets an older one's failure count. */
-    private fun hold(campaignId: String, open: Pending) {
-        // Not putIfAbsent: that is API 24 and minSdk is 21.
-        synchronized(pending) { if (!pending.containsKey(campaignId)) pending[campaignId] = open }
-    }
-
-    companion object {
-        const val MAX_ATTEMPTS = 3
+    private suspend fun forget(open: PushOpen) {
+        synchronized(lock) { tapTokens.remove(open) }
+        storage.remove(open)
     }
 }

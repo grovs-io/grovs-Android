@@ -29,6 +29,7 @@ import io.grovs.service.IGrovsService
 import io.grovs.service.TrackingParams
 import io.grovs.storage.ILocalCache
 import io.grovs.storage.LocalCache
+import io.grovs.storage.PushOpenStorage
 import io.grovs.utils.AppDetailsHelper
 import io.grovs.utils.GVRetryResult
 import io.grovs.utils.IAppDetailsHelper
@@ -268,6 +269,7 @@ internal class GrovsManager(
     internal val pushOpens = PushOpenReporter(
         service = this.grovsService,
         consent = grovsContext.consent,
+        storage = PushOpenStorage(context),
         isAuthenticated = { authenticationState == AuthenticationState.AUTHENTICATED },
     )
 
@@ -299,7 +301,7 @@ internal class GrovsManager(
     fun reportPendingPushOpens() {
         val token = grovsContext.consent.tryAcquire(configuration) ?: return
         grovsContext.consent.launchOperation(token, context = grovsContext.serialDispatcher) {
-            pushOpens.reportPending()
+            pushOpens.reportPending(token)
         }
     }
 

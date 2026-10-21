@@ -3,7 +3,6 @@ package io.grovs.e2e.push
 import android.content.Intent
 import io.grovs.e2e.contract.BackendContract
 import io.grovs.e2e.contract.BackendContract.IN_REQUEST_ATTEMPTS
-import io.grovs.e2e.contract.BackendContract.REPORT_ATTEMPTS
 import io.grovs.e2e.contract.ContractTestBase
 import io.grovs.e2e.contract.PushPayloads
 import io.grovs.e2e.contract.PushPayloads.tapIntent
@@ -82,18 +81,63 @@ internal class PushRetryE2ETest : ContractTestBase() {
     }
 
     @Test
-    fun `P21 an open that keeps failing is dropped after three reports`() {
+    fun `P21 an open that keeps failing is retried on every foreground`() {
         backend.failWithStatus("push_open", code = 503, body = "down")
         authenticated()
         foreground(tap)
-        repeat(REPORT_ATTEMPTS + 2) {
+        val foregrounds = 5
+        repeat(foregrounds) {
             settle(60_000)
             foreground(Intent())
         }
-        advanceUntil("12 opens") { pushOpens() >= REPORT_ATTEMPTS * IN_REQUEST_ATTEMPTS }
+        val reports = foregrounds + 1
+        advanceUntil("every report's tries") { pushOpens() >= reports * IN_REQUEST_ATTEMPTS }
         settle(60_000)
+        assertEquals(reports * IN_REQUEST_ATTEMPTS, pushOpens())
 
-        assertEquals(REPORT_ATTEMPTS * IN_REQUEST_ATTEMPTS, pushOpens())
+        contract.install()
+        backend.phase = "recovered"
+        foreground(Intent())
+        pumpUntil("the retried open is reported") { pushOpens("recovered") >= 1 }
+        settle(10_000)
+        assertEquals(1, pushOpens("recovered"))
+    }
+
+    @Test
+    fun `P21 a failed open survives process death and is sent after the relaunch`() {
+        backend.failWithStatus("push_open", code = 503, body = "down")
+        authenticated()
+        foreground(tap)
+        advanceUntil("the first report's tries") { pushOpens() >= IN_REQUEST_ATTEMPTS }
+        settle(30_000)
+        val tapSession = contract.bodies("push_open").first().getString("session_id")
+
+        simulateProcessDeath()
+        contract.install()
+        backend.phase = "after-restart"
+        authenticated()
+        pumpUntil("the saved open is reported") { pushOpens("after-restart") >= 1 }
+        settle(10_000)
+
+        val retried = backend.seen.filter { it.path == "push_open" && it.phase == "after-restart" }
+        assertEquals(tapSession, JSONObject(retried.single().body).getString("session_id"))
+    }
+
+    @Test
+    fun `P21 an open tapped before authentication survives process death`() {
+        backend.failWithStatus("authenticate", code = 503, body = "down")
+        configure()
+        foreground(tap)
+        settle(30_000)
+        assertEquals(0, pushOpens())
+
+        simulateProcessDeath()
+        contract.install()
+        backend.phase = "after-restart"
+        authenticated()
+        pumpUntil("the saved open is reported") { pushOpens("after-restart") >= 1 }
+        settle(10_000)
+        assertEquals(1, pushOpens("after-restart"))
     }
 
     private fun permanentFailure(code: Int, body: String) {

@@ -835,6 +835,9 @@ public class Grovs: ActivityProvider {
         this.grovsContext.settings.clipboardDomains = ClipboardHandler.normalizeDomains(clipboardDomains)
         // Stop the previous manager's custom-events flush timer when configure() is called again.
         grovsManager?.close()
+        // A new configuration never inherits the previous one's unreported opens. A cold start has
+        // no previous manager, so opens saved before the app closed are kept.
+        grovsManager?.pushOpens?.clear()
         // A job chained off the previous manager must not keep retrying against a manager that is
         // about to be replaced: checkConfiguration() joins this (now cancelled) job before it
         // authenticates the new one, so joining returns immediately instead of waiting out retries.

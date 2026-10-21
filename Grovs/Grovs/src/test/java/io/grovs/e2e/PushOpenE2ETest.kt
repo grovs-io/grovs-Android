@@ -213,20 +213,20 @@ class PushOpenE2ETest : DrivenBackendTestBase() {
     }
 
     @Test
-    fun `a failing open is dropped after three attempts`() {
+    fun `a failing open is retried on every foreground`() {
         backend.respond(authenticate, authOk)
         backend.failWithStatus(pushOpen, code = 503, body = "down")
         linkResolves()
         configure()
         foreground(pushTap())
-        repeat(3) {
+        repeat(4) {
             advance(60_000)
             // A fresh activity each time: restarting the same one stops reaching the process lifecycle.
             foreground(Intent())
         }
         advance(60_000)
 
-        assertEquals(3 * ATTEMPTS_PER_REPORT, backend.count(pushOpen))
+        assertEquals(5 * ATTEMPTS_PER_REPORT, backend.count(pushOpen))
     }
 
     @Test

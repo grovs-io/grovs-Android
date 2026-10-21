@@ -51,9 +51,6 @@ internal object BackendContract {
     /** One report is tried 4 times with backoff before it is held. */
     const val IN_REQUEST_ATTEMPTS = 4
 
-    /** An open is dropped after 3 reports. */
-    const val REPORT_ATTEMPTS = 3
-
     /** Stamps the backend answers when in-app is switched off. */
     const val OFF_STAMPS = """{"campaigns_changed_at":"off","user_changed_at":"off"}"""
 
