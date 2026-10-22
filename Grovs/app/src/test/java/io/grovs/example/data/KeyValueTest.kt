@@ -61,6 +61,12 @@ class KeyValueTest {
     }
 
     @Test
+    fun aliasMapKeepsRawTextAndSkipsBlankKeys() {
+        val map = listOf(KeyValue(" MainActivity ", "123"), KeyValue(" ", "x")).toAliasMap()
+        assertEquals(mapOf("MainActivity" to "123"), map)
+    }
+
+    @Test
     fun summaryListsKeys() {
         assertEquals("a, b", listOf(KeyValue("a", "1"), KeyValue("", "2"), KeyValue("b", "x")).summary())
     }

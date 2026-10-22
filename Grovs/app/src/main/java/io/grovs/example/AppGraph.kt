@@ -40,6 +40,13 @@ object AppGraph {
         sdkEnabled.value = startedProfile.startEnabled
     }
 
+    /** Used when the stored profile cannot configure the SDK, so it is not tried again on the next launch. */
+    fun fallBackToDefaultProfile(): Profile {
+        startedProfile = store.resetToDefaultProfile()
+        sdkEnabled.value = startedProfile.startEnabled
+        return startedProfile
+    }
+
     fun rerun(action: TestAction) {
         scope.launch { runner.run(action) }
     }
@@ -49,7 +56,9 @@ object AppGraph {
         log.markSeen()
     }
 
+    /** Errors that arrived while the panel was open have been seen. */
     fun closePanel() {
         panel.value = PanelState()
+        log.markSeen()
     }
 }

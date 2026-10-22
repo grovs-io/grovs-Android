@@ -29,6 +29,12 @@ class SettingsStore(context: Context) : LinkHistory {
     val activeProfile: Profile
         get() = profiles.let { all -> all.firstOrNull { it.id == activeProfileId } ?: all.first() }
 
+    fun resetToDefaultProfile(): Profile {
+        profiles = withDefaultProfile(profiles)
+        activeProfileId = DEFAULT_PROFILES.first().id
+        return activeProfile
+    }
+
     var linkForm: LinkForm
         get() = decodeLinkForm(prefs.getString(K_LINK_FORM, null))
         set(value) = put(K_LINK_FORM, encodeLinkForm(value))

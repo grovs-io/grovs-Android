@@ -58,6 +58,10 @@ fun formatDate(date: Date): String = dateFormat().format(date)
 fun List<KeyValue>.toValueMap(): Map<String, Serializable> =
     filter { it.key.isNotBlank() }.associate { it.key.trim() to it.value() }
 
+/** Screen aliases are plain text, so the raw value is kept. */
+fun List<KeyValue>.toAliasMap(): Map<String, String> =
+    filter { it.key.isNotBlank() }.associate { it.key.trim() to it.raw }
+
 fun List<KeyValue>.summary(): String = filter { it.key.isNotBlank() }.joinToString(", ") { it.key.trim() }
 
 fun List<KeyValue>.toJson(): String {

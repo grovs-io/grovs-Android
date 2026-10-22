@@ -47,6 +47,8 @@ import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,12 +100,12 @@ fun HelpText(text: String, isError: Boolean = false, modifier: Modifier = Modifi
 }
 
 @Composable
-fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null) {
+fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null, enabled: Boolean = true) {
     Text(
         text,
         style = AppType.label,
-        color = color ?: AppTheme.colors.accent,
-        modifier = modifier.clip(RoundedCornerShape(6.dp)).clickable(role = Role.Button, onClick = onClick).padding(4.dp),
+        color = if (enabled) color ?: AppTheme.colors.accent else AppTheme.colors.textMuted,
+        modifier = modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(4.dp),
     )
 }
 
@@ -267,7 +269,9 @@ fun AppButton(
             .clip(shape)
             .background(background)
             .then(if (enabled && style == ButtonStyle.OUTLINE) Modifier.border(1.dp, c.border, shape) else Modifier)
-            .combinedClickable(enabled = enabled, role = Role.Button, onClick = onClick, onLongClick = onLongClick)
+            // Long press stays available on a disabled button so its saved values can still be edited.
+            .combinedClickable(enabled = enabled || onLongClick != null, role = Role.Button, onClick = { if (enabled) onClick() }, onLongClick = onLongClick)
+            .then(if (enabled) Modifier else Modifier.semantics { disabled() })
             .padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center,
     ) {

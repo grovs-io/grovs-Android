@@ -1,6 +1,8 @@
 package io.grovs.example.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ProfileTest {
@@ -32,5 +34,27 @@ class ProfileTest {
     @Test
     fun defaultsAreValid() {
         assertEquals(DEFAULT_PROFILES.size, DEFAULT_PROFILES.map { it.id }.toSet().size)
+        DEFAULT_PROFILES.forEach { p ->
+            assertNull(profileNameError(p.name))
+            assertNull(apiKeyError(p.apiKey))
+            assertNull(baseUrlError(p.baseUrl.orEmpty()))
+        }
+    }
+
+    @Test
+    fun validatesSettings() {
+        assertNotNull(profileNameError(" "))
+        assertNotNull(apiKeyError(""))
+        assertNull(baseUrlError(""))
+        assertNull(baseUrlError("https://staging.grovs.io"))
+        assertNotNull(baseUrlError("staging.grovs.io"))
+    }
+
+    @Test
+    fun restoresDefaultProfile() {
+        val default = DEFAULT_PROFILES.first()
+        val broken = default.copy(baseUrl = "staging.grovs.io")
+        assertEquals(listOf(default, base), withDefaultProfile(listOf(broken, base)))
+        assertEquals(listOf(default, base), withDefaultProfile(listOf(base)))
     }
 }

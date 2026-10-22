@@ -26,6 +26,21 @@ val DEFAULT_PROFILES = listOf(
     ),
 )
 
+fun profileNameError(name: String): String? = if (name.isBlank()) "Enter a name" else null
+
+fun apiKeyError(key: String): String? = if (key.isBlank()) "Enter an API key" else null
+
+/** A blank base URL means the SDK default. */
+fun baseUrlError(url: String): String? =
+    if (url.isNotBlank() && !isWebUrl(url)) "Must start with http:// or https://" else null
+
+/** Puts the built-in default profile back, replacing a stored profile with the same id. */
+fun withDefaultProfile(profiles: List<Profile>): List<Profile> {
+    val default = DEFAULT_PROFILES.first()
+    return if (profiles.any { it.id == default.id }) profiles.map { if (it.id == default.id) default else it }
+    else listOf(default) + profiles
+}
+
 fun restartChanges(started: Profile, current: Profile): List<String> {
     if (started.id != current.id) return listOf("Project")
     return buildList {

@@ -3,16 +3,12 @@ package io.grovs.example.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,13 +34,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.example.data.CallStyle
+import io.grovs.example.data.apiKeyError
+import io.grovs.example.data.baseUrlError
 import io.grovs.example.data.middleEllipsis
+import io.grovs.example.data.profileNameError
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.AppTextField
 import io.grovs.example.ui.controls.Chip
 import io.grovs.example.ui.controls.ChipInput
 import io.grovs.example.ui.controls.FieldLabel
 import io.grovs.example.ui.controls.FoldRow
+import io.grovs.example.ui.controls.HelpText
 import io.grovs.example.ui.controls.SectionHeader
 import io.grovs.example.ui.controls.Segment
 import io.grovs.example.ui.controls.SettingRow
@@ -72,17 +72,15 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = viewModel()) {
                 vm.profiles.forEach { p -> Chip(p.name, { vm.select(p.id) }, selected = p.id == profile.id) }
                 Chip("+ New", vm::addProfile, dashed = true)
             }
-            FieldLabel("Name")
-            AppTextField(profile.name, { v -> vm.updateActive { it.copy(name = v) } })
-            Spacer(Modifier.height(6.dp))
-            EditableRow("API key", profile.apiKey, { v -> vm.updateActive { it.copy(apiKey = v.trim()) } })
+            EditableRow("Name", profile.name, { v -> vm.updateActive { it.copy(name = v.trim()) } }, ::profileNameError, mono = false)
+            EditableRow("API key", profile.apiKey, { v -> vm.updateActive { it.copy(apiKey = v.trim()) } }, ::apiKeyError)
             SettingRow("Environment") {
                 Segment(listOf(false, true), profile.useTestEnvironment, { v -> vm.updateActive { it.copy(useTestEnvironment = v) } }, Modifier.width(140.dp), compact = true) {
                     if (it) "Test" else "Prod"
                 }
             }
             EditableRow("Base URL", profile.baseUrl.orEmpty(), { v -> vm.updateActive { it.copy(baseUrl = v.trim().ifEmpty { null }) } },
-                emptyText = "SDK default", keyboardType = KeyboardType.Uri)
+                ::baseUrlError, emptyText = "SDK default", keyboardType = KeyboardType.Uri)
             FoldRow("Clipboard domains", profile.clipboardDomains.joinToString().ifEmpty { "none" }) {
                 ChipInput(profile.clipboardDomains, { v -> vm.updateActive { it.copy(clipboardDomains = v) } }, placeholder = "links.example.com", fieldTag = "domainsField")
             }
@@ -125,8 +123,10 @@ private fun EditableRow(
     label: String,
     value: String,
     onSave: (String) -> Unit,
+    error: (String) -> String?,
     emptyText: String = "Not set",
     keyboardType: KeyboardType = KeyboardType.Text,
+    mono: Boolean = true,
 ) {
     val c = AppTheme.colors
     val clipboard = LocalClipboardManager.current
@@ -134,20 +134,28 @@ private fun EditableRow(
     var draft by rememberSaveable(value) { mutableStateOf(value) }
     if (!editing) {
         SettingRow(label, onClick = { draft = value; editing = true }) {
-            Text(value.ifEmpty { emptyText }.let { if (value.length > 24) middleEllipsis(it, 8) else it }, style = AppType.mono, color = c.textMuted)
+            Text(value.ifEmpty { emptyText }.let { if (value.length > 24) middleEllipsis(it, 8) else it }, style = if (mono) AppType.mono else AppType.body, color = c.textMuted)
         }
         return
+    }
+    val message = error(draft)
+    val save = {
+        if (message == null) {
+            onSave(draft)
+            editing = false
+        }
     }
     Column(Modifier.padding(vertical = 6.dp)) {
         FieldLabel(label)
         AppTextField(
-            draft, { draft = it }, mono = true, keyboardType = keyboardType,
-            onImeAction = { onSave(draft); editing = false },
+            draft, { draft = it }, mono = mono, error = message != null, keyboardType = keyboardType,
+            onImeAction = save,
             trailing = { TextAction("Paste", { clipboard.getText()?.text?.let { draft = it.trim() } }) },
         )
+        if (message != null) HelpText(message, isError = true)
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.End) {
             TextAction("Cancel", { editing = false }, color = c.textMuted)
-            TextAction("Save", { onSave(draft); editing = false })
+            TextAction("Save", save, enabled = message == null)
         }
     }
 }
