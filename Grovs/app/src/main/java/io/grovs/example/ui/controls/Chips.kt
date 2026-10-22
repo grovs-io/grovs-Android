@@ -95,7 +95,10 @@ fun ChipPicker(
     display: (String) -> String = { it },
 ) {
     var editingOther by remember { mutableStateOf(false) }
-    val isCustom = selected !in options
+    var typed by remember { mutableStateOf("") }
+    val custom = selected.takeIf { it.isNotEmpty() && it !in options }
+    val showOther = otherPlaceholder != null && (editingOther || custom != null)
+    val otherText = if (editingOther) typed else custom.orEmpty()
     Column(modifier.fillMaxWidth()) {
         if (label != null) FieldLabel(label)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -104,15 +107,15 @@ fun ChipPicker(
             }
             if (otherPlaceholder != null) {
                 Chip(
-                    if (isCustom && selected.isNotEmpty()) selected else otherLabel,
-                    { editingOther = true },
-                    selected = isCustom || editingOther,
-                    dashed = !isCustom && !editingOther,
+                    otherText.ifEmpty { otherLabel },
+                    { typed = custom.orEmpty(); editingOther = true },
+                    selected = showOther,
+                    dashed = !showOther,
                 )
             }
         }
-        if (otherPlaceholder != null && (editingOther || isCustom)) {
-            AppTextField(if (isCustom) selected else "", onSelect, Modifier.padding(top = 6.dp), placeholder = otherPlaceholder)
+        if (showOther && otherPlaceholder != null) {
+            AppTextField(otherText, { typed = it; editingOther = true; onSelect(it) }, Modifier.padding(top = 6.dp), placeholder = otherPlaceholder)
         }
     }
 }

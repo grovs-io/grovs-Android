@@ -73,7 +73,7 @@ fun AppTextField(
         singleLine = singleLine,
         keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = keyboardType, imeAction = imeAction),
         keyboardActions = KeyboardActions(
-            onNext = { focusManager.moveFocus(FocusDirection.Down) },
+            onNext = { focusManager.moveFocus(FocusDirection.Next) },
             onDone = { focusManager.clearFocus(); onImeAction() },
             onGo = { onImeAction() },
             onSearch = { onImeAction() },

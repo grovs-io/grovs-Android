@@ -5,10 +5,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import io.grovs.example.data.KeyValue
@@ -56,5 +58,20 @@ class ControlsTest {
         }
         rule.onNodeWithTag("kvValue0").performTextInput("12")
         rule.onNodeWithText("123").assertExists()
+    }
+
+    @Test
+    fun imeNextOnKeyFocusesValueField() {
+        rule.setContent {
+            GrovsTestAppTheme {
+                CompositionLocalProvider(LocalSheetHost provides SheetHost()) {
+                    var rows by remember { mutableStateOf(listOf(KeyValue("a", ""), KeyValue("b", ""))) }
+                    KeyValueRows(rows, { rows = it })
+                }
+            }
+        }
+        rule.onNodeWithTag("kvKey0").performClick()
+        rule.onNodeWithTag("kvKey0").performImeAction()
+        rule.onNodeWithTag("kvValue0").assertIsFocused()
     }
 }

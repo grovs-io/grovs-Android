@@ -51,7 +51,7 @@ fun KeyValueRows(
         }
         rows.forEachIndexed { i, row ->
             Row(Modifier.padding(bottom = 5.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                AppTextField(row.key, { replace(i, row.copy(key = it)) }, Modifier.weight(1f), placeholder = "key", imeAction = ImeAction.Next)
+                AppTextField(row.key, { replace(i, row.copy(key = it)) }, Modifier.weight(1f).testTag("kvKey$i"), placeholder = "key", imeAction = ImeAction.Next)
                 AppTextField(
                     row.raw, { replace(i, row.copy(raw = it)) }, Modifier.weight(1.2f).testTag("kvValue$i"),
                     placeholder = "value",
