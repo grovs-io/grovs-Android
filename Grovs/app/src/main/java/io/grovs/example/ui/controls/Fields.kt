@@ -68,7 +68,7 @@ fun AppTextField(
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().revealWhenFocused(),
         textStyle = style,
         singleLine = singleLine,
         keyboardOptions = KeyboardOptions(autoCorrect = false, keyboardType = keyboardType, imeAction = imeAction),

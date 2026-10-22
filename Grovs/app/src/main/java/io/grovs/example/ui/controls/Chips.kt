@@ -146,7 +146,7 @@ fun ChipInput(
     Column(modifier.fillMaxWidth()) {
         if (label != null || max != null) FieldLabel(label ?: "", trailing = max?.let { "${values.size} of $it" }, info = info)
         FlowRow(
-            Modifier.fillMaxWidth().clip(shape).border(1.dp, if (max != null && values.size > max) c.error else c.border, shape)
+            Modifier.fillMaxWidth().revealWhenFocused().clip(shape).border(1.dp, if (max != null && values.size > max) c.error else c.border, shape)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,

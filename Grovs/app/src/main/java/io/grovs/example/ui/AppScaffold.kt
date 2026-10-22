@@ -17,6 +17,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -75,6 +78,7 @@ enum class Tab(val title: String, val icon: ImageVector) {
     IN_APP("In-app", TabIcons.InApp),
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppScaffold() {
     val c = AppTheme.colors
@@ -96,8 +100,10 @@ fun AppScaffold() {
                             SettingsScreen(onBack = { showSettings = false })
                         }
                     } else {
-                        Column(Modifier.fillMaxSize().background(c.background)) {
-                            Box(Modifier.weight(1f).statusBarsPadding().imePadding()) {
+                        // The keyboard covers the strip and tab bar, so they step aside while typing.
+                        val typing = WindowInsets.isImeVisible
+                        Column(Modifier.fillMaxSize().background(c.background).imePadding()) {
+                            Box(Modifier.weight(1f).statusBarsPadding()) {
                                 TabTransition(tab) { shown ->
                                     screenStates.SaveableStateProvider(shown.name) {
                                         when (shown) {
@@ -109,8 +115,10 @@ fun AppScaffold() {
                                     }
                                 }
                             }
-                            ConsoleStrip(entries.firstOrNull(), unseenError, onOpen = { AppGraph.openPanel() })
-                            TabBar(tab, onSelect = { tab = it })
+                            if (!typing) {
+                                ConsoleStrip(entries.firstOrNull(), unseenError, onOpen = { AppGraph.openPanel() })
+                                TabBar(tab, onSelect = { tab = it })
+                            }
                         }
                     }
                 }
