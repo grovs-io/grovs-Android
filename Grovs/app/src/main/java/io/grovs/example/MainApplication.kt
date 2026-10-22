@@ -1,60 +1,64 @@
 package io.grovs.example
 
 import android.app.Application
-import android.os.Build
-import android.util.Log
 import io.grovs.Grovs
-import io.grovs.GrovsInAppListener
-import io.grovs.model.LogLevel
+import io.grovs.example.actions.LinkSource
+import io.grovs.example.actions.LogState
+import io.grovs.example.actions.LogType
+import io.grovs.example.actions.callCode
+import io.grovs.example.data.middleEllipsis
+import io.grovs.example.data.toValueMap
+import io.grovs.utils.flow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 
 class MainApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppGraph.init(this)
+        val store = AppGraph.store
+        val profile = AppGraph.startedProfile
 
-        Grovs.setInAppListener(SampleInAppListener)
-        Grovs.setInAppExcludedScreens(listOf("SecondActivity"))
-        Grovs.setInAppDebugLogging(true)
+        Grovs.setInAppListener(LoggingInAppListener)
+        Grovs.setInAppExcludedScreens(store.excludedScreens)
+        Grovs.setInAppDebugLogging(store.inAppDebug)
 
-        // TODO: Replace with your own API Key
-        val API_KEY = "grovst_06e36086dad3e934289560e3ca59527282030868f8c844629516c6e6c67bbf1f"
-        Grovs.configure(application = this, apiKey = API_KEY, useTestEnvironment = true)
-        //Grovs.useTestEnvironment = true
+        Grovs.configure(
+            application = this,
+            apiKey = profile.apiKey,
+            useTestEnvironment = profile.useTestEnvironment,
+            baseURL = profile.baseUrl,
+            autoTrackScreenViews = profile.autoTrackScreens,
+            clipboardDomains = profile.clipboardDomains.ifEmpty { null },
+            enabled = profile.startEnabled,
+        )
+        Grovs.setDebug(store.debugLevel)
 
-        //Optionally, you can adjust the debug level for logging:
-        Grovs.setDebug(LogLevel.INFO)
+        val identity = store.identity
+        Grovs.identifier = identity.identifier
+        Grovs.attributes = identity.attributes.toValueMap()
+        Grovs.setGlobalTags(store.globalTags.ifEmpty { null })
+        Grovs.setScreenAliases(store.screenAliases.filter { it.key.isNotBlank() }.associate { it.key.trim() to it.raw })
 
-        Grovs.identifier = getDeviceInfo()
-        Grovs.attributes = mapOf("param1" to "value1", "param2" to 123, "param3" to true)
-    }
+        AppGraph.log.add(
+            LogType.SDK, LogState.OK, "SDK configured",
+            "${profile.name} · ${if (profile.useTestEnvironment) "test" else "prod"}",
+            callCode(
+                "configure",
+                "apiKey" to middleEllipsis(profile.apiKey),
+                "useTestEnvironment" to profile.useTestEnvironment,
+                "baseURL" to profile.baseUrl,
+                "autoTrackScreenViews" to profile.autoTrackScreens,
+                "clipboardDomains" to profile.clipboardDomains,
+                "enabled" to profile.startEnabled,
+            ),
+        )
 
-    fun getDeviceInfo(): String {
-        val model = Build.MODEL        // Phone model, e.g., "Pixel 5"
-        val manufacturer = Build.MANUFACTURER  // Manufacturer, e.g., "Google"
-        return "@$manufacturer $model"
-    }
-}
-
-private object SampleInAppListener : GrovsInAppListener {
-    private const val TAG = "GrovsInApp"
-
-    override fun onInAppMessageShown(campaignId: String) {
-        Log.d(TAG, "shown $campaignId")
-    }
-
-    override fun onInAppMessageClicked(campaignId: String, buttonId: String?, payload: Map<String, Any?>?) {
-        Log.d(TAG, "clicked $campaignId button=$buttonId payload=$payload")
-    }
-
-    override fun onInAppMessageDismissed(campaignId: String, reason: String) {
-        Log.d(TAG, "dismissed $campaignId reason=$reason")
-    }
-
-    override fun onInAppMessageAnswered(campaignId: String, value: Any, comment: String?) {
-        Log.d(TAG, "answered $campaignId value=$value comment=$comment")
-    }
-
-    override fun onInAppMessageFailed(campaignId: String, message: String) {
-        Log.d(TAG, "failed $campaignId: $message")
+        AppGraph.scope.launch {
+            Grovs.Companion::openedLinkDetails.flow.filterNotNull().collect { details ->
+                AppGraph.log.recordLinkOpen(details.link, details.data, details.tracking, LinkSource.FLOW)
+            }
+        }
     }
 }
