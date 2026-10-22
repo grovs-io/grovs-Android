@@ -35,6 +35,7 @@ fun KeyValueRows(
     onChange: (List<KeyValue>) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
+    info: Info? = null,
     suggestedKeys: List<String> = emptyList(),
     textOnly: Boolean = false,
 ) {
@@ -45,6 +46,7 @@ fun KeyValueRows(
         if (label != null) {
             FieldLabel(
                 label,
+                info = info,
                 action = if (textOnly) null else "Paste JSON",
                 onAction = { sheets.show { JsonPasteSheet(rows) { onChange(it); sheets.hide() } } },
             )

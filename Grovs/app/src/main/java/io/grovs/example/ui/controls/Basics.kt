@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -69,9 +70,16 @@ fun ScreenTitle(title: String, modifier: Modifier = Modifier, action: String? = 
 }
 
 @Composable
-fun SectionHeader(text: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}, trailing: String? = null) {
+fun SectionHeader(
+    text: String,
+    modifier: Modifier = Modifier,
+    action: String? = null,
+    onAction: () -> Unit = {},
+    trailing: String? = null,
+    info: Info? = null,
+) {
     Row(modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = AppType.label, color = AppTheme.colors.textMuted, modifier = Modifier.weight(1f))
+        LabelWithInfo(text, AppType.label, AppTheme.colors.textMuted, info)
         if (trailing != null) Text(trailing, style = AppType.caption, color = AppTheme.colors.textFaint)
         if (action != null) TextAction(action, onAction)
     }
@@ -84,12 +92,22 @@ fun FieldLabel(
     trailing: String? = null,
     action: String? = null,
     onAction: () -> Unit = {},
+    info: Info? = null,
 ) {
     val c = AppTheme.colors
     Row(modifier.fillMaxWidth().padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = AppType.label, color = c.textMuted, modifier = Modifier.weight(1f))
+        LabelWithInfo(text, AppType.label, c.textMuted, info)
         if (trailing != null) Text(trailing, style = AppType.caption, color = c.textMuted)
         if (action != null) TextAction(action, onAction)
+    }
+}
+
+/** A label that takes the free width of its row, with an optional "?" right after the text. */
+@Composable
+private fun RowScope.LabelWithInfo(text: String, style: TextStyle, color: Color, info: Info?) {
+    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = style, color = color, modifier = Modifier.weight(1f, fill = false))
+        if (info != null) InfoButton(info)
     }
 }
 
@@ -115,6 +133,7 @@ fun SettingRow(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     showDivider: Boolean = true,
+    info: Info? = null,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     val c = AppTheme.colors
@@ -127,7 +146,7 @@ fun SettingRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(label, style = AppType.body, color = c.text, modifier = Modifier.weight(1f))
+            LabelWithInfo(label, AppType.body, c.text, info)
             trailing()
         }
         if (showDivider) Divider(color = c.divider, thickness = 1.dp)
@@ -142,9 +161,10 @@ fun SwitchRow(
     modifier: Modifier = Modifier,
     supporting: String? = null,
     showDivider: Boolean = true,
+    info: Info? = null,
 ) {
     val c = AppTheme.colors
-    SettingRow(label, modifier, onClick = { onCheckedChange(!checked) }, showDivider = showDivider) {
+    SettingRow(label, modifier, onClick = { onCheckedChange(!checked) }, showDivider = showDivider, info = info) {
         if (supporting != null) Text(supporting, style = AppType.caption, color = c.textMuted)
         Switch(
             checked = checked,
@@ -197,8 +217,8 @@ fun <T> Segment(
 }
 
 @Composable
-fun TriStateRow(label: String, value: TriState, onChange: (TriState) -> Unit) {
-    SettingRow(label) {
+fun TriStateRow(label: String, value: TriState, info: Info? = null, onChange: (TriState) -> Unit) {
+    SettingRow(label, info = info) {
         Segment(TriState.values().toList(), value, onChange, Modifier.width(170.dp), compact = true) { it.label }
     }
 }
@@ -292,6 +312,7 @@ fun FoldRow(
     summary: String,
     modifier: Modifier = Modifier,
     initiallyExpanded: Boolean = false,
+    info: Info? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = AppTheme.colors
@@ -302,7 +323,7 @@ fun FoldRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(title, style = AppType.bodyStrong, color = c.text, modifier = Modifier.weight(1f))
+            LabelWithInfo(title, AppType.bodyStrong, c.text, info)
             if (!expanded) {
                 Text(summary, style = AppType.caption, color = c.textMuted, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp))
@@ -322,11 +343,11 @@ fun copyToClipboard(context: Context, clipboard: ClipboardManager, text: String)
 }
 
 @Composable
-fun CopyRow(label: String, value: String?, modifier: Modifier = Modifier, emptyText: String = "Not set") {
+fun CopyRow(label: String, value: String?, modifier: Modifier = Modifier, emptyText: String = "Not set", info: Info? = null) {
     val c = AppTheme.colors
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    SettingRow(label, modifier, onClick = value?.let { { copyToClipboard(context, clipboard, it) } }) {
+    SettingRow(label, modifier, onClick = value?.let { { copyToClipboard(context, clipboard, it) } }, info = info) {
         Text(value?.let { middleEllipsis(it) } ?: emptyText, style = AppType.mono, color = c.textMuted)
         if (value != null) Text("Copy", style = AppType.label, color = c.accent)
     }

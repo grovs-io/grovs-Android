@@ -47,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.BuildConfig
+import io.grovs.example.ui.Help
 import kotlinx.coroutines.delay
 import io.grovs.example.AppGraph
 import io.grovs.example.MainActivity
@@ -118,7 +119,7 @@ private fun StatusSection(vm: HomeViewModel, onOpenSettings: () -> Unit) {
         if (blocked) openAppSettings()
     }
     SectionHeader("Status")
-    SwitchRow("SDK enabled", sdkEnabled, vm::setSdkEnabled)
+    SwitchRow("SDK enabled", sdkEnabled, vm::setSdkEnabled, info = Help.sdkEnabled)
     SettingRow("Project", onClick = onOpenSettings) {
         Text(AppGraph.startedProfile.name, style = AppType.body, color = c.textMuted)
         Icon(Icons.Default.KeyboardArrowRight, null, tint = c.textFaint)
@@ -137,7 +138,7 @@ private fun StatusSection(vm: HomeViewModel, onOpenSettings: () -> Unit) {
             })
         }
     }
-    CopyRow("Push token", token, emptyText = "Waiting…")
+    CopyRow("Push token", token, emptyText = "Waiting…", info = Help.pushToken)
 }
 
 @Composable
@@ -152,7 +153,7 @@ private fun OpenedFromSection() {
             delay(if (age <= TestLog.MERGE_WINDOW_MS) TestLog.MERGE_WINDOW_MS - age + 50 else 30_000L)
         }
     }
-    SectionHeader("Opened from", trailing = latest?.let { relativeTime(now - it.time) })
+    SectionHeader("Opened from", info = Help.openedFrom, trailing = latest?.let { relativeTime(now - it.time) })
     if (latest == null) {
         Text("Not opened from a link yet", style = AppType.caption, color = c.textMuted, modifier = Modifier.padding(vertical = 8.dp))
     } else {
@@ -176,7 +177,7 @@ private fun LinkSourcesPill(entry: LogEntry, now: Long) {
 @Composable
 private fun IdentitySection(vm: HomeViewModel) {
     val c = AppTheme.colors
-    SectionHeader("Identity", action = if (vm.editingIdentity) null else "Change", onAction = vm::startEditing)
+    SectionHeader("Identity", info = Help.identity, action = if (vm.editingIdentity) null else "Change", onAction = vm::startEditing)
     if (!vm.editingIdentity) {
         SettingRow("Identifier", onClick = vm::startEditing) {
             Text(vm.identity.identifier ?: "None", style = AppType.body, color = c.textMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -211,7 +212,7 @@ private fun QuickActions() {
     val sheets = LocalSheetHost.current
     val links: LinksViewModel = viewModel()
     val events: EventsViewModel = viewModel()
-    SectionHeader("Quick actions", trailing = "hold to edit")
+    SectionHeader("Quick actions", trailing = "hold to edit", info = Help.quickActions)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AppButton("Generate link", links::generate, Modifier.weight(1f), enabled = !links.running, onLongClick = {
             sheets.show {

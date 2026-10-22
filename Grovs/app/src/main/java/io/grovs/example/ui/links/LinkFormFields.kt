@@ -16,6 +16,7 @@ import io.grovs.example.data.Redirect
 import io.grovs.example.data.SAMPLE_IMAGE_1
 import io.grovs.example.data.SAMPLE_IMAGE_2
 import io.grovs.example.data.SAMPLE_REDIRECTS
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppTextField
 import io.grovs.example.ui.controls.ChipInput
 import io.grovs.example.ui.controls.ChipPicker
@@ -33,7 +34,7 @@ fun LinkFormFields(form: LinkForm, update: ((LinkForm) -> LinkForm) -> Unit) {
     Spacer(Modifier.height(10.dp))
     SuggestField(form.subtitle, { v -> update { it.copy(subtitle = v) } }, emptyList(), label = "Subtitle", imeAction = ImeAction.Next)
     Spacer(Modifier.height(10.dp))
-    KeyValueRows(form.data, { v -> update { it.copy(data = v) } }, label = "Data", suggestedKeys = listOf("promo", "user_id", "screen"))
+    KeyValueRows(form.data, { v -> update { it.copy(data = v) } }, label = "Data", info = Help.linkData, suggestedKeys = listOf("promo", "user_id", "screen"))
     Spacer(Modifier.height(6.dp))
     FoldRow("More options", form.moreSummary()) {
         ChipPicker(
@@ -46,8 +47,8 @@ fun LinkFormFields(form: LinkForm, update: ((LinkForm) -> LinkForm) -> Unit) {
             display = { when (it) { "" -> "None"; SAMPLE_IMAGE_1 -> "Sample 1"; SAMPLE_IMAGE_2 -> "Sample 2"; else -> it } },
         )
         Spacer(Modifier.height(10.dp))
-        ChipInput(form.tags, { v -> update { it.copy(tags = v) } }, label = "Tags", placeholder = "Add tag")
-        SwitchRow("UTM tracking", form.utmOn, { v -> update { it.copy(utmOn = v) } })
+        ChipInput(form.tags, { v -> update { it.copy(tags = v) } }, label = "Tags", info = Help.linkTags, placeholder = "Add tag")
+        SwitchRow("UTM tracking", form.utmOn, { v -> update { it.copy(utmOn = v) } }, info = Help.utm)
         if (form.utmOn) {
             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 AppTextField(form.utmSource, { v -> update { it.copy(utmSource = v) } }, Modifier.weight(1f), placeholder = "source", imeAction = ImeAction.Next)
@@ -57,14 +58,14 @@ fun LinkFormFields(form: LinkForm, update: ((LinkForm) -> LinkForm) -> Unit) {
         }
         SwitchRow(
             "Custom redirects", form.redirectsOn, { v -> update { it.copy(redirectsOn = v) } },
-            supporting = if (form.redirectsOn) null else "uses project",
+            supporting = if (form.redirectsOn) null else "uses project", info = Help.customRedirects,
         )
         if (form.redirectsOn) {
             RedirectEditor("Android", form.android) { r -> update { it.copy(android = r) } }
             RedirectEditor("iOS", form.ios) { r -> update { it.copy(ios = r) } }
             RedirectEditor("Desktop", form.desktop) { r -> update { it.copy(desktop = r) } }
         }
-        FoldRow("Platform overrides", form.overridesSummary()) {
+        FoldRow("Platform overrides", form.overridesSummary(), info = Help.platformOverrides) {
             TriStateRow("Preview on Android", form.previewAndroid) { v -> update { it.copy(previewAndroid = v) } }
             TriStateRow("Preview on iOS", form.previewIos) { v -> update { it.copy(previewIos = v) } }
             TriStateRow("Clipboard on Android", form.clipboardAndroid) { v -> update { it.copy(clipboardAndroid = v) } }
@@ -78,6 +79,6 @@ private fun RedirectEditor(platform: String, redirect: Redirect, onChange: (Redi
     Column(Modifier.padding(vertical = 6.dp)) {
         LinkField(redirect.url, { onChange(redirect.copy(url = it)) }, label = platform)
         ChipRow(SAMPLE_REDIRECTS, redirect.url, { onChange(redirect.copy(url = it)) }, Modifier.padding(top = 6.dp))
-        SwitchRow("Open app if installed", redirect.openAppIfInstalled, { onChange(redirect.copy(openAppIfInstalled = it)) }, showDivider = false)
+        SwitchRow("Open app if installed", redirect.openAppIfInstalled, { onChange(redirect.copy(openAppIfInstalled = it)) }, showDivider = false, info = Help.openAppIfInstalled)
     }
 }

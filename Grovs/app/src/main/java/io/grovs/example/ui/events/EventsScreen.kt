@@ -31,6 +31,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.example.data.KeyValue
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.AppTextField
 import io.grovs.example.ui.controls.ButtonStyle
@@ -51,11 +52,11 @@ fun EventsScreen(vm: EventsViewModel = viewModel()) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)) {
         ScreenTitle("Events")
 
-        SectionHeader("Custom event")
+        SectionHeader("Custom event", info = Help.customEvent)
         EventFormFields(vm.event, vm::updateEvent, vm.eventSuggestions, vm.eventError, vm::trackEvent, onSendAnyway = { vm.trackEvent(force = true) })
         AppButton(vm.eventError ?: "Track", { vm.trackEvent() }, Modifier.fillMaxWidth().padding(top = 8.dp), enabled = vm.eventError == null)
 
-        SectionHeader("Screen view")
+        SectionHeader("Screen view", info = Help.screenView)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             AppTextField(vm.screen.name, { v -> vm.updateScreen { it.copy(name = v) } }, Modifier.weight(1f), onImeAction = vm::trackScreen)
             AppButton(
@@ -72,16 +73,16 @@ fun EventsScreen(vm: EventsViewModel = viewModel()) {
         ChipRow(vm.screenSuggestions, vm.screen.name, { v -> vm.updateScreen { it.copy(name = v) } }, Modifier.padding(top = 6.dp))
 
         SectionHeader("Setup")
-        FoldRow("Global tags", vm.globalTags.joinToString().ifEmpty { "none" }) {
+        FoldRow("Global tags", vm.globalTags.joinToString().ifEmpty { "none" }, info = Help.globalTags) {
             ChipInput(vm.globalTags, vm::applyGlobalTags, placeholder = "Add tag", fieldTag = "globalTagsField")
         }
-        FoldRow("Screen aliases", vm.aliases.joinToString { "${it.key} → ${it.raw}" }.ifEmpty { "none" }) {
+        FoldRow("Screen aliases", vm.aliases.joinToString { "${it.key} → ${it.raw}" }.ifEmpty { "none" }, info = Help.screenAliases) {
             var draft by remember(vm.aliases) { mutableStateOf<List<KeyValue>>(vm.aliases) }
             KeyValueRows(draft, { draft = it }, textOnly = true)
             AppButton("Apply aliases", { vm.applyAliases(draft) }, Modifier.fillMaxWidth().padding(top = 8.dp), style = ButtonStyle.OUTLINE)
         }
 
-        SectionHeader("Purchase")
+        SectionHeader("Purchase", info = Help.purchase)
         PurchaseSection(vm)
     }
 }
@@ -103,7 +104,7 @@ private fun PurchaseSection(vm: EventsViewModel) {
     AnimatedVisibility(expanded) {
         Column(Modifier.padding(top = 10.dp)) {
             PurchaseFormFields(vm.purchase, vm::updatePurchase)
-            FoldRow("Google Play purchase JSON", if (vm.purchase.playJson.isBlank()) "empty" else "pasted") {
+            FoldRow("Google Play purchase JSON", if (vm.purchase.playJson.isBlank()) "empty" else "pasted", info = Help.playPurchase) {
                 AppTextField(
                     vm.purchase.playJson, { v -> vm.updatePurchase { it.copy(playJson = v) } }, Modifier.heightIn(min = 120.dp),
                     placeholder = "purchase.originalJson", mono = true, singleLine = false, imeAction = ImeAction.Default,

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.example.actions.LogState
 import io.grovs.example.data.adbCommand
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.LinkField
 import io.grovs.example.ui.controls.LocalSheetHost
@@ -54,7 +55,7 @@ fun LinksScreen(vm: LinksViewModel = viewModel()) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 88.dp)) {
             ScreenTitle("Links", action = "Reset", onAction = vm::reset)
-            LinkField(vm.inspectInput, { vm.inspectInput = it }, placeholder = "Paste a link to inspect", showPath = true, onDone = { vm.inspect() })
+            LinkField(vm.inspectInput, { vm.inspectInput = it }, label = "Inspect a link", info = Help.inspect, placeholder = "Paste a link to inspect", showPath = true, onDone = { vm.inspect() })
             vm.result?.let { result ->
                 LinkResultCard(result, onRunAgain = vm::runAgain, onInspect = { link -> vm.inspectInput = link; vm.inspect(link) })
             }

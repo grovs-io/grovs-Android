@@ -8,6 +8,7 @@ import androidx.compose.ui.unit.dp
 import io.grovs.example.data.EventForm
 import io.grovs.example.data.PurchaseForm
 import io.grovs.example.data.summary
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.ChipInput
 import io.grovs.example.ui.controls.ChipPicker
 import io.grovs.example.ui.controls.ChipRow
@@ -36,7 +37,7 @@ fun EventFormFields(
     SuggestField(form.name, { v -> update { it.copy(name = v) } }, suggestions, mono = true, error = error, onImeAction = onTrack)
     if (CustomEventRules.isReserved(form.name)) TextAction("Send anyway", onSendAnyway)
     val summary = listOf(form.properties.summary(), form.tags.joinToString { "tag $it" }).filter { it.isNotBlank() }.joinToString(" · ")
-    FoldRow("Properties and tags", summary.ifEmpty { "none" }) {
+    FoldRow("Properties and tags", summary.ifEmpty { "none" }, info = Help.eventPropertiesAndTags) {
         KeyValueRows(form.properties, { v -> update { it.copy(properties = v) } }, label = "Properties", suggestedKeys = listOf("level", "source"))
         Spacer(Modifier.height(10.dp))
         ChipInput(form.tags, { v -> update { it.copy(tags = v) } }, label = "Tags", placeholder = "Add tag", max = CustomEventRules.MAX_TAGS)
@@ -54,7 +55,7 @@ fun PurchaseFormFields(form: PurchaseForm, update: ((PurchaseForm) -> PurchaseFo
     ChipPicker(CURRENCIES, form.currency, { v -> update { it.copy(currency = v.uppercase()) } }, label = "Currency", otherPlaceholder = "Code, e.g. JPY")
     Spacer(Modifier.height(10.dp))
     ChipPicker(PRODUCTS, form.productId, { v -> update { it.copy(productId = v) } }, label = "Product", otherPlaceholder = "product id")
-    FoldRow("Start date", START_OPTIONS.firstOrNull { it.first == form.startDaysAgo }?.second ?: "${form.startDaysAgo} days ago") {
+    FoldRow("Start date", START_OPTIONS.firstOrNull { it.first == form.startDaysAgo }?.second ?: "${form.startDaysAgo} days ago", info = Help.startDate) {
         ChipRow(START_OPTIONS.map { it.second }, START_OPTIONS.firstOrNull { it.first == form.startDaysAgo }?.second, { label ->
             val days = START_OPTIONS.first { it.second == label }.first
             update { it.copy(startDaysAgo = days) }

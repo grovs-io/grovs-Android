@@ -105,6 +105,7 @@ fun SuggestField(
     suggestions: List<String>,
     modifier: Modifier = Modifier,
     label: String? = null,
+    info: Info? = null,
     placeholder: String = "",
     error: String? = null,
     mono: Boolean = false,
@@ -112,7 +113,7 @@ fun SuggestField(
     onImeAction: () -> Unit = {},
 ) {
     Column(modifier.fillMaxWidth()) {
-        if (label != null) FieldLabel(label)
+        if (label != null) FieldLabel(label, info = info)
         AppTextField(
             value, onValueChange,
             placeholder = placeholder, mono = mono, error = error != null,
@@ -130,13 +131,14 @@ fun LinkField(
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
+    info: Info? = null,
     placeholder: String = "https://",
     showPath: Boolean = false,
     onDone: () -> Unit = {},
 ) {
     val clipboard = LocalClipboardManager.current
     Column(modifier.fillMaxWidth()) {
-        if (label != null) FieldLabel(label)
+        if (label != null) FieldLabel(label, info = info)
         AppTextField(
             value, onValueChange,
             placeholder = placeholder, mono = true, keyboardType = KeyboardType.Uri, onImeAction = onDone,

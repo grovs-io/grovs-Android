@@ -90,6 +90,7 @@ fun ChipPicker(
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
+    info: Info? = null,
     otherLabel: String = "Other…",
     otherPlaceholder: String? = null,
     display: (String) -> String = { it },
@@ -100,7 +101,7 @@ fun ChipPicker(
     val showOther = otherPlaceholder != null && (editingOther || custom != null)
     val otherText = if (editingOther) typed else custom.orEmpty()
     Column(modifier.fillMaxWidth()) {
-        if (label != null) FieldLabel(label)
+        if (label != null) FieldLabel(label, info = info)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             options.forEach { option ->
                 Chip(display(option), { editingOther = false; onSelect(option) }, selected = option == selected && !editingOther)
@@ -127,6 +128,7 @@ fun ChipInput(
     onChange: (List<String>) -> Unit,
     modifier: Modifier = Modifier,
     label: String? = null,
+    info: Info? = null,
     placeholder: String = "Add",
     max: Int? = null,
     fieldTag: String = "chipInputField",
@@ -140,7 +142,7 @@ fun ChipInput(
     }
     val shape = RoundedCornerShape(8.dp)
     Column(modifier.fillMaxWidth()) {
-        if (label != null || max != null) FieldLabel(label ?: "", trailing = max?.let { "${values.size} of $it" })
+        if (label != null || max != null) FieldLabel(label ?: "", trailing = max?.let { "${values.size} of $it" }, info = info)
         FlowRow(
             Modifier.fillMaxWidth().clip(shape).border(1.dp, if (max != null && values.size > max) c.error else c.border, shape)
                 .padding(horizontal = 6.dp, vertical = 4.dp),

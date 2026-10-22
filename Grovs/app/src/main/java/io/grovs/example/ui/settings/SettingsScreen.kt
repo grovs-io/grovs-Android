@@ -38,12 +38,14 @@ import io.grovs.example.data.apiKeyError
 import io.grovs.example.data.baseUrlError
 import io.grovs.example.data.middleEllipsis
 import io.grovs.example.data.profileNameError
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.AppTextField
 import io.grovs.example.ui.controls.Chip
 import io.grovs.example.ui.controls.ChipInput
 import io.grovs.example.ui.controls.FieldLabel
 import io.grovs.example.ui.controls.FoldRow
+import io.grovs.example.ui.controls.Info
 import io.grovs.example.ui.controls.HelpText
 import io.grovs.example.ui.controls.SectionHeader
 import io.grovs.example.ui.controls.Segment
@@ -73,28 +75,28 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = viewModel()) {
                 Chip("+ New", vm::addProfile, dashed = true)
             }
             EditableRow("Name", profile.name, { v -> vm.updateActive { it.copy(name = v.trim()) } }, ::profileNameError, mono = false)
-            EditableRow("API key", profile.apiKey, { v -> vm.updateActive { it.copy(apiKey = v.trim()) } }, ::apiKeyError)
-            SettingRow("Environment") {
+            EditableRow("API key", profile.apiKey, { v -> vm.updateActive { it.copy(apiKey = v.trim()) } }, ::apiKeyError, info = Help.apiKey)
+            SettingRow("Environment", info = Help.environment) {
                 Segment(listOf(false, true), profile.useTestEnvironment, { v -> vm.updateActive { it.copy(useTestEnvironment = v) } }, Modifier.width(140.dp), compact = true) {
                     if (it) "Test" else "Prod"
                 }
             }
             EditableRow("Base URL", profile.baseUrl.orEmpty(), { v -> vm.updateActive { it.copy(baseUrl = v.trim().ifEmpty { null }) } },
-                ::baseUrlError, emptyText = "SDK default", keyboardType = KeyboardType.Uri)
-            FoldRow("Clipboard domains", profile.clipboardDomains.joinToString().ifEmpty { "none" }) {
+                ::baseUrlError, emptyText = "SDK default", keyboardType = KeyboardType.Uri, info = Help.baseUrl)
+            FoldRow("Clipboard domains", profile.clipboardDomains.joinToString().ifEmpty { "none" }, info = Help.clipboardDomains) {
                 ChipInput(profile.clipboardDomains, { v -> vm.updateActive { it.copy(clipboardDomains = v) } }, placeholder = "links.example.com", fieldTag = "domainsField")
             }
-            SwitchRow("Auto track screens", profile.autoTrackScreens, { v -> vm.updateActive { it.copy(autoTrackScreens = v) } })
-            SwitchRow("Start with SDK enabled", profile.startEnabled, { v -> vm.updateActive { it.copy(startEnabled = v) } })
+            SwitchRow("Auto track screens", profile.autoTrackScreens, { v -> vm.updateActive { it.copy(autoTrackScreens = v) } }, info = Help.autoTrackScreens)
+            SwitchRow("Start with SDK enabled", profile.startEnabled, { v -> vm.updateActive { it.copy(startEnabled = v) } }, info = Help.startEnabled)
             if (vm.profiles.size > 1) TextAction("Delete this profile", vm::deleteActive, Modifier.padding(top = 6.dp), color = c.error)
 
             SectionHeader("Developer")
-            SettingRow("Debug level") {
+            SettingRow("Debug level", info = Help.debugLevel) {
                 Segment(LogLevel.values().toList(), vm.debugLevel, vm::changeDebugLevel, Modifier.width(140.dp), compact = true) {
                     it.name.lowercase().replaceFirstChar(Char::uppercase)
                 }
             }
-            SettingRow("Call style", showDivider = false) {
+            SettingRow("Call style", showDivider = false, info = Help.callStyle) {
                 Segment(CallStyle.values().toList(), vm.callStyle, vm::changeCallStyle, Modifier.width(170.dp), compact = true) {
                     it.label.replaceFirstChar(Char::uppercase)
                 }
@@ -127,13 +129,14 @@ private fun EditableRow(
     emptyText: String = "Not set",
     keyboardType: KeyboardType = KeyboardType.Text,
     mono: Boolean = true,
+    info: Info? = null,
 ) {
     val c = AppTheme.colors
     val clipboard = LocalClipboardManager.current
     var editing by rememberSaveable { mutableStateOf(false) }
     var draft by rememberSaveable(value) { mutableStateOf(value) }
     if (!editing) {
-        SettingRow(label, onClick = { draft = value; editing = true }) {
+        SettingRow(label, onClick = { draft = value; editing = true }, info = info) {
             Text(value.ifEmpty { emptyText }.let { if (value.length > 24) middleEllipsis(it, 8) else it }, style = if (mono) AppType.mono else AppType.body, color = c.textMuted)
         }
         return
@@ -146,7 +149,7 @@ private fun EditableRow(
         }
     }
     Column(Modifier.padding(vertical = 6.dp)) {
-        FieldLabel(label)
+        FieldLabel(label, info = info)
         AppTextField(
             draft, { draft = it }, mono = mono, error = message != null, keyboardType = keyboardType,
             onImeAction = save,

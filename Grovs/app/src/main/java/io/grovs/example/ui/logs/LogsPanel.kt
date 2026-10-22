@@ -50,11 +50,13 @@ import io.grovs.example.actions.LogType
 import io.grovs.example.actions.exportLog
 import io.grovs.example.data.deviceName
 import io.grovs.example.data.formatClock
+import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.ButtonStyle
 import io.grovs.example.ui.links.LinksViewModel
 import io.grovs.example.ui.controls.Chip
 import io.grovs.example.ui.controls.Sheet
+import io.grovs.example.ui.controls.SectionHeader
 import io.grovs.example.ui.controls.SettingRow
 import io.grovs.example.ui.controls.StatusDot
 import io.grovs.example.ui.controls.StatusPill
@@ -168,6 +170,7 @@ private fun ColumnScope.LogDetail(entry: LogEntry, onBack: () -> Unit) {
         Text(entry.code.ifBlank { entry.detail }, style = AppType.mono, color = c.text)
     }
     if (entry.type == LogType.LINK) {
+        SectionHeader("Sources", info = Help.linkSources)
         LinkSource.values().forEach { source ->
             SettingRow(source.name.lowercase().replaceFirstChar { it.uppercase() }) {
                 if (source in entry.sources) StatusPill("received", LogState.OK) else StatusPill("missed", LogState.ERROR)
