@@ -1,57 +1,40 @@
 package io.grovs.example.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
-
-    /* Other default colors to override
-    background = Color(0xFFFFFBFE),
-    surface = Color(0xFFFFFBFE),
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onTertiary = Color.White,
-    onBackground = Color(0xFF1C1B1F),
-    onSurface = Color(0xFF1C1B1F),
-    */
-)
+object AppTheme {
+    val colors: GrovsColors
+        @Composable get() = LocalGrovsColors.current
+}
 
 @Composable
 fun GrovsTestAppTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic color is available on Android 12+
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+    val colors = if (darkTheme) DarkGrovsColors else LightGrovsColors
+    val scheme = if (darkTheme) {
+        darkColorScheme(
+            primary = colors.accent, onPrimary = Color.White,
+            background = colors.background, onBackground = colors.text,
+            surface = colors.background, onSurface = colors.text,
+            surfaceVariant = colors.surface, outline = colors.border, error = colors.error,
+        )
+    } else {
+        lightColorScheme(
+            primary = colors.accent, onPrimary = Color.White,
+            background = colors.background, onBackground = colors.text,
+            surface = colors.background, onSurface = colors.text,
+            surfaceVariant = colors.surface, outline = colors.border, error = colors.error,
+        )
     }
-
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalGrovsColors provides colors) {
+        MaterialTheme(colorScheme = scheme, typography = AppTypography, content = content)
+    }
 }
