@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.BuildConfig
 import io.grovs.example.AppGraph
 import io.grovs.example.PanelState
@@ -51,6 +52,7 @@ import io.grovs.example.data.deviceName
 import io.grovs.example.data.formatClock
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.ButtonStyle
+import io.grovs.example.ui.links.LinksViewModel
 import io.grovs.example.ui.controls.Chip
 import io.grovs.example.ui.controls.Sheet
 import io.grovs.example.ui.controls.SettingRow
@@ -176,6 +178,11 @@ private fun ColumnScope.LogDetail(entry: LogEntry, onBack: () -> Unit) {
         AppButton("Copy", { copyToClipboard(context, clipboard, entry.code.ifBlank { entry.detail }) }, Modifier.weight(1f), style = ButtonStyle.OUTLINE)
         entry.action?.let { action ->
             AppButton("Run again", { AppGraph.rerun(action) }, Modifier.weight(1f), style = ButtonStyle.OUTLINE)
+        }
+        val link = entry.link
+        if (link != null) {
+            val links: LinksViewModel = viewModel()
+            AppButton("Inspect link", { links.inspect(link) }, Modifier.weight(1f), style = ButtonStyle.OUTLINE)
         }
     }
 }

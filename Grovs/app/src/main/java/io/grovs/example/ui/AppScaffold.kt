@@ -47,6 +47,7 @@ import io.grovs.example.ui.controls.LocalSheetHost
 import io.grovs.example.ui.controls.SheetHost
 import io.grovs.example.ui.controls.SheetHostView
 import io.grovs.example.ui.controls.StatusDot
+import io.grovs.example.ui.links.LinksScreen
 import io.grovs.example.ui.logs.LogsPanel
 import io.grovs.example.ui.theme.AppTheme
 import io.grovs.example.ui.theme.AppType
@@ -81,7 +82,7 @@ fun AppScaffold() {
                         Box(Modifier.weight(1f).statusBarsPadding().imePadding()) {
                             when (tab) {
                                 Tab.HOME -> PlaceholderScreen("Home")
-                                Tab.LINKS -> PlaceholderScreen("Links")
+                                Tab.LINKS -> LinksScreen()
                                 Tab.EVENTS -> PlaceholderScreen("Events")
                                 Tab.IN_APP -> PlaceholderScreen("In-app")
                             }
