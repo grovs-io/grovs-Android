@@ -32,6 +32,7 @@ class TestRunnerTest {
         val outcome = runner.run(action)
         assertEquals(LogState.ERROR, outcome.result.state)
         assertEquals("404 not found", outcome.entry.detail)
+        assertEquals("java.lang.IllegalStateException: 404 not found", outcome.error.toString())
     }
 
     @Test

@@ -63,7 +63,7 @@ class LinksViewModel : ViewModel() {
             result = LinkResult(
                 ok = ok,
                 link = outcome.result.value,
-                message = if (ok) "${outcome.elapsedMs} ms · ${outcome.result.detail}" else outcome.result.detail,
+                message = if (ok) "${outcome.elapsedMs} ms · ${outcome.result.detail}" else outcome.error?.toString() ?: outcome.result.detail,
             )
             running = false
         }

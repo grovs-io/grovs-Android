@@ -17,6 +17,12 @@ class LinkHistoryJsonTest {
     }
 
     @Test
+    fun unknownSourceNamesAreSkipped() {
+        val json = """[{"time":1,"title":"t","detail":"d","code":"c","link":null,"sources":["LISTENER","PUSH"]}]"""
+        assertEquals(setOf(LinkSource.LISTENER), decodeLinkEntries(json).single().sources)
+    }
+
+    @Test
     fun badJsonGivesEmptyList() {
         assertEquals(emptyList<LogEntry>(), decodeLinkEntries("nope"))
         assertEquals(emptyList<LogEntry>(), decodeLinkEntries(null))

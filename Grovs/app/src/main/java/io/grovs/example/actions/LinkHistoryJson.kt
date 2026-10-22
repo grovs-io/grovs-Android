@@ -34,7 +34,9 @@ fun decodeLinkEntries(json: String?): List<LogEntry> {
                 detail = o.getString("detail"),
                 code = o.getString("code"),
                 link = if (o.isNull("link")) null else o.getString("link"),
-                sources = (0 until sources.length()).map { LinkSource.valueOf(sources.getString(it)) }.toSet(),
+                sources = (0 until sources.length())
+                    .mapNotNull { j -> LinkSource.values().firstOrNull { it.name == sources.getString(j) } }
+                    .toSet(),
             )
         }
     } catch (e: JSONException) {

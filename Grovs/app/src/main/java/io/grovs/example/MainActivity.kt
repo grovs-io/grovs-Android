@@ -25,11 +25,12 @@ class MainActivity : FragmentActivity() {
         enableEdgeToEdge()
         setContent { GrovsTestAppTheme { AppScaffold() } }
 
-        logPushOpen(intent)
+        // A recreated activity has already logged the intent it was started with.
+        if (savedInstanceState == null) logPushOpen(intent)
         Grovs.setOnDeeplinkReceivedListener(this) { details ->
             AppGraph.log.recordLinkOpen(details.link, details.data, details.tracking, LinkSource.LISTENER)
         }
-        fetchPushToken()
+        if (AppGraph.pushToken.value == null) fetchPushToken()
     }
 
     override fun onResume() {
