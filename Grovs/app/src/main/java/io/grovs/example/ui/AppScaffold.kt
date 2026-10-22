@@ -47,6 +47,7 @@ import io.grovs.example.ui.controls.LocalSheetHost
 import io.grovs.example.ui.controls.SheetHost
 import io.grovs.example.ui.controls.SheetHostView
 import io.grovs.example.ui.controls.StatusDot
+import io.grovs.example.ui.events.EventsScreen
 import io.grovs.example.ui.links.LinksScreen
 import io.grovs.example.ui.logs.LogsPanel
 import io.grovs.example.ui.theme.AppTheme
@@ -83,7 +84,7 @@ fun AppScaffold() {
                             when (tab) {
                                 Tab.HOME -> PlaceholderScreen("Home")
                                 Tab.LINKS -> LinksScreen()
-                                Tab.EVENTS -> PlaceholderScreen("Events")
+                                Tab.EVENTS -> EventsScreen()
                                 Tab.IN_APP -> PlaceholderScreen("In-app")
                             }
                         }
