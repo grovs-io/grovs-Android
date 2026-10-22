@@ -1,6 +1,7 @@
 package io.grovs.example.ui.home
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -8,6 +9,7 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -33,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,6 +47,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.BuildConfig
+import kotlinx.coroutines.delay
 import io.grovs.example.AppGraph
 import io.grovs.example.MainActivity
 import io.grovs.example.actions.LinkSource
@@ -102,9 +106,16 @@ private fun StatusSection(vm: HomeViewModel, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     val sdkEnabled by AppGraph.sdkEnabled.collectAsState()
     val token by AppGraph.pushToken.collectAsState()
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+    val openAppSettings = {
+        context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+    }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         vm.refreshPermission()
         (context as? MainActivity)?.fetchPushToken()
+        val blocked = !granted && (context as? Activity)?.let {
+            !ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.POST_NOTIFICATIONS)
+        } == true
+        if (blocked) openAppSettings()
     }
     SectionHeader("Status")
     SwitchRow("SDK enabled", sdkEnabled, vm::setSdkEnabled)
@@ -121,7 +132,7 @@ private fun StatusSection(vm: HomeViewModel, onOpenSettings: () -> Unit) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     permission.launch(Manifest.permission.POST_NOTIFICATIONS)
                 } else {
-                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
+                    openAppSettings()
                 }
             })
         }
@@ -134,20 +145,27 @@ private fun OpenedFromSection() {
     val c = AppTheme.colors
     val entries by AppGraph.log.entries.collectAsState()
     val latest = entries.firstOrNull { it.type == LogType.LINK }
-    SectionHeader("Opened from", action = latest?.let { relativeTime(System.currentTimeMillis() - it.time) }, onAction = {})
+    val now by produceState(System.currentTimeMillis(), latest?.id) {
+        while (true) {
+            value = System.currentTimeMillis()
+            val age = value - (latest?.time ?: value)
+            delay(if (age <= TestLog.MERGE_WINDOW_MS) TestLog.MERGE_WINDOW_MS - age + 50 else 30_000L)
+        }
+    }
+    SectionHeader("Opened from", trailing = latest?.let { relativeTime(now - it.time) })
     if (latest == null) {
         Text("Not opened from a link yet", style = AppType.caption, color = c.textMuted, modifier = Modifier.padding(vertical = 8.dp))
     } else {
         SettingRow(latest.link ?: "no link", onClick = { AppGraph.openPanel(latest.id) }) {
-            LinkSourcesPill(latest)
+            LinkSourcesPill(latest, now)
         }
     }
 }
 
 @Composable
-private fun LinkSourcesPill(entry: LogEntry) {
+private fun LinkSourcesPill(entry: LogEntry, now: Long) {
     val both = entry.sources.size == LinkSource.values().size
-    val settled = System.currentTimeMillis() - entry.time > TestLog.MERGE_WINDOW_MS
+    val settled = now - entry.time > TestLog.MERGE_WINDOW_MS
     when {
         both -> StatusPill("listener ✓ flow ✓", LogState.OK)
         settled -> StatusPill("${LinkSource.values().first { it !in entry.sources }.name.lowercase()} missed", LogState.ERROR)
@@ -193,7 +211,7 @@ private fun QuickActions() {
     val sheets = LocalSheetHost.current
     val links: LinksViewModel = viewModel()
     val events: EventsViewModel = viewModel()
-    SectionHeader("Quick actions", action = "hold to edit", onAction = {})
+    SectionHeader("Quick actions", trailing = "hold to edit")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AppButton("Generate link", links::generate, Modifier.weight(1f), onLongClick = {
             sheets.show {

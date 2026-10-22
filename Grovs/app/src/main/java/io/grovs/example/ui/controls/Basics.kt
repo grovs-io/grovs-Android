@@ -67,9 +67,10 @@ fun ScreenTitle(title: String, modifier: Modifier = Modifier, action: String? = 
 }
 
 @Composable
-fun SectionHeader(text: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
+fun SectionHeader(text: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}, trailing: String? = null) {
     Row(modifier.fillMaxWidth().padding(top = 18.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = AppType.label, color = AppTheme.colors.textMuted, modifier = Modifier.weight(1f))
+        if (trailing != null) Text(trailing, style = AppType.caption, color = AppTheme.colors.textFaint)
         if (action != null) TextAction(action, onAction)
     }
 }
