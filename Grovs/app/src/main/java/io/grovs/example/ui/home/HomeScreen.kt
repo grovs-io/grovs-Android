@@ -213,11 +213,11 @@ private fun QuickActions() {
     val events: EventsViewModel = viewModel()
     SectionHeader("Quick actions", trailing = "hold to edit")
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AppButton("Generate link", links::generate, Modifier.weight(1f), onLongClick = {
+        AppButton("Generate link", links::generate, Modifier.weight(1f), enabled = !links.running, onLongClick = {
             sheets.show {
                 Text("Generate link", style = AppType.heading, color = c.text, modifier = Modifier.padding(bottom = 8.dp))
                 LinkFormFields(links.form, links::update)
-                AppButton("Save and generate", { links.generate(); sheets.hide() }, Modifier.fillMaxWidth().padding(top = 12.dp))
+                AppButton("Save and generate", { links.generate(); sheets.hide() }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = !links.running)
             }
         })
         AppButton("Open clipboard", {
@@ -238,12 +238,13 @@ private fun QuickActions() {
                     AppButton("Save and track", { events.trackEvent(); sheets.hide() }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = events.eventError == null)
                 }
             })
-        AppButton(events.purchase.label(), events::logPurchase, Modifier.weight(1f), style = ButtonStyle.OUTLINE, onLongClick = {
-            sheets.show {
-                Text("Purchase", style = AppType.heading, color = c.text, modifier = Modifier.padding(bottom = 8.dp))
-                PurchaseFormFields(events.purchase, events::updatePurchase)
-                AppButton("Save and log", { events.logPurchase(); sheets.hide() }, Modifier.fillMaxWidth().padding(top = 12.dp))
-            }
-        })
+        AppButton(events.purchase.label(), events::logPurchase, Modifier.weight(1f), style = ButtonStyle.OUTLINE,
+            enabled = events.purchase.isValid(), onLongClick = {
+                sheets.show {
+                    Text("Purchase", style = AppType.heading, color = c.text, modifier = Modifier.padding(bottom = 8.dp))
+                    PurchaseFormFields(events.purchase, events::updatePurchase)
+                    AppButton("Save and log", { events.logPurchase(); sheets.hide() }, Modifier.fillMaxWidth().padding(top = 12.dp), enabled = events.purchase.isValid())
+                }
+            })
     }
 }

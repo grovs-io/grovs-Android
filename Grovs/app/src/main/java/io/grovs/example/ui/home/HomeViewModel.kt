@@ -40,7 +40,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setSdkEnabled(on: Boolean) {
         AppGraph.sdkEnabled.value = on
-        run(TestAction(LogType.SDK, if (on) "SDK enabled" else "SDK disabled", callCode("setSDK", "enabled" to on)) {
+        run(TestAction(LogType.SDK, if (on) "SDK enabled" else "SDK disabled", callCode("setSDK", "enabled" to on), repeatable = false) {
             Grovs.setSDK(on)
             ActionResult(LogState.OK, if (on) "sending" else "holding events")
         })
@@ -65,7 +65,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         store.identity = saved
         editingIdentity = false
         val attributes = saved.attributes.toValueMap()
-        run(TestAction(LogType.SDK, "Identity saved", callCode("identity", "identifier" to saved.identifier, "attributes" to attributes)) {
+        run(TestAction(LogType.SDK, "Identity saved", callCode("identity", "identifier" to saved.identifier, "attributes" to attributes), repeatable = false) {
             Grovs.identifier = saved.identifier
             Grovs.attributes = attributes
             ActionResult(LogState.OK, saved.identifier ?: "no identifier")

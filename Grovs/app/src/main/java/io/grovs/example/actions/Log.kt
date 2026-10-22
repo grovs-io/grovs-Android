@@ -31,11 +31,15 @@ enum class LogFilter(val label: String) {
     }
 }
 
-/** One SDK call with its values, kept by the log so it can be run again. */
+/**
+ * One SDK call with its values, kept by the log so it can be run again.
+ * Setters are not [repeatable]: running an old one again would leave the screen showing a newer value than the SDK has.
+ */
 class TestAction(
     val type: LogType,
     val title: String,
     val code: String,
+    val repeatable: Boolean = true,
     val run: suspend () -> ActionResult,
 )
 

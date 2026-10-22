@@ -35,12 +35,13 @@ class InAppViewModel : ViewModel() {
     var excluded by mutableStateOf(store.excludedScreens)
         private set
 
-    val triggerSuggestions: List<String> get() = (store.recent(RECENT_TRIGGERS) + DEFAULT_TRIGGERS).distinct()
+    var triggerSuggestions by mutableStateOf(triggerNames())
+        private set
 
     fun setRunning(on: Boolean) {
         running = on
         val call = if (on) "resumeInAppMessages" else "pauseInAppMessages"
-        run(TestAction(LogType.IN_APP, if (on) "Resume messages" else "Pause messages", callCode(call)) {
+        run(TestAction(LogType.IN_APP, if (on) "Resume messages" else "Pause messages", callCode(call), repeatable = false) {
             if (on) Grovs.resumeInAppMessages() else Grovs.pauseInAppMessages()
             ActionResult(LogState.OK, if (on) "running" else "paused")
         })
@@ -50,6 +51,7 @@ class InAppViewModel : ViewModel() {
         if (trigger.isBlank()) return
         store.triggerEvent = trigger
         store.remember(RECENT_TRIGGERS, trigger)
+        triggerSuggestions = triggerNames()
         run(EventActions.trigger(trigger))
     }
 
@@ -57,7 +59,7 @@ class InAppViewModel : ViewModel() {
     fun discard(dismissCurrent: Boolean) {
         running = false
         val title = if (dismissCurrent) "Close current message" else "Discard waiting messages"
-        run(TestAction(LogType.IN_APP, title, callCode("discardInAppMessages", "dismissCurrent" to dismissCurrent)) {
+        run(TestAction(LogType.IN_APP, title, callCode("discardInAppMessages", "dismissCurrent" to dismissCurrent), repeatable = false) {
             Grovs.discardInAppMessages(dismissCurrent)
             ActionResult(LogState.OK, "paused")
         })
@@ -73,7 +75,7 @@ class InAppViewModel : ViewModel() {
     fun setDebugLogging(on: Boolean) {
         debugLogging = on
         store.inAppDebug = on
-        run(TestAction(LogType.IN_APP, "Debug logging ${if (on) "on" else "off"}", callCode("setInAppDebugLogging", "enabled" to on)) {
+        run(TestAction(LogType.IN_APP, "Debug logging ${if (on) "on" else "off"}", callCode("setInAppDebugLogging", "enabled" to on), repeatable = false) {
             Grovs.setInAppDebugLogging(on)
             ActionResult(LogState.OK, "applied")
         })
@@ -82,11 +84,13 @@ class InAppViewModel : ViewModel() {
     fun setExcluded(screens: List<String>) {
         excluded = screens
         store.excludedScreens = screens
-        run(TestAction(LogType.IN_APP, "Excluded screens set", callCode("setInAppExcludedScreens", "screens" to screens)) {
+        run(TestAction(LogType.IN_APP, "Excluded screens set", callCode("setInAppExcludedScreens", "screens" to screens), repeatable = false) {
             Grovs.setInAppExcludedScreens(screens)
             ActionResult(LogState.OK, screens.joinToString().ifEmpty { "none" })
         })
     }
+
+    private fun triggerNames() = (store.recent(RECENT_TRIGGERS) + DEFAULT_TRIGGERS).distinct()
 
     private fun run(action: TestAction) {
         viewModelScope.launch { AppGraph.runner.run(action) }

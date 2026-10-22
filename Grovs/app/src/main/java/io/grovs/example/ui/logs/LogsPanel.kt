@@ -142,7 +142,7 @@ private fun LogRow(entry: LogEntry, onClick: () -> Unit) {
             }
         }
         val action = entry.action
-        if (action != null) {
+        if (action != null && action.repeatable) {
             IconButton(onClick = { AppGraph.rerun(action) }, modifier = Modifier.size(32.dp)) {
                 Icon(Icons.Default.Refresh, contentDescription = "Run again", tint = c.accent)
             }
@@ -176,7 +176,7 @@ private fun ColumnScope.LogDetail(entry: LogEntry, onBack: () -> Unit) {
     }
     Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AppButton("Copy", { copyToClipboard(context, clipboard, entry.code.ifBlank { entry.detail }) }, Modifier.weight(1f), style = ButtonStyle.OUTLINE)
-        entry.action?.let { action ->
+        entry.action?.takeIf { it.repeatable }?.let { action ->
             AppButton("Run again", { AppGraph.rerun(action) }, Modifier.weight(1f), style = ButtonStyle.OUTLINE)
         }
         val link = entry.link

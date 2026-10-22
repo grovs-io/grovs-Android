@@ -31,7 +31,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.example.data.KeyValue
-import io.grovs.example.data.parseAmountToCents
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.AppTextField
 import io.grovs.example.ui.controls.ButtonStyle
@@ -91,7 +90,7 @@ fun EventsScreen(vm: EventsViewModel = viewModel()) {
 private fun PurchaseSection(vm: EventsViewModel) {
     val c = AppTheme.colors
     var expanded by rememberSaveable { mutableStateOf(false) }
-    val valid = parseAmountToCents(vm.purchase.amount) != null
+    val valid = vm.purchase.isValid()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         AppButton(
             vm.purchase.fullLabel(), vm::logPurchase, Modifier.weight(1f),

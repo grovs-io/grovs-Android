@@ -6,6 +6,7 @@ import io.grovs.example.data.KeyValue
 import io.grovs.example.data.PurchaseForm
 import io.grovs.example.data.ScreenForm
 import io.grovs.example.data.parseAmountToCents
+import io.grovs.example.data.toAliasMap
 import io.grovs.example.data.toValueMap
 import io.grovs.utils.InstantCompat
 import java.util.Date
@@ -37,6 +38,7 @@ object EventActions {
     }
 
     fun purchase(form: PurchaseForm, nowMillis: Long): TestAction? {
+        if (!form.isValid()) return null
         val cents = parseAmountToCents(form.amount) ?: return null
         val start = nowMillis - form.startDaysAgo * DAY_MS
         val code = callCode(
@@ -60,14 +62,14 @@ object EventActions {
         }
 
     fun globalTags(tags: List<String>): TestAction =
-        TestAction(LogType.SDK, "Global tags set", callCode("setGlobalTags", "tags" to tags.ifEmpty { null })) {
+        TestAction(LogType.SDK, "Global tags set", callCode("setGlobalTags", "tags" to tags.ifEmpty { null }), repeatable = false) {
             Grovs.setGlobalTags(tags.ifEmpty { null })
             ActionResult(LogState.OK, tags.joinToString().ifEmpty { "cleared" })
         }
 
     fun aliases(rows: List<KeyValue>): TestAction {
-        val map = rows.filter { it.key.isNotBlank() }.associate { it.key.trim() to it.raw }
-        return TestAction(LogType.SDK, "Screen aliases set", callCode("setScreenAliases", "aliases" to map)) {
+        val map = rows.toAliasMap()
+        return TestAction(LogType.SDK, "Screen aliases set", callCode("setScreenAliases", "aliases" to map), repeatable = false) {
             Grovs.setScreenAliases(map)
             ActionResult(LogState.OK, "${map.size} aliases")
         }

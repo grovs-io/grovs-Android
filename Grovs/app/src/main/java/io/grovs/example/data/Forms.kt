@@ -78,6 +78,8 @@ data class PurchaseForm(
     }
 
     fun fullLabel(): String = "${label()} · $currency · $productId"
+
+    fun isValid(): Boolean = parseAmountToCents(amount) != null && currency.isNotBlank() && productId.isNotBlank()
 }
 
 data class Identity(val identifier: String?, val attributes: List<KeyValue>)

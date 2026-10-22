@@ -36,8 +36,10 @@ class EventsViewModel : ViewModel() {
         private set
 
     val eventError: String? get() = eventNameError(event.name) ?: tagsError(event.tags)
-    val eventSuggestions: List<String> get() = (store.recent(RECENT_EVENTS) + DEFAULT_EVENT_NAMES).distinct()
-    val screenSuggestions: List<String> get() = (store.recent(RECENT_SCREENS) + DEFAULT_SCREEN_NAMES).distinct()
+    var eventSuggestions by mutableStateOf(eventNames())
+        private set
+    var screenSuggestions by mutableStateOf(screenNames())
+        private set
 
     fun updateEvent(change: (EventForm) -> EventForm) { event = change(event) }
     fun updateScreen(change: (ScreenForm) -> ScreenForm) { screen = change(screen) }
@@ -47,6 +49,7 @@ class EventsViewModel : ViewModel() {
         if (!force && eventError != null) return
         store.eventForm = event
         store.remember(RECENT_EVENTS, event.name)
+        eventSuggestions = eventNames()
         run(EventActions.track(event, expectRejected = force && eventError != null))
     }
 
@@ -54,6 +57,7 @@ class EventsViewModel : ViewModel() {
         if (screen.name.isBlank()) return
         store.screenForm = screen
         store.remember(RECENT_SCREENS, screen.name)
+        screenSuggestions = screenNames()
         run(EventActions.screen(screen))
     }
 
@@ -80,6 +84,9 @@ class EventsViewModel : ViewModel() {
         store.screenAliases = rows
         run(EventActions.aliases(rows))
     }
+
+    private fun eventNames() = (store.recent(RECENT_EVENTS) + DEFAULT_EVENT_NAMES).distinct()
+    private fun screenNames() = (store.recent(RECENT_SCREENS) + DEFAULT_SCREEN_NAMES).distinct()
 
     private fun run(action: TestAction) {
         viewModelScope.launch { AppGraph.runner.run(action) }
