@@ -58,10 +58,13 @@ import io.grovs.example.AppGraph
 import io.grovs.example.actions.LogEntry
 import io.grovs.example.actions.LogState
 import io.grovs.example.data.formatClock
+import io.grovs.example.ui.controls.FieldAreas
+import io.grovs.example.ui.controls.LocalFieldAreas
 import io.grovs.example.ui.controls.LocalSheetHost
 import io.grovs.example.ui.controls.SheetHost
 import io.grovs.example.ui.controls.SheetHostView
 import io.grovs.example.ui.controls.StatusDot
+import io.grovs.example.ui.controls.clearFocusOnTapOutside
 import io.grovs.example.ui.events.EventsScreen
 import io.grovs.example.ui.home.HomeScreen
 import io.grovs.example.ui.inapp.InAppScreen
@@ -85,14 +88,15 @@ fun AppScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val sheetHost = remember { SheetHost() }
+    val fieldAreas = remember { FieldAreas() }
     val screenStates = rememberSaveableStateHolder()
     val entries by AppGraph.log.entries.collectAsState()
     val unseenError by AppGraph.log.unseenError.collectAsState()
     val panel by AppGraph.panel.collectAsState()
 
-    CompositionLocalProvider(LocalSheetHost provides sheetHost) {
+    CompositionLocalProvider(LocalSheetHost provides sheetHost, LocalFieldAreas provides fieldAreas) {
         Surface(color = c.background, contentColor = c.text) {
-            Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().clearFocusOnTapOutside(fieldAreas)) {
                 PushTransition(showSettings) { settings ->
                     if (settings) {
                         BackHandler { showSettings = false }
