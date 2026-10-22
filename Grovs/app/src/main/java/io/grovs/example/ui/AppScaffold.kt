@@ -52,6 +52,7 @@ import io.grovs.example.ui.home.HomeScreen
 import io.grovs.example.ui.inapp.InAppScreen
 import io.grovs.example.ui.links.LinksScreen
 import io.grovs.example.ui.logs.LogsPanel
+import io.grovs.example.ui.settings.SettingsScreen
 import io.grovs.example.ui.theme.AppTheme
 import io.grovs.example.ui.theme.AppType
 
@@ -78,7 +79,7 @@ fun AppScaffold() {
                 if (showSettings) {
                     BackHandler { showSettings = false }
                     Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-                        PlaceholderScreen("Settings")
+                        SettingsScreen(onBack = { showSettings = false })
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
@@ -99,11 +100,6 @@ fun AppScaffold() {
             }
         }
     }
-}
-
-@Composable
-fun PlaceholderScreen(title: String) {
-    Text(title, style = AppType.title, color = AppTheme.colors.text, modifier = Modifier.padding(16.dp))
 }
 
 @Composable
