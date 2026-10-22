@@ -166,7 +166,7 @@ private fun ConsoleStrip(latest: LogEntry?, unseenError: Boolean, onOpen: () -> 
     Column {
         Divider(color = c.border, thickness = 1.dp)
         Row(
-            Modifier.fillMaxWidth().height(36.dp).background(c.surface)
+            Modifier.fillMaxWidth().height(44.dp).background(c.surface)
                 .clickable(onClick = onOpen)
                 .pointerInput(Unit) { detectVerticalDragGestures { _, dragAmount -> if (dragAmount < -8f) open() } }
                 .padding(horizontal = 16.dp),

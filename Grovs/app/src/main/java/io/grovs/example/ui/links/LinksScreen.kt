@@ -37,6 +37,7 @@ import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.LinkField
 import io.grovs.example.ui.controls.LocalSheetHost
+import io.grovs.example.ui.controls.MIN_TOUCH
 import io.grovs.example.ui.controls.ScreenTitle
 import io.grovs.example.ui.controls.SectionHeader
 import io.grovs.example.ui.controls.StatusDot
@@ -88,14 +89,14 @@ private fun LinkResultCard(result: LinkResult, onRunAgain: () -> Unit, onInspect
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatusDot(state)
             Text(if (result.ok) "Created · ${result.message}" else "Failed", style = AppType.caption, color = c.textMuted, modifier = Modifier.weight(1f))
-            IconButton(onClick = onRunAgain, modifier = Modifier.size(28.dp)) {
+            IconButton(onClick = onRunAgain, modifier = Modifier.size(MIN_TOUCH)) {
                 Icon(Icons.Default.Refresh, contentDescription = "Run again", tint = c.accent)
             }
         }
         val link = result.link
         if (result.ok && link != null) {
             Text(link, style = AppType.mono, color = c.accent, modifier = Modifier.padding(vertical = 6.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextAction("Copy", { copyToClipboard(context, clipboard, link) })
                 TextAction("Share", { shareText(context, link) })
                 TextAction("QR", { sheets.show { QrSheet(link) } })

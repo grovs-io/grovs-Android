@@ -103,7 +103,7 @@ fun Sheet(
                     .imePadding(),
             ) {
                 Box(
-                    Modifier.fillMaxWidth().height(28.dp)
+                    Modifier.fillMaxWidth().height(36.dp)
                         .clickable(onClickLabel = "Close", role = Role.Button, onClick = onDismiss)
                         .draggable(
                             dragState,

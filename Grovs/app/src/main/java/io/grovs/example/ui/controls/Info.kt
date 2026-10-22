@@ -36,7 +36,7 @@ fun InfoButton(info: Info, modifier: Modifier = Modifier) {
     val c = AppTheme.colors
     var open by rememberSaveable { mutableStateOf(false) }
     Box(
-        modifier.size(28.dp).clip(CircleShape)
+        modifier.size(MIN_TOUCH).clip(CircleShape)
             .clickable(onClickLabel = "About ${info.title}", role = Role.Button) { open = true },
         contentAlignment = Alignment.Center,
     ) {

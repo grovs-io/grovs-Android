@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.grovs.BuildConfig
 import io.grovs.example.ui.Help
+import io.grovs.example.ui.controls.MIN_TOUCH
 import kotlinx.coroutines.delay
 import io.grovs.example.AppGraph
 import io.grovs.example.MainActivity
@@ -92,7 +93,7 @@ fun HomeScreen(onOpenSettings: () -> Unit, vm: HomeViewModel = viewModel()) {
             }
             Text("Grovs Test", style = AppType.title, color = c.text, modifier = Modifier.weight(1f))
             Text("${if (profile.useTestEnvironment) "Test" else "Prod"} · ${BuildConfig.SDK_VERSION}", style = AppType.caption, color = c.textMuted)
-            IconButton(onClick = onOpenSettings, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Settings, "Settings", tint = c.textMuted) }
+            IconButton(onClick = onOpenSettings, modifier = Modifier.size(MIN_TOUCH)) { Icon(Icons.Default.Settings, "Settings", tint = c.textMuted) }
         }
         StatusSection(vm, onOpenSettings)
         OpenedFromSection()

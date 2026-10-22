@@ -82,8 +82,8 @@ fun AppTextField(
         cursorBrush = SolidColor(c.accent),
         decorationBox = { inner ->
             Row(
-                Modifier.heightIn(min = 38.dp).clip(shape).background(c.background).border(1.dp, border, shape)
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier.heightIn(min = FIELD_HEIGHT).clip(shape).background(c.background).border(1.dp, border, shape)
+                    .padding(horizontal = 10.dp, vertical = if (singleLine) 0.dp else 10.dp),
                 verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {

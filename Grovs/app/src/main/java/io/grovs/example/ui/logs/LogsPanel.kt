@@ -53,6 +53,7 @@ import io.grovs.example.data.formatClock
 import io.grovs.example.ui.Help
 import io.grovs.example.ui.controls.AppButton
 import io.grovs.example.ui.controls.ButtonStyle
+import io.grovs.example.ui.controls.MIN_TOUCH
 import io.grovs.example.ui.links.LinksViewModel
 import io.grovs.example.ui.controls.Chip
 import io.grovs.example.ui.controls.Sheet
@@ -104,7 +105,7 @@ private fun ColumnScope.LogList(
         })
         TextAction("Clear", AppGraph.log::clear, color = c.textMuted)
     }
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         LogFilter.values().forEach { f ->
             val isErrors = f == LogFilter.ERRORS
             Chip(
@@ -131,7 +132,7 @@ private fun ColumnScope.LogList(
 private fun LogRow(entry: LogEntry, onClick: () -> Unit) {
     val c = AppTheme.colors
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -145,7 +146,7 @@ private fun LogRow(entry: LogEntry, onClick: () -> Unit) {
         }
         val action = entry.action
         if (action != null && action.repeatable) {
-            IconButton(onClick = { AppGraph.rerun(action) }, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = { AppGraph.rerun(action) }, modifier = Modifier.size(MIN_TOUCH)) {
                 Icon(Icons.Default.Refresh, contentDescription = "Run again", tint = c.accent)
             }
         }
@@ -158,7 +159,7 @@ private fun ColumnScope.LogDetail(entry: LogEntry, onBack: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        IconButton(onClick = onBack, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.ArrowBack, "Back", tint = c.textMuted) }
+        IconButton(onClick = onBack, modifier = Modifier.size(MIN_TOUCH)) { Icon(Icons.Default.ArrowBack, "Back", tint = c.textMuted) }
         StatusDot(entry.state)
         Text(entry.title, style = AppType.heading, color = c.text, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(formatClock(entry.time, seconds = true), style = AppType.caption, color = c.textMuted)

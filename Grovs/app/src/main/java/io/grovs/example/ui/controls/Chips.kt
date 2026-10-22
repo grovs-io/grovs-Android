@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -53,7 +54,8 @@ fun Chip(
             .background(if (selected) c.accentSoft else c.background)
             .then(if (dashed) Modifier.dashedBorder(c.border, 999.dp) else Modifier.border(1.dp, if (selected) c.accent else c.border, shape))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .heightIn(min = 36.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -78,7 +80,7 @@ fun ChipRow(
     modifier: Modifier = Modifier,
     label: (String) -> String = { it },
 ) {
-    Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         values.forEach { Chip(label(it), { onPick(it) }, selected = it == selected) }
     }
 }
@@ -146,11 +148,11 @@ fun ChipInput(
         FlowRow(
             Modifier.fillMaxWidth().clip(shape).border(1.dp, if (max != null && values.size > max) c.error else c.border, shape)
                 .padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             values.forEach { value ->
-                Chip(value, { onChange(values - value) }, Modifier.padding(vertical = 2.dp), removable = true)
+                Chip(value, { onChange(values - value) }, Modifier.padding(vertical = 3.dp), removable = true)
             }
             BasicTextField(
                 value = draft,

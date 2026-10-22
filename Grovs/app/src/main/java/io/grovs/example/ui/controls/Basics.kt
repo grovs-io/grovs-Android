@@ -61,6 +61,12 @@ import io.grovs.example.data.middleEllipsis
 import io.grovs.example.ui.theme.AppTheme
 import io.grovs.example.ui.theme.AppType
 
+/** Smallest tap target height and width, so neighbours are hard to hit by mistake. */
+val MIN_TOUCH = 40.dp
+
+/** Height of text fields and buttons, so they line up when side by side. */
+val FIELD_HEIGHT = 44.dp
+
 @Composable
 fun ScreenTitle(title: String, modifier: Modifier = Modifier, action: String? = null, onAction: () -> Unit = {}) {
     Row(modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -119,12 +125,13 @@ fun HelpText(text: String, isError: Boolean = false, modifier: Modifier = Modifi
 
 @Composable
 fun TextAction(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, color: Color? = null, enabled: Boolean = true) {
-    Text(
-        text,
-        style = AppType.label,
-        color = if (enabled) color ?: AppTheme.colors.accent else AppTheme.colors.textMuted,
-        modifier = modifier.clip(RoundedCornerShape(6.dp)).clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(4.dp),
-    )
+    Box(
+        modifier.heightIn(min = MIN_TOUCH).widthIn(min = MIN_TOUCH).clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = AppType.label, color = if (enabled) color ?: AppTheme.colors.accent else AppTheme.colors.textMuted)
+    }
 }
 
 @Composable
@@ -201,7 +208,7 @@ fun <T> Segment(
                     .clip(RoundedCornerShape(7.dp))
                     .background(if (on) c.background else Color.Transparent)
                     .clickable(role = Role.Tab) { onSelect(option) }
-                    .padding(vertical = if (compact) 4.dp else 7.dp),
+                    .padding(vertical = if (compact) 8.dp else 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -285,7 +292,7 @@ fun AppButton(
     val foreground = if (!enabled || style == ButtonStyle.PRIMARY) Color.White else c.text
     Box(
         modifier
-            .heightIn(min = if (small) 34.dp else 40.dp)
+            .heightIn(min = FIELD_HEIGHT)
             .clip(shape)
             .background(background)
             .then(if (enabled && style == ButtonStyle.OUTLINE) Modifier.border(1.dp, c.border, shape) else Modifier)

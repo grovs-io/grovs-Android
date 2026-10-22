@@ -70,7 +70,7 @@ fun SettingsScreen(onBack: () -> Unit, vm: SettingsViewModel = viewModel()) {
             }
 
             SectionHeader("Project")
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 vm.profiles.forEach { p -> Chip(p.name, { vm.select(p.id) }, selected = p.id == profile.id) }
                 Chip("+ New", vm::addProfile, dashed = true)
             }
