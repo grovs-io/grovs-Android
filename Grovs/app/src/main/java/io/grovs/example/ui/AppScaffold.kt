@@ -1,6 +1,16 @@
 package io.grovs.example.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.with
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -32,12 +42,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.grovs.example.AppGraph
 import io.grovs.example.actions.LogEntry
@@ -69,6 +81,7 @@ fun AppScaffold() {
     var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val sheetHost = remember { SheetHost() }
+    val screenStates = rememberSaveableStateHolder()
     val entries by AppGraph.log.entries.collectAsState()
     val unseenError by AppGraph.log.unseenError.collectAsState()
     val panel by AppGraph.panel.collectAsState()
@@ -76,23 +89,29 @@ fun AppScaffold() {
     CompositionLocalProvider(LocalSheetHost provides sheetHost) {
         Surface(color = c.background, contentColor = c.text) {
             Box(Modifier.fillMaxSize()) {
-                if (showSettings) {
-                    BackHandler { showSettings = false }
-                    Box(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-                        SettingsScreen(onBack = { showSettings = false })
-                    }
-                } else {
-                    Column(Modifier.fillMaxSize()) {
-                        Box(Modifier.weight(1f).statusBarsPadding().imePadding()) {
-                            when (tab) {
-                                Tab.HOME -> HomeScreen(onOpenSettings = { showSettings = true })
-                                Tab.LINKS -> LinksScreen()
-                                Tab.EVENTS -> EventsScreen()
-                                Tab.IN_APP -> InAppScreen()
-                            }
+                PushTransition(showSettings) { settings ->
+                    if (settings) {
+                        BackHandler { showSettings = false }
+                        Box(Modifier.fillMaxSize().background(c.background).statusBarsPadding().imePadding()) {
+                            SettingsScreen(onBack = { showSettings = false })
                         }
-                        ConsoleStrip(entries.firstOrNull(), unseenError, onOpen = { AppGraph.openPanel() })
-                        TabBar(tab, onSelect = { tab = it })
+                    } else {
+                        Column(Modifier.fillMaxSize().background(c.background)) {
+                            Box(Modifier.weight(1f).statusBarsPadding().imePadding()) {
+                                TabTransition(tab) { shown ->
+                                    screenStates.SaveableStateProvider(shown.name) {
+                                        when (shown) {
+                                            Tab.HOME -> HomeScreen(onOpenSettings = { showSettings = true })
+                                            Tab.LINKS -> LinksScreen()
+                                            Tab.EVENTS -> EventsScreen()
+                                            Tab.IN_APP -> InAppScreen()
+                                        }
+                                    }
+                                }
+                            }
+                            ConsoleStrip(entries.firstOrNull(), unseenError, onOpen = { AppGraph.openPanel() })
+                            TabBar(tab, onSelect = { tab = it })
+                        }
                     }
                 }
                 LogsPanel(panel, entries, onClose = AppGraph::closePanel)
@@ -100,6 +119,44 @@ fun AppScaffold() {
             }
         }
     }
+}
+
+private const val TRANSITION_MS = 260
+
+/** Settings slides in from the right over the tabs and back out on close. */
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun PushTransition(pushed: Boolean, content: @Composable AnimatedVisibilityScope.(Boolean) -> Unit) {
+    AnimatedContent(
+        targetState = pushed,
+        transitionSpec = {
+            val spec = tween<IntOffset>(TRANSITION_MS, easing = FastOutSlowInEasing)
+            if (targetState) {
+                slideInHorizontally(spec) { it } with
+                    slideOutHorizontally(spec) { -it / 4 } + fadeOut(tween(TRANSITION_MS))
+            } else {
+                slideInHorizontally(spec) { -it / 4 } + fadeIn(tween(TRANSITION_MS)) with
+                    slideOutHorizontally(spec) { it }
+            }.apply { targetContentZIndex = if (targetState) 1f else 0f }
+        },
+        content = content,
+    )
+}
+
+/** Tabs cross-fade with a short slide toward the side of the newly selected tab. */
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+private fun TabTransition(tab: Tab, content: @Composable AnimatedVisibilityScope.(Tab) -> Unit) {
+    AnimatedContent(
+        targetState = tab,
+        transitionSpec = {
+            val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+            val slide = tween<IntOffset>(TRANSITION_MS, easing = FastOutSlowInEasing)
+            slideInHorizontally(slide) { direction * it / 12 } + fadeIn(tween(TRANSITION_MS, delayMillis = 60)) with
+                slideOutHorizontally(slide) { -direction * it / 12 } + fadeOut(tween(TRANSITION_MS / 2))
+        },
+        content = content,
+    )
 }
 
 @Composable
@@ -141,9 +198,9 @@ private fun TabBar(selected: Tab, onSelect: (Tab) -> Unit) {
                     icon = { Icon(tab.icon, contentDescription = null) },
                     label = { Text(tab.title, style = AppType.label) },
                     colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = c.accent,
-                        selectedTextColor = c.accent,
-                        indicatorColor = c.accentSoft,
+                        selectedIconColor = c.text,
+                        selectedTextColor = c.text,
+                        indicatorColor = c.chipFill,
                         unselectedIconColor = c.textMuted,
                         unselectedTextColor = c.textMuted,
                     ),
