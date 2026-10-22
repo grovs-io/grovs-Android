@@ -2,144 +2,153 @@ package io.grovs.example.ui
 
 import io.grovs.example.ui.controls.Info
 
-/** What each less obvious control does, in plain words. */
+/** What each less obvious control does, in plain words, for people new to Grovs. */
 object Help {
     // Home
     val sdkEnabled = Info(
         "SDK enabled",
-        "Turns user consent on or off with Grovs.setSDK. When off, the SDK keeps running but sends nothing: no links, events or push data.",
+        "The Grovs SDK is the library this app uses to talk to Grovs. This switch is the user's consent (Grovs.setSDK). When off, the SDK stays installed but sends nothing to Grovs: no links, events or push data.",
     )
     val pushToken = Info(
         "Push token",
-        "The Firebase token the SDK sends to Grovs. Copy it and paste it into the dashboard to send a test push to this phone.",
+        "Firebase gives every install a token that push notifications are sent to. The SDK passes it to Grovs so you can reach this phone from a dashboard campaign. Copy it to send a test push to just this phone.",
     )
     val openedFrom = Info(
         "Opened from",
-        "The last link that opened the app. The SDK reports a link in two ways: the deep link listener and the openedLinkDetails flow. Both should receive it. \"missed\" means one of them never did, which points to an SDK bug.",
+        "Grovs links open your app when it is installed, and the SDK hands the link and its data to the app. It does that in two ways: a listener and a flow. This shows the last link that opened the app, and \"missed\" means one of the two never got it.",
     )
     val identity = Info(
         "Identity",
-        "Who this phone is in the dashboard. The identifier is your own user id (Grovs.identifier). Attributes are extra facts about the user, like plan or country (Grovs.attributes).",
+        "Grovs groups links opened, events and purchases by user. The identifier is your own user id, for example from your login (Grovs.identifier). Attributes are facts about the user, like plan or country, shown on their profile in the dashboard.",
     )
     val quickActions = Info(
         "Quick actions",
-        "One tap runs the test with the values you last used on its tab. Hold a button to change those values first.",
+        "Shortcuts to the most common tests. One tap runs the test with the values you last used on its tab. Hold a button to change the values first.",
     )
 
     // Links
     val inspect = Info(
         "Inspect a link",
-        "Paste any Grovs link to see what the backend stores for it: title, data, tags and redirects. Uses Grovs.linkDetails with the link's path.",
+        "Every Grovs link is stored on the Grovs backend with its title, data and settings. Paste a link to load what is stored for it (Grovs.linkDetails). Useful for checking a link made here or in the dashboard.",
     )
     val linkData = Info(
         "Data",
-        "Custom values stored with the link. The app that opens the link gets them back in the link details. Values are sent as text, number, true/false or date; tap the type badge to change it.",
+        "Custom values saved inside the link, like a promo code or the id of a product. When someone opens the link, your app gets this data back and can show the right screen. Tap the type badge to send a value as text, number, true/false or date.",
     )
-    val linkTags = Info("Tags", "Labels for filtering links in the dashboard. They do not change how the link behaves.")
+    val linkTags = Info(
+        "Tags",
+        "Labels for organizing links in the Grovs dashboard, for example by campaign or channel. They do not change how the link behaves.",
+    )
     val utm = Info(
         "UTM tracking",
-        "Adds utm_source, utm_medium and utm_campaign to the link so the dashboard can tell which campaign brought each open and install.",
+        "UTM parameters are the standard way to name where traffic comes from: source (like newsletter), medium (like email) and campaign. Grovs uses them to show which campaign brought each open and install.",
     )
     val customRedirects = Info(
         "Custom redirects",
-        "Where the link sends people on each platform, instead of the project's default redirects. Leave it off to use the project settings.",
+        "When someone opens a link without the app installed, Grovs sends them somewhere: by default the store or website set in your project. Turn this on to choose a different place per platform for this one link.",
     )
     val openAppIfInstalled = Info(
         "Open app if installed",
-        "On: if the app is installed, the link opens it. Off: the link always goes to the redirect URL, even when the app is installed.",
+        "On: if the app is installed, the link opens it, and the URL above is only used when it is not. Off: the link always opens the URL above.",
     )
     val platformOverrides = Info(
         "Platform overrides",
-        "Preview shows a landing page with the link's title and image before redirecting. Clipboard copies the link on that page before the store opens, so the app can find it after install (deferred deep linking). \"Default\" uses the project's setting.",
+        "Per-link versions of two project settings. Preview shows a page with the link's title and image before redirecting. Clipboard copies the link on that page, so after installing, the app can still find which link brought the user. \"Default\" keeps the project's setting.",
     )
 
     // Events
     val customEvent = Info(
         "Custom event",
-        "Sends an event with Grovs.track. Some names are reserved by the SDK, like screen_view, and the SDK rejects them. \"Send anyway\" sends a reserved name on purpose, to check that it is rejected.",
+        "Events are actions you report from your app, like signup or level_complete (Grovs.track). They appear in the dashboard and can trigger in-app messages. Some names are used by Grovs itself and rejected; \"Send anyway\" checks that.",
     )
     val eventPropertiesAndTags = Info(
         "Properties and tags",
-        "Properties are values sent with this one event. Tags label the event for filtering, up to 20, each up to 255 characters.",
+        "Properties are details sent with this one event, like level = 3. Tags are labels for filtering events in the dashboard, up to 20 per event.",
     )
     val screenView = Info(
         "Screen view",
-        "Reports a screen by hand with Grovs.trackScreenView. Activities are also tracked on their own when \"Auto track screens\" is on in Settings. Hold Track to add properties.",
+        "Grovs records which screens people visit, for analytics and for in-app message rules. Most screens are reported on their own (see Auto track screens in Settings). This reports one by hand (Grovs.trackScreenView). Hold Track to add properties.",
     )
     val globalTags = Info(
         "Global tags",
-        "Tags the SDK adds to every event from now on (Grovs.setGlobalTags). Removing all of them clears them.",
+        "Tags added to every event this app sends from now on, like beta or region_eu (Grovs.setGlobalTags). Handy for splitting all events by a group of users.",
     )
     val screenAliases = Info(
         "Screen aliases",
-        "Friendly names for screens. The key is the screen's real name, like MainActivity; the value is the name shown in the dashboard.",
+        "Automatically tracked screens are named after their code class, like MainActivity. An alias gives a screen a readable name in the dashboard. The key is the class name, the value is the name to show.",
     )
     val purchase = Info(
         "Purchase",
-        "Logs a payment you track yourself with Grovs.logCustomPurchase. Buy, cancel and refund are the event types. The amount is sent in cents.",
+        "Grovs ties purchases to the link or campaign that brought the user, so you can see revenue per link. Use this for payments you handle yourself (Grovs.logCustomPurchase). Buy, cancel and refund are the types; the amount is sent in cents.",
     )
     val startDate = Info(
         "Start date",
-        "When the purchase happened. Pick an earlier date to test purchases that are reported late.",
+        "When the purchase happened. Choose an earlier date to test a purchase that is reported late.",
     )
     val playPurchase = Info(
         "Google Play purchase JSON",
-        "Paste a real Purchase.originalJson from Google Play Billing. The SDK sends it to Grovs to log the purchase (Grovs.logInAppPurchase).",
+        "For purchases made with Google Play Billing. Paste the purchase's originalJson and the SDK sends it to Grovs to log the purchase (Grovs.logInAppPurchase).",
     )
 
     // In-app
     val showMessage = Info(
         "Show a message",
-        "Sends an event that can trigger an in-app message. A message shows only if a live campaign in the dashboard uses this event as its trigger.",
+        "In-app messages are pop-ups you design in the Grovs dashboard. Each campaign has a trigger: an event name. This sends that event, and a message shows if a live campaign uses it as its trigger.",
     )
     val queue = Info(
         "Queue",
-        "Discard waiting drops messages that are queued but not shown yet. Close current also closes the one on screen. Both leave messages paused.",
+        "Messages wait in a queue until a good moment to show. Discard waiting drops queued messages. Close current also closes the one on screen. Both pause messages; switch to Running to resume.",
     )
     val blockAll = Info(
         "Block all messages",
-        "Answers \"no\" every time the SDK asks this app whether to show a message. The message is logged as blocked. Not saved across launches.",
+        "Before showing a message, the SDK asks the app whether it may (shouldShowInAppMessage). On means this app always answers no, and the message is logged as blocked. Not saved across launches.",
     )
     val inAppDebug = Info(
         "Debug logging",
-        "Makes the SDK log in-app decisions to Logcat: why a message was or was not shown.",
+        "Makes the SDK explain its in-app message decisions in Logcat, the Android developer log: why a message was or was not shown.",
     )
     val excludedScreens = Info(
         "Excluded screens",
-        "Screens where messages never show, by class name, like SecondActivity. Messages wait until you leave the screen.",
+        "Screens where in-app messages never appear, like checkout. Use the screen's class name, like SecondActivity. Messages wait until the user leaves that screen.",
     )
 
     // Settings
-    val apiKey = Info("API key", "The key of your Grovs project, from the dashboard. Changes apply after a restart.")
+    val apiKey = Info(
+        "API key",
+        "Identifies your Grovs project, so the SDK sends data to the right place. Copy it from your project in the Grovs dashboard. Changes apply after a restart.",
+    )
     val environment = Info(
         "Environment",
-        "Test sends everything to your project's test environment. Prod sends it to live data. Use the API key that matches.",
+        "Each Grovs project has a test environment and a live (Prod) one, with separate data. Use Test while building so you don't mix test data with real users. Use the API key that matches.",
     )
     val baseUrl = Info(
         "Base URL",
-        "Sends SDK requests to another backend, like a staging server. Must start with http:// or https://. Leave it empty for the SDK default.",
+        "The server the SDK talks to. Leave it empty for Grovs' own servers. Set it only to test against another backend, like a staging server; it must start with http:// or https://.",
     )
     val clipboardDomains = Info(
         "Clipboard domains",
-        "Hosts your links are served from, like links.example.com. Used for deferred deep linking: the SDK only checks clipboard links on these hosts. grovs.link and sqd.link are always accepted.",
+        "Deferred deep linking means the app finds the link that brought a user even after a fresh install. One way is through the clipboard. If your links use your own domain, list it here so the SDK trusts it. grovs.link and sqd.link always work.",
     )
     val autoTrackScreens = Info(
         "Auto track screens",
-        "When on, the SDK reports a screen view each time an activity or fragment is shown. Turn it off to report screens only by hand.",
+        "When on, the SDK reports a screen view each time an activity or fragment appears, with no extra code. Turn it off to report screens only by hand.",
     )
     val startEnabled = Info(
         "Start with SDK enabled",
-        "The consent state the SDK starts with on launch. Off starts it without sending anything until you turn it on from Home.",
+        "Whether the user's consent starts as given on each launch. Off starts the SDK without sending anything until you turn it on from Home, like an app waiting for a consent popup.",
     )
-    val debugLevel = Info("Debug level", "How much the SDK writes to Logcat. Info shows everything, Error only failures.")
+    val debugLevel = Info(
+        "Debug level",
+        "How much the SDK writes to Logcat, the Android developer log. Info shows every step, Error only failures.",
+    )
     val callStyle = Info(
         "Call style",
-        "Which SDK API the tests use for links: the suspend (coroutine) functions or the callback ones. Both should behave the same.",
+        "The SDK offers each link function in two forms: Kotlin coroutines (suspend) and classic callbacks. Pick which one the tests use; both should give the same result.",
     )
 
     // Logs
     val linkSources = Info(
         "Link sources",
-        "Listener is setOnDeeplinkReceivedListener. Flow is the openedLinkDetails flow. Every opened link should reach both.",
+        "The SDK hands an opened link to the app in two ways: a listener (setOnDeeplinkReceivedListener) and a flow (openedLinkDetails). Apps use one or the other, so every link should reach both.",
     )
 }
