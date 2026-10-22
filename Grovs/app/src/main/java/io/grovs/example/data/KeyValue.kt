@@ -3,7 +3,7 @@ package io.grovs.example.data
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Serializable
-import java.text.ParseException
+import java.text.ParsePosition
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -36,7 +36,7 @@ fun convert(raw: String, type: ValueType): Serializable {
     val v = raw.trim()
     return when (type) {
         ValueType.TEXT -> raw
-        ValueType.NUMBER -> v.toLongOrNull() ?: v.toDoubleOrNull() ?: raw
+        ValueType.NUMBER -> v.toLongOrNull() ?: v.toDoubleOrNull()?.takeIf { it.isFinite() } ?: raw
         ValueType.BOOL -> v.equals("true", ignoreCase = true)
         ValueType.DATE -> parseDate(v) ?: raw
     }
@@ -47,10 +47,10 @@ private fun dateFormat() = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply {
     timeZone = TimeZone.getTimeZone("UTC")
 }
 
-private fun parseDate(v: String): Date? = try {
-    dateFormat().parse(v)
-} catch (e: ParseException) {
-    null
+private fun parseDate(v: String): Date? {
+    val position = ParsePosition(0)
+    val date = dateFormat().parse(v, position)
+    return if (position.index == v.length) date else null
 }
 
 fun formatDate(date: Date): String = dateFormat().format(date)
@@ -73,7 +73,7 @@ fun parseKeyValues(json: String): List<KeyValue> {
         val type = when (value) {
             is Boolean -> ValueType.BOOL
             is Number -> ValueType.NUMBER
-            else -> null
+            else -> ValueType.TEXT
         }
         KeyValue(key, if (value == JSONObject.NULL) "" else value.toString(), type)
     }.toList()

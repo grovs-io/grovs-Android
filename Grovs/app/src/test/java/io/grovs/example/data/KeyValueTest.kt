@@ -30,6 +30,19 @@ class KeyValueTest {
     }
 
     @Test
+    fun nonFiniteNumbersStayText() {
+        assertEquals("NaN", convert("NaN", ValueType.NUMBER))
+        assertEquals("Infinity", convert("Infinity", ValueType.NUMBER))
+        assertEquals(listOf(KeyValue("x", "NaN", ValueType.TEXT)), parseKeyValues(listOf(KeyValue("x", "NaN", ValueType.NUMBER)).toJson()))
+    }
+
+    @Test
+    fun dateMustMatchWholeText() {
+        assertEquals("2026-10-22xyz", convert("2026-10-22xyz", ValueType.DATE))
+        assertEquals(ValueType.TEXT, detectType("2026-10-22xyz"))
+    }
+
+    @Test
     fun explicitTypeWinsOverDetection() {
         assertEquals("01234", KeyValue("zip", "01234", ValueType.TEXT).value())
         assertEquals(1234L, KeyValue("zip", "01234").value())
@@ -62,15 +75,25 @@ class KeyValueTest {
     fun parsesPastedJson() {
         val rows = parseKeyValues("""{"level": 3, "vip": true, "name": "Ana"}""").toSet()
         assertEquals(
-            setOf(KeyValue("level", "3", ValueType.NUMBER), KeyValue("vip", "true", ValueType.BOOL), KeyValue("name", "Ana")),
+            setOf(
+                KeyValue("level", "3", ValueType.NUMBER),
+                KeyValue("vip", "true", ValueType.BOOL),
+                KeyValue("name", "Ana", ValueType.TEXT),
+            ),
             rows,
         )
     }
 
     @Test
+    fun quotedJsonStringsStayText() {
+        val map = parseKeyValues("""{"zip": "01234", "flag": "true"}""").toValueMap()
+        assertEquals(mapOf("zip" to "01234", "flag" to "true"), map)
+    }
+
+    @Test
     fun toJsonWritesValues() {
         val json = listOf(KeyValue("level", "3"), KeyValue("on", "2026-10-22")).toJson()
-        assertEquals(setOf(KeyValue("level", "3", ValueType.NUMBER), KeyValue("on", "2026-10-22")), parseKeyValues(json).toSet())
+        assertEquals(setOf(KeyValue("level", "3", ValueType.NUMBER), KeyValue("on", "2026-10-22", ValueType.TEXT)), parseKeyValues(json).toSet())
     }
 
     @Test
