@@ -138,7 +138,7 @@ class GrovsService(val context: Context, val apiKey: String, val grovsContext: G
         /** First retry wait. Doubles per retry: 2s, 4s, 8s, plus jitter. */
         val RETRY_BASE_DELAY_MS: Long = 2000
 
-        /** Backend limit for POST events/batch (events_controller.rb MAX_BATCH_SIZE). */
+        /** Backend limit for POST events/batch. */
         const val MAX_BATCH_SIZE = 50
     }
 
